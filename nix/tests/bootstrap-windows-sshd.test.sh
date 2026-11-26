@@ -145,14 +145,14 @@ done
 
 state_on='{"enable":true,"version":1,"windowsHome":"@WIN@"}'
 state_off='{"enable":false,"version":1,"windowsHome":null}'
-group_on='{"group":"personal","tiers":{"aiTools":true,"personalAccounts":true},"tools":{"windowsFiles":true,"windowsSshd":true},"version":1}'
-group_off='{"group":"personal","tiers":{"aiTools":true,"personalAccounts":true},"tools":{"windowsFiles":true,"windowsSshd":false},"version":1}'
+group_on='{"group":"all","tools":{"windowsSshd":true},"version":2}'
+group_off='{"group":"all","tools":{"windowsSshd":false},"version":2}'
 # 道具を足す前の世代の group.json (windowsSshd の欄が無い)
-group_absent='{"group":"personal","tiers":{"aiTools":true,"personalAccounts":true},"tools":{"windowsFiles":true},"version":1}'
+group_absent='{"group":"all","tools":{"claude":true},"version":2}'
 # windows-sshd.json の中身
 keys_two=$(jq -nc --arg a "${key1}" --arg b "${key2}" '{version: 1, authorizedKeys: [$a, $b]}')
-keys_empty='{"authorizedKeys":[],"version":1}'
-keys_null='{"authorizedKeys":null,"version":1}'
+keys_empty='{"authorizedKeys":[],"version":2}'
+keys_null='{"authorizedKeys":null,"version":2}'
 
 # 1 ケースぶんの HOME を作る。
 #   $1: 名前、$2: windows-files.json の中身 (空なら作らない。@WIN@ は配り先に置き換える)

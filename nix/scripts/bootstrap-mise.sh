@@ -245,7 +245,7 @@ echo "==> claude (役割分担の例外)"
 # 「自動で上がってほしい」を成立させるため。省くと --update を何度回しても
 # 入った版で固まり、mise に置いた理由 (nixpkgs pin より速い刻み) が消える。
 #
-# Claude Code を入れないホスト (dotfiles.claude.enable が false。設定グループの ② AI の道具が off の客先の PC など) では
+# Claude Code を入れないホスト (dotfiles.claude.enable が false。グループ minimum で Claude Code を足していないホストなど) では
 # 入れない。値は ~/.local/state/dotfiles/group.json (nix/home/modules/group.nix) の tools.claude で、ファイル・欄が無い
 # (この仕組みの前の世代)・読めないときは今までどおり入れる。前に入れた claude が config.toml の [tools] に残っていれば、
 # 外すコマンドを 1 行出すだけで、消さない (setup は off にした道具の入れたものを消さない。ADR 057)。

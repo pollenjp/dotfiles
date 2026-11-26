@@ -1117,7 +1117,7 @@ summaries_case() {
   mkdir -p "${c}/wt/nix/hosts" "${c}/wt/win/hosts" "${c}/wt/docs/hosts/nix/html" "${c}/body/nix"
   printf '{ mkHome, ... }: mkHome { username = "bob"; }\n' >"${c}/wt/nix/hosts/bob@other.nix"
   printf '{ mkHome, ... }: mkHome { username = "carol"; }\n' >"${c}/wt/nix/hosts/carol@x.nix"
-  printf 'group = "personal"\n' >"${c}/wt/win/hosts/dave@x.toml"
+  printf 'group = "minimum"\n' >"${c}/wt/win/hosts/dave@x.toml"
   printf 'old summary\n' >"${c}/wt/nix/hosts/README.md"
   printf 'old\n' >"${c}/wt/docs/hosts/nix/old@gone.md"
   printf 'old\n' >"${c}/wt/docs/hosts/nix/html/old@gone.html"
@@ -1230,7 +1230,7 @@ fi
 # 34d. summaries: 名前に空白を含むホスト (Windows のユーザー名の空白が win/hosts/ のファイル名に入る) のページも書き、--check は同じと
 #      見て、ホストのファイルが無くなればページを消す
 c=$(summaries_case r34d)
-printf 'group = "company"\n' >"${c}/wt/win/hosts/Frank Example@x.toml"
+printf 'group = "all"\n' >"${c}/wt/win/hosts/Frank Example@x.toml"
 run_summaries "${c}" --private "${c}/wt" --nix-dir "${c}/body/nix"
 h="${c}/wt/docs/hosts"
 rc_sp_write=$(rc "${c}")

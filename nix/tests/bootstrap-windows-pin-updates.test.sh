@@ -303,7 +303,7 @@ pin_json herdr-app 'Windows の herdr-app' 0.1.15 '0.1.16|設定が読めなか�
 pin_json herdr-core herdr-core 0.1.21 '0.1.22|||' >"${d2}/json/herdr-core.json"
 run "${d2}" 0
 d3=$(new_case t3d "${state_on}")
-printf '%s\n' '{"group":"client","tiers":{"aiTools":false,"personalAccounts":false},"tools":{"windowsHerdr":false},"version":1}' \
+printf '%s\n' '{"group":"minimum","tools":{"windowsHerdr":false},"version":2}' \
   >"${d3}/home/.local/state/dotfiles/group.json"
 pin_json openssh 'Windows の openssh' 1.0.0 '1.0.1|||' >"${d3}/json/openssh.json"
 pin_json herdr-app 'Windows の herdr-app' 0.1.15 '0.1.16|||' >"${d3}/json/herdr-app.json"
@@ -336,11 +336,11 @@ fi
 
 # 4c. group.json の tools.windowsHerdr が false なら herdr・herdr-app・herdr-core を確かめない。true なら確かめる
 d=$(new_case t4c "${state_on}")
-printf '%s\n' '{"group":"client","tiers":{"aiTools":false,"personalAccounts":false},"tools":{"windowsHerdr":false},"version":1}' \
+printf '%s\n' '{"group":"minimum","tools":{"windowsHerdr":false},"version":2}' \
   >"${d}/home/.local/state/dotfiles/group.json"
 run "${d}" 0
 d2=$(new_case t4d "${state_on}")
-printf '%s\n' '{"group":"personal","tiers":{"aiTools":true,"personalAccounts":true},"tools":{"windowsHerdr":true},"version":1}' \
+printf '%s\n' '{"group":"all","tools":{"windowsHerdr":true},"version":2}' \
   >"${d2}/home/.local/state/dotfiles/group.json"
 run "${d2}" 0
 if [[ $(rc "${d}") == 0 ]] && ! called "${d}" -E '^winget .*herdr$' && ! called "${d}" -E '^herdr-app ' \
@@ -353,7 +353,7 @@ fi
 
 # 4d. --candidates と --list --json (依存の更新の skill が読む口) は group.json を見ない。tools.windowsHerdr が false の
 #     マシンでも herdr・herdr-app・herdr-core を出す (repo が固定しているもの全部)
-group_no_herdr='{"group":"client","tiers":{"aiTools":false,"personalAccounts":false},"tools":{"windowsHerdr":false},"version":1}'
+group_no_herdr='{"group":"minimum","tools":{"windowsHerdr":false},"version":2}'
 d=$(new_case t4e "${state_on}")
 printf '%s\n' "${group_no_herdr}" >"${d}/home/.local/state/dotfiles/group.json"
 run "${d}" 1 --list --json
@@ -373,16 +373,16 @@ fi
 # 4h. tailscale は group.json の tools.windowsTailscale が true のマシンでだけ確かめる。false・欄が無い (前の世代)・group.json が
 #     無いときは確かめない (どのグループでも既定は off。入れていない道具の版を知らせない)。ほかの名前は今までどおり確かめる
 d=$(new_case t4ts-on "${state_on}")
-printf '%s\n' '{"group":"personal","tiers":{"aiTools":true,"personalAccounts":true},"tools":{"windowsHerdr":true,"windowsTailscale":true},"version":1}' \
+printf '%s\n' '{"group":"all","tools":{"windowsHerdr":true,"windowsTailscale":true},"version":2}' \
   >"${d}/home/.local/state/dotfiles/group.json"
 pin_json tailscale 'Windows の Tailscale' 1.104.5 '1.104.6|||' >"${d}/json/tailscale.json"
 run "${d}" 0
 d2=$(new_case t4ts-off "${state_on}")
-printf '%s\n' '{"group":"personal","tiers":{"aiTools":true,"personalAccounts":true},"tools":{"windowsHerdr":true,"windowsTailscale":false},"version":1}' \
+printf '%s\n' '{"group":"all","tools":{"windowsHerdr":true,"windowsTailscale":false},"version":2}' \
   >"${d2}/home/.local/state/dotfiles/group.json"
 run "${d2}" 0
 d3=$(new_case t4ts-absent "${state_on}")
-printf '%s\n' '{"group":"personal","tiers":{"aiTools":true,"personalAccounts":true},"tools":{"windowsHerdr":true},"version":1}' \
+printf '%s\n' '{"group":"all","tools":{"windowsHerdr":true},"version":2}' \
   >"${d3}/home/.local/state/dotfiles/group.json"
 run "${d3}" 0
 d4=$(new_case t4ts-nogroup "${state_on}")

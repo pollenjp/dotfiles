@@ -662,13 +662,13 @@ fi
 
 # 12. group.json の tools.claude が false なら claude を入れず、[tools] に残った claude は外すコマンドを出すだけ。true なら入れる
 h=$(new_home group-no-claude "$(state 9d)")
-printf '%s\n' '{"group":"client","tiers":{"aiTools":false,"personalAccounts":false},"tools":{"claude":false},"version":1}' \
+printf '%s\n' '{"group":"minimum","tools":{"claude":false},"version":2}' \
   >"${h}/.local/state/dotfiles/group.json"
 mkdir -p "${h}/.config/mise"
 printf '[tools]\nclaude = "latest"\ngo = "latest"\n' >"${h}/.config/mise/config.toml"
 run "${h}" 2026-10-22T03:00:00Z
 h2=$(new_home group-claude "$(state 9d)")
-printf '%s\n' '{"group":"personal","tiers":{"aiTools":true,"personalAccounts":true},"tools":{"claude":true},"version":1}' \
+printf '%s\n' '{"group":"all","tools":{"claude":true},"version":2}' \
   >"${h2}/.local/state/dotfiles/group.json"
 run "${h2}" 2026-10-22T03:00:00Z
 if finished "${h}" && ! grep -Fq -- 'claude' "${h}/mise.log" && others_plain "${h}" \
@@ -691,7 +691,7 @@ else
 fi
 
 h=$(new_home rust-on "$(state 9d)")
-printf '%s\n' '{"group":"personal","tools":{"claude":true,"claudePrivateSkills":true},"version":1}' \
+printf '%s\n' '{"group":"all","tools":{"claude":true,"claudePrivateSkills":true},"version":2}' \
   >"${h}/.local/state/dotfiles/group.json"
 FAKE_MISE_IDIOMATIC='["node","rust"]' run "${h}" 2026-10-22T03:00:00Z
 if finished "${h}" && grep -Fxq -- '|use -g rust' "${h}/mise.log" \
@@ -703,13 +703,13 @@ else
 fi
 
 h=$(new_home rust-off "$(state 9d)")
-printf '%s\n' '{"group":"company","tools":{"claude":true,"claudePrivateSkills":false},"version":1}' \
+printf '%s\n' '{"group":"minimum","tools":{"claude":true,"claudePrivateSkills":false},"version":2}' \
   >"${h}/.local/state/dotfiles/group.json"
 mkdir -p "${h}/.config/mise"
 printf '[tools]\nrust = "latest"\ngo = "latest"\n' >"${h}/.config/mise/config.toml"
 run "${h}" 2026-10-22T03:00:00Z
 h2=$(new_home rust-off-clean "$(state 9d)")
-printf '%s\n' '{"group":"company","tools":{"claude":true,"claudePrivateSkills":false},"version":1}' \
+printf '%s\n' '{"group":"minimum","tools":{"claude":true,"claudePrivateSkills":false},"version":2}' \
   >"${h2}/.local/state/dotfiles/group.json"
 run "${h2}" 2026-10-22T03:00:00Z
 if finished "${h}" && ! grep -Eq -- '(rust|idiomatic)' "${h}/mise.log" && others_plain "${h}" \

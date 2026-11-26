@@ -13,7 +13,7 @@
 # - bootstrap-*.sh は glob で **自動列挙** する。スクリプトを増やしても
 #   このファイルの編集は要らない (claude.nix が readDir で列挙しているのと
 #   同じ方針)。説明文も各スクリプト冒頭のコメントから取るので二重管理しない。
-# - 設定グループ (ADR 057) で off の道具の手順は飛ばす。どの道具の手順かも各スクリプト冒頭の
+# - 設定グループ (ADR 057・109) で off の道具の手順は飛ばす。どの道具の手順かも各スクリプト冒頭の
 #   `# tool: <key> (<option>)` から取り、off かは home-manager が置く ~/.local/state/dotfiles/group.json を
 #   jq なしで読む (tool_off)。実行の頭には、対象ホストのグループを 1 行出す (note_group)。switch のあとは、この PC の
 #   ホストの要約 (dotfiles-private の docs/hosts/nix/<ホスト>.md と HTML 版) が今の設定と同じかを見る (check_host_summary)。
@@ -1958,7 +1958,7 @@ step_switch() {
 
 # この PC のホストの要約 (dotfiles-private の docs/hosts/nix/<ホスト>.md と HTML 版 docs/hosts/nix/html/<ホスト>.html。ADR 057・093)
 # が今の設定と同じかを見て、違えば・無ければ警告する (止めない)。dotfiles-private には CI が無く、ホストのファイルの直し忘れのほか、
-# 本体の変更 (段の割り当て・既定・図の作り) でもページは古くなるので、switch のたびに setup が見る。行に skill の名前を書き、
+# 本体の変更 (グループの表・既定・図の作り) でもページは古くなるので、switch のたびに setup が見る。行に skill の名前を書き、
 # Claude Code が拾って出し直せるようにする (固定した版より新しい版の知らせと同じ形)。
 #
 # 見るのは、対象ホストが dotfiles-private に登録したホストで、ローカル flake が clone の nix/ を読むときだけ。比べるファイルは、
@@ -2005,7 +2005,7 @@ check_host_summary() {
     return 0
   fi
   warn "dotfiles-private のこの PC のホストの要約 (docs/hosts/nix/${host}.md と HTML 版) ${how} → Claude Code の pjp-dotfiles-register-host skill で、docs/hosts/ を出し直す PR を作る" \
-    "出し直すコマンド: ${script_dir}/private-host.sh summaries --private <dotfiles-private の作業ツリー> --nix-dir <dotfiles の origin/main の nix/> (ホストの値・本体の段の割り当てが変わると古くなる)"
+    "出し直すコマンド: ${script_dir}/private-host.sh summaries --private <dotfiles-private の作業ツリー> --nix-dir <dotfiles の origin/main の nix/> (ホストの値・本体のグループの表が変わると古くなる)"
 }
 
 # md を、3 行目 (h1 と空行の後ろ) の「📝 [Notion で開く](https://app.notion.com/p/…)」の行と、その後ろの空行を外して出す
@@ -2640,8 +2640,10 @@ local_flake_migrate_cmd() {
   printf '%s' "${cmd}"
 }
 
-# 対象ホストの設定グループ (ADR 057) を 1 行で出す。グループを選び忘れた PC (客先の PC の tmp など。選ばなければ personal に
-# なり、② ③ の道具まで入る) で、switch の前に気づけるようにする。選んでいなければ「選んでいない。既定」と添える。
+# 対象ホストの設定グループ (ADR 057・109) を 1 行で出す。グループを選び忘れた PC (ローカル flake の tmp など。選ばなければ
+# minimum になり、足していない道具は入らない) で、switch の前に気づけるようにする。選んでいなければ「選んでいない。既定」と添え、
+# 前の既定 (personal。ADR 057) の道具を保つ書き方の場所をもう 1 行出す (既定が personal から minimum に替わったので、グループを
+# 書いていない tmp は黙って縮む。ADR 109)。
 #
 # 実行の頭 (execute。対象ホストが決まっていて Nix があるとき) と、switch の手順の頭 (ホストが決まり、lock を張り直した後) で
 # 呼ぶ。switch の頭では評価し直し、実行の頭に出した行と同じなら出さない (dotfiles-private の取得 (private-fetch) でホストの
@@ -2650,10 +2652,8 @@ local_flake_migrate_cmd() {
 # ホストが無い) ときは黙る。lock は書き換えない
 group_noted=""
 # shellcheck disable=SC2016 # Nix の式をそのまま書く
-group_line_expr='hc: let d = hc.config.dotfiles; o = hc.options.dotfiles; onoff = b: if b then "on" else "off"; in
-  d.group + (if o.group.highestPrio < 1500 then " (ホストで選んだ)" else " (選んでいない。既定)")
-  + " · ① エンジニアの道具 on · ② AI の道具 " + onoff d.aiTools.enable
-  + " · ③ 個人の道具 " + onoff d.personalAccounts.enable'
+group_line_expr='hc: let d = hc.config.dotfiles; o = hc.options.dotfiles; in
+  d.group + (if o.group.highestPrio < 1500 then " (ホストで選んだ)" else " (選んでいない。既定)")'
 note_group() {
   local line
   if [[ -z ${host} ]] || ! have nix; then
@@ -2672,6 +2672,11 @@ note_group() {
   else
     note "グループ: ${line}  (nix/README.md「設定グループ」)"
   fi
+  case ${line} in
+    *"(選んでいない。既定)"*)
+      note "        グループを書かないホストは minimum (足した道具だけが入る)。前の既定 personal の道具を保つ書き方は、nix/README.md「設定グループ」の「前のグループから移す」"
+      ;;
+  esac
   group_noted=${host}$'\t'${line}
 }
 
