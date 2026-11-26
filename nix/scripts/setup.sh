@@ -2473,7 +2473,7 @@ post_notes() {
   if ! is_selected local-flake && local_flake_stale; then
     note "${flake_dir}/flake.nix は前の雛形から作られています (雛形の版 ${local_flake_state})。"
     note "        値を引き継いで今の雛形へ移す: $(local_flake_migrate_cmd)"
-    note '        (Claude Code なら pjp-dotfiles-local-flake-migrate skill)'
+    note "        (Claude Code なら pjp-dotfiles-local-flake-migrate skill。世代から外れていれば ${nix_dir}/files/claude/skills/pjp-dotfiles-local-flake-migrate/SKILL.md)"
   fi
   # 初期用のホスト initial (setup-local-flake.sh --initial がローカル flake に書く) で当てている。登録までの踏み台なので、
   # 次の段を出す。clone にこの PC のファイルが来ていれば、initial を外す (ローカル flake のホストは登録したホストより先に
@@ -2486,6 +2486,12 @@ post_notes() {
       note "        initial を外し、clone の nix/ を読む雛形に作り直す: ${script_dir}/setup-local-flake.sh --force"
       note '        (initial のほかに手で足した値があれば、先に登録へ移す。--force は退避を取らない)'
     else
+      # 前の版の --initial が書いた initial はグループを書いていないので、本体を新しくすると minimum に縮む (ADR 109)。
+      # Claude Code と dotfiles の skill が外れ、下の 3. が回らないので、先に今の initial に作り直させる
+      if [[ ${group_noted} == *"(選んでいない。既定)"* ]]; then
+        note 'この initial はグループを書いていない前の版なので、minimum に縮んでいます (Claude Code と dotfiles の skill が入らない)。'
+        note "        先に今の initial に作り直す: ${script_dir}/setup-local-flake.sh --force --initial のあと ~/dotfiles/setup --update"
+      fi
       note '初期用のホスト initial で当てています (SSH 鍵も gh のログインもまだの段)。次は:'
       note '        1. 1Password を入れて SSH agent を有効にし、gh auth login'
       note "        2. dotfiles-private を取る: ${script_dir}/bootstrap-dotfiles-private.sh"
