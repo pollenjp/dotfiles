@@ -4,8 +4,8 @@ description: >-
   シークレット (API キー・パスワード・token・秘密鍵) を扱うときに読む。値が要る program を起こす・試すとき、
   .env・設定ファイル・CI・cron・systemd に認証情報を書くとき、ユーザーにパスワードや token を設定・入力して
   もらいたくなったとき、ユーザーが会話に値を貼ったとき、.env の中身を確かめたくなったとき、平文のシークレットを
-  repo・ファイル・ログで見つけたとき、op (1Password CLI) の run・read・inject・item create・item get・item delete を打とうとしたとき、
-  1Password の参照 (op://…) をもらった・.env の参照を ID の形に直したいときに使う
+  repo・ファイル・ログで見つけたとき、op (1Password CLI) の run・read・inject・item create・item get・item list・item delete を打とうとしたとき、
+  1Password の参照 (op://…) をもらった・.env の参照を ID の形に直したいとき、エージェントが作った 1Password の項目を一覧したいときに使う
 ---
 
 # pjp-secrets
@@ -36,8 +36,9 @@ program は `pjp-op-env` が起動のときに 1 回の op で値を解いて環
 2. ユーザーに 1Password のアプリで項目を作り、値をアプリに直に入れてもらう。外のサービスが発行する値 (API キーなど) はこれ。
    cron などで無人で動かす見込みがあれば、最初から専用の vault に作ってもらう (下の「人が承認できない処理」)。
    用が済んだら消す項目は、題の頭に `🚧 ` を付ける (下の「一時的な項目」)。
-   Claude が生んでよい値 (ローカルの DB のパスワードなど) は、どの vault にどの名前で作るかを伝えてから、1Password の中で生む:
-   `printf '%s' '{"title":"<名前>","category":"PASSWORD"}' | op --reason "<理由>" item create --vault "<vault>" - --generate-password=letters,digits,32 >/dev/null`
+   Claude が生んでよい値 (ローカルの DB のパスワードなど) は、どの vault にどの題で作るかを伝えてから、1Password の中で生む。
+   エージェントが op で作る項目なので、題の頭に `🤖 ` (一時的なら `🤖🚧 `) を付け、タグ `ai-agent` を付ける (下の「エージェントが作る項目」):
+   `printf '%s' '{"title":"🤖 <名前>","category":"PASSWORD"}' | op --reason "<理由>" item create --vault "<vault>" --tags ai-agent - --generate-password=letters,digits,32 >/dev/null`
    (op は stdin が端末でないとそこから項目のテンプレートを読むので、Claude の Bash では最小の JSON を流して `-` を付ける。
    `</dev/null` だと「invalid JSON in piped input」で、承認の後に落ちる。出力は捨てる。op が wrapper の op-reason でない
    マシン (素の op) では `--reason` を外す)
@@ -72,18 +73,36 @@ program は `pjp-op-env` が起動のときに 1 回の op で値を解いて環
 パスワードなど) には付けない。
 
 - わけ: 1Password の一覧で一時的なものと分かり、片付けやすい (検索に 🚧 を打てば、一時的な項目だけが並ぶ)
-- Claude が op で作るときは、JSON の `title` を `🚧 <名前>` にする (上の 2 の形)。ユーザーにアプリで作ってもらうときは、題を
-  `🚧 <名前>` にするよう、そのまま写せる字面で伝える
+- Claude が op で作るときは、JSON の `title` を `🤖🚧 <名前>` にする (上の 2 の形。🤖 は下の「エージェントが作る項目」)。
+  ユーザーにアプリで作ってもらうときは、題を `🚧 <名前>` にするよう、そのまま写せる字面で伝える
 - 参照は ID の形で書く・渡す。参照の名前に使える字は英数字・`-`・`_`・`.`・空白だけで、ほかの字を含む部分は ID で書くので、
-  題に 🚧 があると名前の形 (`op://<vault>/🚧 <名前>/<欄>`) は op で解けない。ユーザーが作った項目は Copy Secret Reference
-  (🚧 のある題の部分は自動で ID になる) を、Claude が作った項目は vault・題・欄の名前で書いた参照を、上の 4 の pjp-op-ref に通す
-  (pjp-op-ref は題で項目を引くので、🚧 のある題のままでよい)。pjp-op-ref が無いマシン (下の「マシンの違い」) では、Claude が
-  作った項目もユーザーに Copy Secret Reference で参照をもらい、そのまま書く (🚧 のある題の部分は ID になっているので解ける)
-- 一時的のつもりがずっと使うことになったら、題から 🚧 を外す (アプリで題を変えてもらう)。ID の参照は題を変えても切れない
+  題に 🚧 や 🤖 があると名前の形 (`op://<vault>/🚧 <名前>/<欄>`) は op で解けない。ユーザーが作った項目は Copy Secret Reference
+  (印のある題の部分は自動で ID になる) を、Claude が作った項目は vault・題・欄の名前で書いた参照を、上の 4 の pjp-op-ref に通す
+  (pjp-op-ref は題で項目を引くので、印のある題のままでよい)。pjp-op-ref が無いマシン (下の「マシンの違い」) では、Claude が
+  作った項目もユーザーに Copy Secret Reference で参照をもらい、そのまま書く (印のある題の部分は ID になっているので解ける)
+- 一時的のつもりがずっと使うことになったら、題から 🚧 だけを外す (アプリで題を変えてもらう。Claude が作った項目は
+  `🤖🚧 <名前>` を `🤖 <名前>` にし、タグ `ai-agent` は残す)。ID の参照は題を変えても切れない
 - 用が済んだら (key を使い終えた・作業や試しが済んだ)、その項目を消すかをユーザーに聞く。`.env` などに書いた参照の行も、
   一緒に消すかを聞く。消すのは、消すと答えをもらってから。アプリで消してもらうか、Claude が ID で消す:
   `op --reason "<理由>" item delete <項目の ID> --vault <vault>` (項目の ID と vault は、参照の 2 つ目と 1 つ目の部分。素の op の
   マシンでは `--reason` を外す)
+
+## エージェントが作る項目 (題の頭に 🤖・タグ ai-agent)
+
+エージェント (Claude・Codex など) が `op item create` で作る項目は、題の頭に `🤖 ` (🤖 と半角の空白) を付け、タグ `ai-agent` を付ける。
+一時的な項目 (上の「一時的な項目」) なら題の頭は `🤖🚧 ` (🤖 が先で、絵文字の間に空白を入れない)。
+例: `🤖 local-db-password`・`🤖🚧 try-db-postgres`。
+
+- わけ: 題の 🤖 は、1Password のアプリの一覧でエージェントが作った項目と見分ける印。タグは、エージェントが作った項目だけを絞って
+  一覧するため (CLI の `op item list --tags ai-agent`・アプリの左の「タグ」の ai-agent)。タグはどのエージェントも同じ `ai-agent` の 1 つ
+- 作り方: 上の「新しくシークレットが要るとき」の 2 の形のとおり、JSON の `title` を `🤖 <名前>` (一時的なら `🤖🚧 <名前>`) にし、
+  `--tags ai-agent` を付ける。タグは JSON の欄でなく `--tags` の flag で渡す
+- 付けるのは、エージェントが `op item create` で作るときだけ。ユーザーがアプリで作る項目 (Claude が作るよう頼んだものも) と、
+  `op item edit` で触る既にある項目には付けない (🤖 とタグは「エージェントが作った」印。値を入れたのが人の項目に付けると、一覧の意味が崩れる)
+- 参照: 🤖 も 🚧 と同じく英数字でない字なので、名前の形の参照は op で解けない。上の「一時的な項目」の参照の段のとおり、
+  pjp-op-ref に通して ID の形にする (pjp-op-ref が無いマシンでは、ユーザーに Copy Secret Reference で参照をもらう)
+- 一時的のつもりがずっと使うことになったら、🚧 だけを外して `🤖 <名前>` にする (タグ `ai-agent` は残す)
+- 一覧: `op --reason "<理由>" item list --tags ai-agent` (下の「値を見ずに確かめる」)。アプリなら左の「タグ」から ai-agent
 
 ## 既にある `.env` の名前の参照を ID に直す
 
@@ -101,6 +120,7 @@ program は `pjp-op-env` が起動のときに 1 回の op で値を解いて環
 | `.env` にどの名前があり、参照か値か・空か、参照が名前の形か ID の形か | `pjp-op-env --dry-run` (参照は出し、参照でない値は出さない) | なし |
 | もらった参照の ID の形 | `pjp-op-ref --reason "<理由>" "<参照>"…` (ID だけを出す) | 項目ごとに 1 回 |
 | 参照が全部解けるか | `pjp-op-env --reason "<理由>" -- true` (1 つでも解けなければ op の誤りで止まる) | 1 回 |
+| エージェントが作った項目の一覧 | `op --reason "<理由>" item list --tags ai-agent` (出るのは ID・題・vault・更新日時の表で、値は出ない。`--format json` は付けない (表に無い欄も出る)。素の op のマシンでは `--reason` を外す)。一時的なものは題の頭の 🤖🚧 で見る | 1 回 |
 | program に渡ったか | `pjp-op-env` が起こす前に出す 1 行 (解いた件数と名前) と、program の動き | — |
 | シークレットでない設定 (URL・ポート) の値 | 名前を指して `grep '^KABU_API_URL=' .env` (シークレットでないと分かっている名前だけ。`postgres://user:pass@…`・`?token=`・webhook の URL のように認証情報が入るものはシークレット) | なし |
 | 値が正しいか | program の認証の結果で見る (値を見比べない)。program のログに値や受け取った token が出ないよう、HTTP の body を出す debug の log を足して起こさない | 起こすたびに 1 回 |
@@ -140,7 +160,7 @@ program は `pjp-op-env` が起動のときに 1 回の op で値を解いて環
 | WSL の op が wrapper (op-reason) | `~/.local/state/dotfiles/claude-op-reason.json` の `enable` が true | pjp-op-env を使う (pjp-op-env が op に `--reason` を付ける)。op を自分で打つ前に、初めてなら `op-reason --skill` で wrapper の手引き (理由の書き方・拒否・時間切れのあとにすること) を読む |
 | 素の op のマシン | `enable` が true でなく、`command -v op` がある | pjp-op-env を使う (pjp-op-env は op に `--reason` を付けない) |
 | pjp-op-env が無い | `command -v pjp-op-env` が無い | 平文に逃げず、ユーザーに渡し方を聞く |
-| pjp-op-ref が無い | `command -v pjp-op-ref` が無い (dotfiles が pjp-op-ref の入る前の版) | 名前の参照のまま書く (pjp-op-env はどちらも解く。題に 🚧 のある項目は上の「一時的な項目」)。`op item get` を素で打って ID を探さない |
+| pjp-op-ref が無い | `command -v pjp-op-ref` が無い (dotfiles が pjp-op-ref の入る前の版) | 名前の参照のまま書く (pjp-op-env はどちらも解く。題に 🚧・🤖 のある項目は上の「一時的な項目」)。`op item get` を素で打って ID を探さない |
 | op が無い | `command -v op` が無い | 平文に逃げず、ユーザーに渡し方を聞く (op を入れる・下の「自分の端末で入れる」) |
 
 `pjp-op-env --reason` はどのマシンでも受けるので、手順や script に書いてよい (書いてはいけないのは `op --reason`)。
@@ -189,6 +209,8 @@ program は `pjp-op-env` が起動のときに 1 回の op で値を解いて環
 | 「確かめるために値を表示する」「長さや hash なら出してよい」 | `--dry-run` と `-- true` と program の動きで足りる。表示したものは会話から消せず、弱い値は hash から戻る |
 | 「`op inject -o config.yml` で設定ファイルを作れば program を直さずに済む」 | 平文のファイルができる。環境変数で読む形にして pjp-op-env で起こす |
 | 「Copy Secret Reference の参照をそのまま書けば動く」 | 今は動くが、vault・項目・セクション・欄の名前を変えると切れる。pjp-op-ref で ID の形にしてから書く |
+| 「タグ `ai-agent` があれば、題の 🤖 は要らない」 | アプリの一覧で目に入るのは題で、タグは絞ったときにしか見えない。題の 🤖 は一覧で見分ける印、タグは一覧に絞る道で、役目が違う |
+| 「ユーザーに作ってもらった項目や、edit で直した項目にも 🤖 を付ければ揃う」 | 🤖 とタグ `ai-agent` は、エージェントが `op item create` で作った印。人が作った項目に付けると、一覧で誰が作ったかが分からなくなる |
 | 「`op item get --format json \| jq` で ID を見れば足りる」 | 出力は隠す欄の値も含みうる。jq の書き方を誤ると値が端末に出る (jq の型の誤りの文にも値が入る)。pjp-op-ref は ID と件数だけを抜き出し、テストで守られている |
 
 ## 赤信号 (止まって、この skill の手順に戻る)
@@ -201,3 +223,4 @@ program は `pjp-op-env` が起動のときに 1 回の op で値を解いて環
 - `.env` に触れる `git diff`・`git show`・`git log -p`、`.env.local` などほかの env のファイルを Read で開く
 - 値を crontab・unit・script・引数に書こうとした
 - ユーザーの答えを待たずに 1Password の項目を消そうとした (`op item delete`)
+- `op item create` の題の頭の `🤖 ` か `--tags ai-agent` を落とした・ユーザーが作った項目や既にある項目に `op item edit` で 🤖 やタグを足そうとした
