@@ -6,7 +6,7 @@
 //
 // 図の形:
 //   - グループの領域を内から minimum → all と左から並べ、外のグループほど外に入れ子にする (minimum ⊂ all)。列は minimum の
-//     基本の道具 (switch なし。常に入る)・minimum の道具の switch・all の道具 (2 列)・Windows の道具 (win/ を配るマシン・runner)
+//     基本の道具 (switch なし。常に入る)・minimum の道具の switch・all の道具 (2 列)・Windows のアプリ (win/ を配るマシン・runner で効く)
 //   - 列の中の箱の並びは、ホストのページ (order "host") なら「ホストで足した → どちらでも入る → ホストで外した → どちらでも
 //     入らない」、入口 (order "count") なら入るホストの多い順 (同じなら groups.nix の順)。ホストの入る道具が列の上から並ぶので、
 //     隣どうしの列の入る箱が一番上の行で接し、囲みの線が 1 つの形 (階段) になる
@@ -79,8 +79,12 @@ const HostMap = (() => {
     const nRows = Math.max(1, ...cols.map((c) => c.tools.length));
     const y0 = top[0] + L.top;
     const rowY = (i) => y0 + i * (L.bh + L.gy);
-    const contentBottom = rowY(nRows - 1) + L.bh;
-    for (let k = 0; k < R; k++) bottom[k] = contentBottom + L.pad + L.inset * k;
+    // 領域の下端は、その領域と内の領域の列の箱の数で決める (箱の少ない minimum の領域を、外の列の高さまで伸ばさない)
+    const levelOf = new Map(fig.regions.map((r, k) => [r.id, k]));
+    for (let k = 0; k < R; k++) {
+      const rows = Math.max(1, ...cols.filter((c) => levelOf.get(c.region) <= k).map((c) => c.tools.length));
+      bottom[k] = rowY(rows - 1) + L.bh + L.pad + L.inset * k;
+    }
     const boxes = [];
     cols.forEach((c, ci) =>
       c.tools.forEach((key, row) => boxes.push({ key, ci, row, x: colX.get(c.id), y: rowY(row), w: L.bw, h: L.bh })),
@@ -616,7 +620,8 @@ const HostMap = (() => {
           flag = s && (s.s === "host" || s.s === "shared") ? s.s : "";
           // 入口の図 (箱の右下に点の列がある) では字を短くし、ホストで決めた値は右上の ● だけで見せる
           const tag = tab.kind === "host" && !withDots ? srcShort(s && s.s) : "";
-          text = s && s.s === "fixed" ? "on · 常に入る" : { on: "on", off: "off", na: "– 効かない" }[st] + (tag ? ` · ${tag}` : "");
+          const fixed = withDots ? "常に入る" : "on · 常に入る";
+          text = s && s.s === "fixed" ? fixed : { on: "on", off: "off", na: "– 効かない" }[st] + (tag ? ` · ${tag}` : "");
         }
         g.classList.remove("st-on", "st-off", "st-na", "st-mix", "set", "sh", "fixed");
         g.classList.add(`st-${st}`);

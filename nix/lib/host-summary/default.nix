@@ -82,7 +82,8 @@ let
   ];
 
   # 図の列。minimum の領域に基本の道具 (switch なし) と minimum の道具の switch、all の領域にほかの道具を 2 列と Windows の道具を 1 列。
-  # 列は箱を並べる場所で、道具の種類のラベルではない (Windows の道具の列だけ、効く環境 (win/ を配るマシン・runner) で分ける)
+  # 列は箱を並べる場所で、道具の種類のラベルではない (Windows の道具の列だけ、効く環境 (win/ を配るマシン・runner) で分け、見出しを
+  # 「Windows のアプリ」にする。効く環境は箱の「–」と環境の行で見せる)
   columnsFor =
     base: rows:
     let
@@ -118,7 +119,7 @@ let
       {
         id = "win";
         region = "all";
-        head = "Windows (win/ を配るマシン・runner)";
+        head = "Windows のアプリ";
         tools = keys (builtins.filter (r: r.windows) rows);
       }
     ];
