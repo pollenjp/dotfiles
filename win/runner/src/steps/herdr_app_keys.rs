@@ -664,9 +664,10 @@ mod tests {
     //!   割り当てない。
     //!   prefix なしの Ctrl+Q が worktree を消す確かめの小窓 (pjp-worktree-remove) を開き、小窓の section の Ctrl+Q をその mod が受ける。
     //!   prefix の mod が worktree と一緒に Claude Code を起こす argv (main.js の CLAUDE) が c の 3 か所 (fish・bash・PowerShell) と同じ引数。
-    //!   section `layout:pjp-main` の Ctrl+Shift+← / → が、サイドパネルの stack (sidebar-lists) の Spaces / Agents を layout.select で選ぶ
-    //!   (タブの mod pjp-sidebar-tabs と同じ命令)
-    //! - object の action を、無い `layout:<name>` の section に足し、記録し、記録どおりなら書き換える
+    //!   section `layout:pjp-main` の Ctrl+Alt+← / → が、サイドパネルの stack (sidebar-lists) の Spaces / Agents を layout.select で選ぶ
+    //!   (タブの mod pjp-sidebar-tabs と同じ命令)。前に当てた Ctrl+Shift+← / → は割り当てない
+    //! - object の action を、無い `layout:<name>` の section に足し、記録し、記録どおりなら書き換える。section のキーを替えると、前のキーを外して
+    //!   新しいキーを同じ section に足す
 
     use super::*;
     use crate::context::join_segments;
@@ -941,28 +942,45 @@ mod tests {
         );
     }
 
-    /// object の action (名前つきの引数) を、herdr-app の keys.json に無い `layout:<name>` の section に足す (section は末尾に作る)。
-    /// 書いた値と記録は object のまま。2 回目は揃っていて、repo の値を変えれば記録どおりの値を書き換える
-    #[test]
-    fn adds_object_actions_in_a_layout_section() {
-        let e = Env::new();
+    /// repo の keys.json: section `layout:pjp-main` の `<mods>-left` (child は `left`)・`<mods>-right` (child は agents) に layout.select
+    fn sidebar_keys(mods: &str, left: &str) -> String {
         let select = |child: &str| {
             format!(
                 r#"{{ "command": "layout.select", "args": {{ "stack": "sidebar-lists", "child": "{child}" }} }}"#
             )
         };
-        let ours = |left: &str| {
-            format!(
-                r#"{{ "layout:pjp-main": {{ "ctrl-shift-left": {}, "ctrl-shift-right": {} }} }}"#,
-                select(left),
-                select("agents")
-            )
-        };
-        e.t.write("dotfiles/win/herdr-app/keys.json", &ours("spaces"));
+        format!(
+            r#"{{ "layout:pjp-main": {{ "{mods}-left": {}, "{mods}-right": {} }} }}"#,
+            select(left),
+            select("agents")
+        )
+    }
+
+    /// keys.json に書いた layout.select の値 (serde_json の字面)
+    fn select_json(child: &str) -> String {
+        format!(
+            r#"{{"command":"layout.select","args":{{"stack":"sidebar-lists","child":"{child}"}}}}"#
+        )
+    }
+
+    /// 記録の layout.select の値
+    fn select_recorded(child: &str) -> serde_json::Value {
+        serde_json::json!({ "command": "layout.select", "args": { "stack": "sidebar-lists", "child": child } })
+    }
+
+    /// object の action (名前つきの引数) を、herdr-app の keys.json に無い `layout:<name>` の section に足す (section は末尾に作る)。
+    /// 書いた値と記録は object のまま。2 回目は揃っていて、repo の値を変えれば記録どおりの値を書き換える
+    #[test]
+    fn adds_object_actions_in_a_layout_section() {
+        let e = Env::new();
+        e.t.write(
+            "dotfiles/win/herdr-app/keys.json",
+            &sidebar_keys("ctrl-alt", "spaces"),
+        );
         let (o, out) = e.run(Mode::Check);
         assert_eq!(kinds(&o), vec![Kind::Missing], "{o:?}\n{out}");
         assert!(
-            out.contains(r#"足す (apply で): layout:pjp-main ctrl-shift-left = {"command":"layout.select","args":{"stack":"sidebar-lists","child":"spaces"}}"#),
+            out.contains(r#"足す (apply で): layout:pjp-main ctrl-alt-left = {"command":"layout.select","args":{"stack":"sidebar-lists","child":"spaces"}}"#),
             "{out}"
         );
         let (o, out) = e.run(APPLY);
@@ -974,38 +992,84 @@ mod tests {
             vec!["global", "terminal", "layout:pjp-main"],
             "ほかの section と順は残し、無い section は末尾に作る"
         );
-        let json = |child: &str| {
-            format!(
-                r#"{{"command":"layout.select","args":{{"stack":"sidebar-lists","child":"{child}"}}}}"#
-            )
-        };
         assert_eq!(
             keys[2].1,
             vec![
-                ("ctrl-shift-left".to_string(), json("spaces")),
-                ("ctrl-shift-right".to_string(), json("agents")),
+                ("ctrl-alt-left".to_string(), select_json("spaces")),
+                ("ctrl-alt-right".to_string(), select_json("agents")),
             ]
         );
-        let recorded = |child: &str| serde_json::json!({ "command": "layout.select", "args": { "stack": "sidebar-lists", "child": child } });
         assert_eq!(
             e.recorded(),
             serde_json::json!({ "layout:pjp-main": {
-                "ctrl-shift-left": recorded("spaces"),
-                "ctrl-shift-right": recorded("agents"),
+                "ctrl-alt-left": select_recorded("spaces"),
+                "ctrl-alt-right": select_recorded("agents"),
             } })
         );
         let (o, out) = e.run(Mode::Check);
         assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}\n{out}");
         assert!(o[0].text.contains("同じ 2"), "{o:?}");
         // 記録どおりの object の値は、repo を変えると書き換える
-        e.t.write("dotfiles/win/herdr-app/keys.json", &ours("agents"));
+        e.t.write(
+            "dotfiles/win/herdr-app/keys.json",
+            &sidebar_keys("ctrl-alt", "agents"),
+        );
         let (o, out) = e.run(APPLY);
         assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}\n{out}");
         assert!(o[0].text.starts_with("追加 0 / 更新 1 /"), "{o:?}");
         assert_eq!(
-            e.recorded()["layout:pjp-main"]["ctrl-shift-left"],
-            recorded("agents")
+            e.recorded()["layout:pjp-main"]["ctrl-alt-left"],
+            select_recorded("agents")
         );
+    }
+
+    /// repo で `layout:<name>` の section のキーを替える (Ctrl+Shift+←→ から Ctrl+Alt+←→ へ) と、前に書いた object の値のキーは記録どおりなので
+    /// 外し、新しいキーを同じ section に足す。section は残り、中は新しいキーだけ。記録も新しいキーだけ
+    #[test]
+    fn renames_object_actions_in_a_layout_section() {
+        let e = Env::new();
+        e.t.write(
+            "dotfiles/win/herdr-app/keys.json",
+            &sidebar_keys("ctrl-shift", "spaces"),
+        );
+        e.run(APPLY);
+        e.t.write(
+            "dotfiles/win/herdr-app/keys.json",
+            &sidebar_keys("ctrl-alt", "spaces"),
+        );
+        let (o, out) = e.run(Mode::Check);
+        assert_eq!(kinds(&o), vec![Kind::Fix], "{o:?}\n{out}");
+        for line in [
+            r#"足す (apply で): layout:pjp-main ctrl-alt-left = {"command":"layout.select","args":{"stack":"sidebar-lists","child":"spaces"}}"#,
+            r#"外す (apply で): layout:pjp-main ctrl-shift-left = {"command":"layout.select","args":{"stack":"sidebar-lists","child":"spaces"}} (repo から消えた)"#,
+            r#"外す (apply で): layout:pjp-main ctrl-shift-right = {"command":"layout.select","args":{"stack":"sidebar-lists","child":"agents"}} (repo から消えた)"#,
+        ] {
+            assert!(out.contains(line), "{line} が無い\n{out}");
+        }
+        let (o, out) = e.run(APPLY);
+        assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}\n{out}");
+        assert!(o[0].text.starts_with("追加 2 / 更新 0 / 削除 2 /"), "{o:?}");
+        let keys = e.keys();
+        assert_eq!(
+            keys.iter().map(|(s, _)| s.as_str()).collect::<Vec<_>>(),
+            vec!["global", "terminal", "layout:pjp-main"]
+        );
+        assert_eq!(
+            keys[2].1,
+            vec![
+                ("ctrl-alt-left".to_string(), select_json("spaces")),
+                ("ctrl-alt-right".to_string(), select_json("agents")),
+            ]
+        );
+        assert_eq!(
+            e.recorded(),
+            serde_json::json!({ "layout:pjp-main": {
+                "ctrl-alt-left": select_recorded("spaces"),
+                "ctrl-alt-right": select_recorded("agents"),
+            } })
+        );
+        let (o, out) = e.run(Mode::Check);
+        assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}\n{out}");
     }
 
     #[test]
@@ -1678,9 +1742,9 @@ mod tests {
         }
     }
 
-    /// 本物の repo のキー: layout pjp-main を出している間の Ctrl+Shift+← / → が、サイドパネルの stack (herdr-app-pjp-spaces が書く
+    /// 本物の repo のキー: layout pjp-main を出している間の Ctrl+Alt+← / → が、サイドパネルの stack (herdr-app-pjp-spaces が書く
     /// sidebar-lists) の 1 つ目の子 (Spaces) / 2 つ目の子 (Agents) を選ぶ (タブの mod pjp-sidebar-tabs が押されたときに打つのと同じ
-    /// layout.select)。端で回らない
+    /// layout.select)。端で回らない。前に当てた Ctrl+Shift+← / → は割り当てない (端末のプログラムに返す)
     #[test]
     fn real_repo_keys_select_the_sidebar_tabs() {
         use super::super::herdr_app_pjp_spaces::{LAYOUT, LISTS, TAB_CHILDREN};
@@ -1700,13 +1764,21 @@ mod tests {
             serde_json::to_value(v).unwrap()
         };
         for (key, child) in [
-            ("ctrl-shift-left", TAB_CHILDREN[0]),
-            ("ctrl-shift-right", TAB_CHILDREN[1]),
+            ("ctrl-alt-left", TAB_CHILDREN[0]),
+            ("ctrl-alt-right", TAB_CHILDREN[1]),
         ] {
             assert_eq!(
                 action(key),
                 serde_json::json!({ "command": "layout.select", "args": { "stack": LISTS, "child": child } }),
                 "{section} の {key}"
+            );
+        }
+        for key in ["ctrl-shift-left", "ctrl-shift-right"] {
+            assert!(
+                wanted
+                    .iter()
+                    .all(|(_, ks)| ks.iter().all(|(k, _)| k != key)),
+                "{key} がある"
             );
         }
         // タブの mod が押されたときに打つのも layout.select {stack, child}

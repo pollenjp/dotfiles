@@ -10,11 +10,11 @@
     "ctrl-pagedown": "space.next"
   },
   "layout:pjp-main": {
-    "ctrl-shift-left": {
+    "ctrl-alt-left": {
       "command": "layout.select",
       "args": { "stack": "sidebar-lists", "child": "spaces" }
     },
-    "ctrl-shift-right": {
+    "ctrl-alt-right": {
       "command": "layout.select",
       "args": { "stack": "sidebar-lists", "child": "agents" }
     }
