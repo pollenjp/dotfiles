@@ -1,0 +1,19 @@
+# dotfiles の Windows の runner のホストの値の雛形 (設定グループ minimum だけの値)。
+# 引数なしの win/bootstrap/Install-Bootstrap.ps1 (gh にログインしない形) が、%USERPROFILE%\.config\dotfiles\host.toml に写す (あれば上書きしない)。
+# 写したファイルはその PC のもので、dotfiles の repo には戻さない。書き方は dotfiles の win/README.md の「ホストの値」。
+#
+# runner はホストの値を --host-file → %USERPROFILE%\.config\dotfiles\host.toml → dotfiles-private の win/hosts/<ユーザー>@<PC>.toml の順に引く。
+# 手元の host.toml と dotfiles-private のファイルの両方があると、dotfiles check は ⚠ を出し、dotfiles apply は止まる (どちらかを退ける)。
+
+group = "minimum"
+
+[tools]
+# minimum では、runner が読む道具は全部 off。この PC で使う道具を 1 行ずつ true で足す (windowsClaudeCode = true など。名前は README の
+# 「ホストの値」)。
+# privateRepos (pollenjp の private な repo と gh のログイン) は、gh にログインできる PC でだけ true にする (bootstrap は -Private で流す)。
+# claudePrivateSkills・herdrHub・opReasonSshRelay は privateRepos が要る (privateRepos が off なのに足すと、runner が止める)。
+
+[runner]
+# 受け持ちは runner (WSL の setup が Windows に配らない PC。dotfiles apply が全部の手順を揃える)。WSL の setup が Windows に配る PC
+# (Nix のホストの値の wsl.windowsFiles.enable が true) では false にする。
+enable = true

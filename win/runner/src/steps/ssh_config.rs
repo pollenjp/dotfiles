@@ -900,8 +900,7 @@ mod tests {
 
     const RUNNER_HOST: &str = "[runner]\nenable = true\n";
     /// SSH の中継を使うホスト (1Password の switch も要る)
-    const RELAY_HOST: &str =
-        "[tools]\nonePassword = true\nopReasonSshRelay = true\n[runner]\nenable = true\n";
+    const RELAY_HOST: &str = "[tools]\nonePassword = true\nopReasonSshRelay = true\nprivateRepos = true\n[runner]\nenable = true\n";
     const WSL_HOST: &str = "group = \"minimum\"\n";
     const APPLY: Mode = Mode::Apply { force: false };
     const FORCE: Mode = Mode::Apply { force: true };
@@ -1189,7 +1188,7 @@ mod tests {
         for host in [
             RUNNER_HOST,
             "[tools]\nonePassword = true\nopReasonSshRelay = false\n[runner]\nenable = true\n",
-            "[tools]\nopReasonSshRelay = true\n[runner]\nenable = true\n",
+            "[tools]\nopReasonSshRelay = true\nprivateRepos = true\n[runner]\nenable = true\n",
         ] {
             let e = Env::new();
             e.put_relay_exe();

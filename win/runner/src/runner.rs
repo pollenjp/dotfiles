@@ -5,6 +5,15 @@ use crate::host::{HostValues, Source};
 use crate::report::{self, Kind, Row};
 use crate::steps::{Mode, Outcome, Step};
 
+/// 見た場所を「・」でつなぐ (ホストの値が無いときの文)
+fn joined(paths: &[std::path::PathBuf]) -> String {
+    paths
+        .iter()
+        .map(|p| p.display().to_string())
+        .collect::<Vec<_>>()
+        .join("・")
+}
+
 /// ホストの値と受け持ちを 2 行で出す (表の前)。
 pub fn describe_host(ctx: &mut Ctx) {
     let h = ctx.host.clone();
@@ -14,9 +23,15 @@ pub fn describe_host(ctx: &mut Ctx) {
             p.display(),
             h.group
         )),
-        Source::Missing(p) => ctx.say(format!(
+        Source::Both { used, other } => ctx.say(format!(
+            "ホストの値: {} (グループ {})。dotfiles-private の {} もある (どちらを使うか決まらないので、apply は止める)",
+            used.display(),
+            h.group,
+            other.display()
+        )),
+        Source::Missing(paths) => ctx.say(format!(
             "ホストの値: 無い ({})。グループ {} の既定で確かめる",
-            p.display(),
+            joined(paths),
             h.group
         )),
     }
@@ -41,19 +56,38 @@ fn shared_with_wsl(id: &str) -> bool {
         .any(|s| s.info().id == id && !s.info().windows_only)
 }
 
-/// ホストの値が無いときの行。
+/// ホストの値が無い・2 つあるときの行。
 pub fn host_rows(host: &HostValues) -> Vec<Row> {
     match &host.source {
         Source::File(_) => Vec::new(),
-        Source::Missing(p) => vec![
+        Source::Both { used, other } => vec![
             Row::new(
                 None,
                 "host",
                 Kind::Manual,
-                format!("ホストの値が無い ({}) → dotfiles-private の win/hosts/ に書く", p.display()),
+                format!(
+                    "ホストの値が 2 つある ({} と {}) → 使わない方を退ける (check は手元の {} の値で確かめた)",
+                    used.display(),
+                    other.display(),
+                    used.display()
+                ),
             )
             .with_notes(vec![
-                "書き方は win/README.md の「runner」。無い間は、グループの既定で確かめ、apply は止める".to_string(),
+                "どちらを使うか決まらないので、apply は止める。--host-file でどちらかを渡せば、その 1 つだけを読む (win/README.md の「ホストの値」)".to_string(),
+            ]),
+        ],
+        Source::Missing(paths) => vec![
+            Row::new(
+                None,
+                "host",
+                Kind::Manual,
+                format!(
+                    "ホストの値が無い ({}) → 手元の host.toml に雛形 (win/templates/host.minimum.toml) を写すか、dotfiles-private の win/hosts/ に書く",
+                    joined(paths)
+                ),
+            )
+            .with_notes(vec![
+                "書き方は win/README.md の「ホストの値」。無い間は、グループの既定で確かめ、apply は止める".to_string(),
             ]),
         ],
     }
@@ -117,8 +151,8 @@ pub fn finish(ctx: &mut Ctx, title: &str, rows: &[Row]) -> i32 {
     report::exit_code(rows)
 }
 
-/// apply を止めるわけ (無ければ流してよい)。ホストの値が無いとき・受け持ちが WSL のホストで Windows にしか無い手順を選んでいないとき
-/// (`apply --steps files` が黙って何もせずに 0 で終わらないように)。
+/// apply を止めるわけ (無ければ流してよい)。ホストの値が無い・2 つある (手元と dotfiles-private) とき・受け持ちが WSL のホストで Windows に
+/// しか無い手順を選んでいないとき (`apply --steps files` が黙って何もせずに 0 で終わらないように)。
 pub fn apply_blocker(host: &HostValues, steps: &[Box<dyn Step>]) -> Option<Row> {
     match &host.source {
         Source::Missing(_) => Some(Row::new(
@@ -126,6 +160,12 @@ pub fn apply_blocker(host: &HostValues, steps: &[Box<dyn Step>]) -> Option<Row> 
             "host",
             Kind::Blocker,
             "ホストの値が無いので apply は止めた (check と apply --dry-run は流せる)",
+        )),
+        Source::Both { .. } => Some(Row::new(
+            None,
+            "host",
+            Kind::Blocker,
+            "ホストの値が 2 つある (手元の host.toml と dotfiles-private) ので apply は止めた (check と apply --dry-run は流せる)",
         )),
         Source::File(p)
             if !host.runner_enable
@@ -508,6 +548,38 @@ mod tests {
         let (rows, _) = rows_for(None);
         assert_eq!(rows[0].id, "host");
         assert_eq!(rows[0].kind, Kind::Manual);
+        assert!(
+            rows[0].text.contains("→ 手元の host.toml に雛形 (win/templates/host.minimum.toml) を写すか、dotfiles-private の win/hosts/ に書く"),
+            "{}",
+            rows[0].text
+        );
+    }
+
+    /// 手元の host.toml と dotfiles-private の両方があれば、行は manual (使わない方を退ける) で、apply は止める
+    #[test]
+    fn both_host_files_add_a_row_and_block_apply() {
+        let mut h = host_of(Some("[runner]\nenable = true\n"));
+        h.source = Source::Both {
+            used: "/h/.config/dotfiles/host.toml".into(),
+            other: "/p/win/hosts/alice@example-host.toml".into(),
+        };
+        let rows = host_rows(&h);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].kind, Kind::Manual);
+        assert!(
+            rows[0].text.starts_with("ホストの値が 2 つある ("),
+            "{}",
+            rows[0].text
+        );
+        assert!(
+            rows[0].notes[0].contains("--host-file"),
+            "{:?}",
+            rows[0].notes
+        );
+        let steps: Vec<Box<dyn Step>> = vec![Box::new(Fixed(windows_only("w"), Kind::Ok))];
+        let b = apply_blocker(&h, &steps).unwrap();
+        assert_eq!(b.kind, Kind::Blocker);
+        assert!(b.text.contains("ホストの値が 2 つある"), "{}", b.text);
     }
 
     /// apply を止めるのは、ホストの値が無いときと、受け持ちが WSL のホストで Windows にしか無い手順を選んでいないとき

@@ -63,7 +63,8 @@ dotfiles の Windows 側の runner (win/README.md の「runner」)。
   --show-words      google-ime の辞書の衝突で、語の diff も出す (出さなければ辞書ごとの行の数だけ)。自分の端末で打つ (Claude などの
                     ログに残る場所では流さない)
   --steps <id>,…    流す手順を id で絞る (id は dotfiles list で見る)
-  --host-file <path> ホストの値のファイル (既定は dotfiles-private の win/hosts/<ユーザー>@<PC>.toml)
+  --host-file <path> ホストの値のファイル (既定は %USERPROFILE%\\.config\\dotfiles\\host.toml、無ければ dotfiles-private の
+                    win/hosts/<ユーザー>@<PC>.toml。両方あれば check は ⚠ を出し、apply は止まる)
   --windows-home <path> manifest の置き先を、この Windows のホストの下として解く (既定は環境変数)
   --repo <path>     dotfiles の clone (既定は runner を build した clone。試すとき)
 
@@ -472,8 +473,9 @@ fn steps_command(
         }
     };
     let groups = Groups::embedded()?;
-    let host_path = match &a.host_file {
-        Some(p) => p.clone(),
+    // ホストの値を引く順: --host-file → 手元の %USERPROFILE%\.config\dotfiles\host.toml → dotfiles-private (host.rs の resolve)
+    let host = match &a.host_file {
+        Some(p) => host::load(p, groups)?,
         None => {
             let user = sys
                 .env("USERNAME")
@@ -486,10 +488,13 @@ fn steps_command(
                 .env("USERPROFILE")
                 .filter(|s| !s.is_empty())
                 .map(PathBuf::from);
-            host::default_path(&repo, user_profile.as_deref(), &user, &pc)
+            let private = host::default_path(&repo, user_profile.as_deref(), &user, &pc);
+            match &user_profile {
+                Some(up) => host::resolve(&host::local_path(up), &private, groups)?,
+                None => host::load(&private, groups)?,
+            }
         }
     };
-    let host = host::load(&host_path, groups)?;
     // list は置き先を使わないので、環境変数が無くても流せる (試すとき)
     let roots = match Roots::from_env(&|n| sys.env(n)) {
         Ok(r) => r,
@@ -904,6 +909,28 @@ mod tests {
             let (code, out, _) = w.run(&["check", "--steps", "files"]);
             assert_eq!(code, 1);
             assert!(out.contains("ホストの値が無い ("));
+            // 見た 2 つの場所 (手元の host.toml と dotfiles-private) を、引く順に並べる
+            let local =
+                w.t.path()
+                    .join("home")
+                    .join(".config")
+                    .join("dotfiles")
+                    .join("host.toml");
+            let private =
+                w.t.path()
+                    .join("g")
+                    .join("dotfiles-private")
+                    .join("win")
+                    .join("hosts")
+                    .join("alice@example-host.toml");
+            assert!(
+                out.contains(&format!(
+                    "ホストの値: 無い ({}・{})",
+                    local.display(),
+                    private.display()
+                )),
+                "{out}"
+            );
             let (code, out, _) = w.run(&["apply", "--steps", "files"]);
             assert_eq!(code, 1);
             assert!(out.contains("ホストの値が無いので apply は止めた"));
@@ -1203,6 +1230,78 @@ mod tests {
             let (code, _, err) = w.run(&["manifest"]);
             assert_eq!(code, 1);
             assert!(err.contains("知らないキーがあります"));
+        }
+
+        /// 手元の %USERPROFILE%\.config\dotfiles\host.toml を、dotfiles-private より先に読む (gh にログインできない PC。bootstrap が雛形を写す)
+        #[test]
+        fn local_host_file_is_read_before_dotfiles_private() {
+            let w = World::new(None);
+            let local = w.t.write(
+                "home/.config/dotfiles/host.toml",
+                "[runner]\nenable = true\n",
+            );
+            let (code, out, _) = w.run(&["list"]);
+            assert_eq!(code, 0, "{out}");
+            assert!(
+                out.contains(&format!(
+                    "ホストの値: {} (グループ minimum)",
+                    local.display()
+                )),
+                "{out}"
+            );
+            assert!(out.contains("受け持ち: runner"), "{out}");
+            // 手元の値で apply できる
+            let (code, out, _) = w.run(&["apply", "--steps", "files"]);
+            assert_eq!(code, 0, "{out}");
+            assert!(w.dst().exists());
+        }
+
+        /// 手元の host.toml と dotfiles-private の両方があれば、check は手元の値で確かめて ⚠ を出し、apply は書かずに止まる。--host-file なら 1 つだけ読む
+        #[test]
+        fn both_host_files_warn_on_check_and_stop_apply() {
+            let w = World::new(Some("[runner]\nenable = true\n"));
+            w.t.write(
+                "home/.config/dotfiles/host.toml",
+                "group = \"all\"\n[runner]\nenable = true\n",
+            );
+            let (code, out, _) = w.run(&["check", "--steps", "files"]);
+            assert_eq!(code, 1, "{out}");
+            assert!(out.contains("ホストの値が 2 つある ("), "{out}");
+            assert!(
+                out.contains("(グループ all)。dotfiles-private の "),
+                "{out}"
+            );
+            let (code, out, _) = w.run(&["apply", "--steps", "files"]);
+            assert_eq!(code, 1, "{out}");
+            assert!(
+                out.contains("ホストの値が 2 つある (手元の host.toml と dotfiles-private) ので apply は止めた"),
+                "{out}"
+            );
+            assert!(!w.dst().exists());
+            let (code, out, _) = w.run(&["apply", "--dry-run", "--steps", "files"]);
+            assert_eq!(code, 1, "{out}");
+            assert!(
+                out.contains("※ 本番の apply は止まる: ホストの値が 2 つある"),
+                "{out}"
+            );
+            // --host-file で渡せば、両方を見ずにその 1 つを読む
+            let private =
+                w.t.path()
+                    .join("g")
+                    .join("dotfiles-private")
+                    .join("win")
+                    .join("hosts")
+                    .join("alice@example-host.toml");
+            let (code, out, _) = w.run(&[
+                "apply",
+                "--steps",
+                "files",
+                "--host-file",
+                &private.to_string_lossy(),
+            ]);
+            assert_eq!(code, 0, "{out}");
+            assert!(!out.contains("2 つある"), "{out}");
+            assert!(w.dst().exists());
         }
 
         /// 一時の場所の clone から流しても、ホストの値を bootstrap の置き場 (%USERPROFILE%\ghq\github.com\pollenjp\dotfiles-private) で見つける

@@ -167,7 +167,9 @@ mod tests {
         assert!(off_reason("").is_some());
         // claude-skills を足して使う minimum のホストは on
         assert_eq!(
-            off_reason("group = \"minimum\"\n[tools]\nclaudePrivateSkills = true"),
+            off_reason(
+                "group = \"minimum\"\n[tools]\nclaudePrivateSkills = true\nprivateRepos = true"
+            ),
             None
         );
         // all でも claude-skills を外したホストは off

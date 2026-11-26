@@ -3094,8 +3094,7 @@ mod tests {
     const OFF_CHECK: &str = "-Check -SshRelay 'off'";
     const OFF: &str = "-SshRelay 'off'";
     /// 中継を使うホスト (1Password の switch も要る)
-    const RELAY_ON: &str =
-        "[tools]\nonePassword = true\nopReasonSshRelay = true\n[runner]\nenable = true\n";
+    const RELAY_ON: &str = "[tools]\nonePassword = true\nopReasonSshRelay = true\nprivateRepos = true\n[runner]\nenable = true\n";
 
     /// op-reason は、中継の switch が on ならモードを、off なら off を、-Check にも揃える流れにも -SshRelay で渡す
     #[test]
@@ -3117,7 +3116,7 @@ mod tests {
             (off_switch, "off"),
             // 1Password が off なら中継は効かない (groups.nix の requires)。手順そのものは走らせて確かめる
             (
-                "[tools]\nopReasonSshRelay = true\n[runner]\nenable = true\n",
+                "[tools]\nopReasonSshRelay = true\nprivateRepos = true\n[runner]\nenable = true\n",
                 "off",
             ),
         ] {
@@ -3149,7 +3148,7 @@ mod tests {
             "op-reason",
             &sys3,
             Mode::Check,
-            Some("[tools]\nonePassword = true\nopReasonSshRelay = true\n"),
+            Some("[tools]\nonePassword = true\nopReasonSshRelay = true\nprivateRepos = true\n"),
         );
         assert_eq!(ends(&calls), vec!["-Check -SshRelay 'per-call'"]);
         // ほかの手順には渡さない

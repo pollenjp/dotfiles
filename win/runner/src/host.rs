@@ -1,4 +1,10 @@
-//! ホストの値 (dotfiles-private の `win/hosts/<Windows のユーザー名>@<PC の名前>.toml`) と、設定グループの写し (`groups.json`)。
+//! ホストの値 (手元の `%USERPROFILE%\.config\dotfiles\host.toml` か、dotfiles-private の `win/hosts/<Windows のユーザー名>@<PC の名前>.toml`) と、
+//! 設定グループの写し (`groups.json`)。
+//!
+//! 引く順は `--host-file` → 手元の `host.toml` (雛形 `win/templates/host.minimum.toml` を bootstrap が写す。gh にログインできない PC 向け) →
+//! dotfiles-private (`resolve`)。手元と dotfiles-private の両方があれば、値は手元のものを読み、check は ⚠・apply は止める (どちらを使うか
+//! 決まらない。`Source::Both`)。道具の switch `privateRepos` (pollenjp の private な repo と gh のログイン。runner だけが読む道具) が off なのに、
+//! それが要る道具 (`NEEDS_PRIVATE_REPOS`) が on なら、読むときに止める (dotfiles-private の docs/adr/111_win_runner_without_gh_*)。
 //!
 //! ホストの値は WSL の Nix のホスト (`nix/hosts/<user>@<hostname>.nix`) に当たる。書けるのは設定グループ (`group`)・道具の switch の上書き
 //! (`[tools]`。`group.json` の `tools` と同じ名前)・受け持ちの印 (`[runner] enable`)・op-reason の SSH の中継のモード (`[opReason]`)・
@@ -271,8 +277,11 @@ impl Groups {
 pub enum Source {
     /// このファイルを読んだ
     File(PathBuf),
-    /// このファイルが無い (グループの既定で確かめる)
-    Missing(PathBuf),
+    /// 手元の host.toml (`used`。値はここから読んだ) と dotfiles-private のファイル (`other`) の両方がある。どちらを使うか決まらないので、
+    /// check は ⚠ を出し、apply は止める
+    Both { used: PathBuf, other: PathBuf },
+    /// どのファイルも無い (グループの既定で確かめる)。見た場所を引く順に並べる (`--host-file` なら 1 つ)
+    Missing(Vec<PathBuf>),
 }
 
 /// ホストの値 (グループの既定と上書きを合わせたもの)。
@@ -305,6 +314,11 @@ pub struct HostValues {
 impl HostValues {
     /// ファイルが無いときの値 (グループの既定・受け持ちは WSL・Notion の宛先は選んでいない)。
     pub fn missing(path: &Path, groups: Groups) -> Self {
+        Self::missing_at(vec![path.to_path_buf()], groups)
+    }
+
+    /// どのファイルも無いときの値 (`missing` と同じ。見た場所を引く順に並べる)。
+    pub fn missing_at(paths: Vec<PathBuf>, groups: Groups) -> Self {
         HostValues {
             group: groups.default.clone(),
             overrides: BTreeMap::new(),
@@ -315,7 +329,7 @@ impl HostValues {
             sshd_allow_from: None,
             t3_clear_claude_entrypoint: false,
             notion: NotionValues::default(),
-            source: Source::Missing(path.to_path_buf()),
+            source: Source::Missing(paths),
             groups,
         }
     }
@@ -351,6 +365,45 @@ impl HostValues {
 
 /// やめた設定グループの名前 (dotfiles-private の ADR 057 の 3 つ)。書いたホストは、書き直し方を案内して止める (ADR 109)
 const REMOVED_GROUPS: [&str; 3] = ["personal", "company", "client"];
+
+/// 道具の switch `privateRepos` (pollenjp の private な repo (dotfiles-private・claude-skills) と gh のログインを使うホストか)。Nix の option を
+/// 持たない runner だけの道具 (`nix/lib/groups.nix` の runnerOnlyTools)。off なら ssh-config・port-forward・pin-updates と google-ime の辞書は
+/// 流さず、手順 bootstrap は `-Private` を付けずに確かめる (ADR 111)
+pub const PRIVATE_REPOS: &str = "privateRepos";
+
+/// `privateRepos` が要る道具と、そのわけ (groups.nix の runnerOnlyTools の requiredBy と同じ並び)。privateRepos が off なのにどれかが on なら、
+/// ホストの値を読むときに止める (黙って手順を飛ばさない)
+pub const NEEDS_PRIVATE_REPOS: [(&str, &str); 3] = [
+    ("claudePrivateSkills", "claude-skills の clone を読む"),
+    (
+        "herdrHub",
+        "claude-skills の pjp でハブを作り、claude-skills の mod を置く",
+    ),
+    (
+        "opReasonSshRelay",
+        "中継のファイルを置く手順 ssh-config が dotfiles-private の ssh/ を読む",
+    ),
+];
+
+/// `privateRepos` が off なのに、それが要る道具が on なら、その誤りの文 (無ければ None)
+fn private_repos_error(h: &HostValues) -> Option<String> {
+    if h.tool(PRIVATE_REPOS) {
+        return None;
+    }
+    let on: Vec<String> = NEEDS_PRIVATE_REPOS
+        .iter()
+        .filter(|(key, _)| h.tool(key))
+        .map(|(key, why)| format!("{key} ({why})"))
+        .collect();
+    if on.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "[tools] {PRIVATE_REPOS} が off ({}) なのに、private な repo を要る道具が on です: {}。gh にログインして private な repo を取る PC なら [tools] に {PRIVATE_REPOS} = true を書き (bootstrap は -Private で流す)、取らない PC なら、その道具を false にしてください (dotfiles の win/README.md の「ホストの値」)",
+        h.tool_origin(PRIVATE_REPOS),
+        on.join("・")
+    ))
+}
 
 /// op-reason の SSH の中継のモード (`op-reason.exe --ssh-agent --mode` の値。先頭が書かなかったときの既定)
 pub const SSH_RELAY_MODES: [&str; 2] = ["per-call", "show-only"];
@@ -655,6 +708,33 @@ pub fn default_path(repo: &Path, user_profile: Option<&Path>, user: &str, pc: &s
         .join(format!("{user}@{pc}.toml"))
 }
 
+/// 手元のホストの値の置き場所: `%USERPROFILE%\.config\dotfiles\host.toml` (gh にログインできない PC で、bootstrap が雛形
+/// `win/templates/host.minimum.toml` を写す所)。
+pub fn local_path(user_profile: &Path) -> PathBuf {
+    crate::context::join_segments(user_profile, ".config/dotfiles/host.toml")
+}
+
+/// `--host-file` が無いときのホストの値: 手元 (`local`) → dotfiles-private (`private`) の順に引く。両方あれば手元のものを読み、
+/// `Source::Both` にする (check は ⚠、apply は止める)。どちらも無ければ `Source::Missing` に 2 つの場所を並べる。
+pub fn resolve(local: &Path, private: &Path, groups: Groups) -> Result<HostValues, String> {
+    match (local.exists(), private.exists()) {
+        (true, true) => {
+            let mut h = load(local, groups)?;
+            h.source = Source::Both {
+                used: local.to_path_buf(),
+                other: private.to_path_buf(),
+            };
+            Ok(h)
+        }
+        (true, false) => load(local, groups),
+        (false, true) => load(private, groups),
+        (false, false) => Ok(HostValues::missing_at(
+            vec![local.to_path_buf(), private.to_path_buf()],
+            groups,
+        )),
+    }
+}
+
 /// ホストの値を読む。ファイルが無ければ `Source::Missing` の値 (誤りではない)。読めない・誤りがあれば文を返す。
 pub fn load(path: &Path, groups: Groups) -> Result<HostValues, String> {
     match std::fs::read_to_string(path) {
@@ -766,7 +846,7 @@ pub fn parse(text: &str, path: &Path, groups: Groups) -> Result<HostValues, Stri
         None => NotionValues::default(),
         Some(v) => parse_claude(v).map_err(fail)?,
     };
-    Ok(HostValues {
+    let h = HostValues {
         group,
         overrides,
         runner_enable,
@@ -778,7 +858,11 @@ pub fn parse(text: &str, path: &Path, groups: Groups) -> Result<HostValues, Stri
         notion,
         source: Source::File(path.to_path_buf()),
         groups,
-    })
+    };
+    if let Some(e) = private_repos_error(&h) {
+        return Err(fail(e));
+    }
+    Ok(h)
 }
 
 #[cfg(test)]
@@ -894,25 +978,27 @@ mod tests {
                 .ssh_relay(),
             None
         );
-        // on ならモード。書かなければ per-call (1Password の switch は minimum では既定が off なので、入れるホストが一緒に書く)
-        let h = host("[tools]\nonePassword = true\nopReasonSshRelay = true\n").unwrap();
+        // on ならモード。書かなければ per-call (1Password の switch と、中継のファイルを置く ssh-config に要る privateRepos は minimum では既定が
+        // off なので、入れるホストが一緒に書く)
+        let h = host("[tools]\nonePassword = true\nopReasonSshRelay = true\nprivateRepos = true\n")
+            .unwrap();
         assert_eq!(h.ssh_relay(), Some("per-call"));
         assert_eq!(h.tool_origin("opReasonSshRelay"), "ホストの値");
         assert_eq!(
-            host("[tools]\nonePassword = true\nopReasonSshRelay = true\n[opReason]\nsshRelayMode = \"show-only\"\n")
+            host("[tools]\nonePassword = true\nopReasonSshRelay = true\nprivateRepos = true\n[opReason]\nsshRelayMode = \"show-only\"\n")
                 .unwrap()
                 .ssh_relay(),
             Some("show-only")
         );
         assert_eq!(
-            host("[tools]\nonePassword = true\nopReasonSshRelay = true\n[opReason]\nsshRelayMode = \"per-call\"\n")
+            host("[tools]\nonePassword = true\nopReasonSshRelay = true\nprivateRepos = true\n[opReason]\nsshRelayMode = \"per-call\"\n")
                 .unwrap()
                 .ssh_relay(),
             Some("per-call")
         );
         // 1Password が off なら効かない (groups.nix の requires。op-reason の手順も走らない)
         assert_eq!(
-            host("[tools]\nopReasonSshRelay = true\nonePassword = false\n")
+            host("[tools]\nopReasonSshRelay = true\nprivateRepos = true\nonePassword = false\n")
                 .unwrap()
                 .ssh_relay(),
             None
@@ -942,6 +1028,128 @@ mod tests {
         let h = host("").unwrap();
         assert!(!h.tool("windowsTailscale"));
         assert_eq!(h.tool_origin("windowsTailscale"), "グループ minimum の既定");
+    }
+
+    /// privateRepos は runner だけが読む道具 (groups.json の tools にある)。minimum では off、all では on
+    #[test]
+    fn private_repos_is_off_in_minimum_and_on_in_all() {
+        let h = host("").unwrap();
+        assert!(!h.tool(PRIVATE_REPOS));
+        assert_eq!(h.tool_origin(PRIVATE_REPOS), "グループ minimum の既定");
+        assert!(host("group = \"all\"\n").unwrap().tool(PRIVATE_REPOS));
+        let h = host("[tools]\nprivateRepos = true\n").unwrap();
+        assert!(h.tool(PRIVATE_REPOS));
+        assert_eq!(h.tool_origin(PRIVATE_REPOS), "ホストの値");
+        assert!(!HostValues::missing(Path::new("h.toml"), groups()).tool(PRIVATE_REPOS));
+    }
+
+    /// privateRepos が off なのに、それが要る道具 (claudePrivateSkills・herdrHub・opReasonSshRelay) が on なら、どの道具がなぜ要るかを出して止める
+    #[test]
+    fn tools_needing_private_repos_stop_without_it() {
+        for (key, why) in NEEDS_PRIVATE_REPOS {
+            let e = host(&format!("[tools]\n{key} = true\n")).unwrap_err();
+            assert!(e.starts_with("h.toml: "), "{e}");
+            assert!(
+                e.contains("[tools] privateRepos が off (グループ minimum の既定) なのに、private な repo を要る道具が on です: "),
+                "{e}"
+            );
+            assert!(e.contains(&format!("{key} ({why})")), "{e}");
+            assert!(
+                e.contains("privateRepos = true を書き (bootstrap は -Private で流す)"),
+                "{e}"
+            );
+            let h = host(&format!("[tools]\n{key} = true\nprivateRepos = true\n")).unwrap();
+            assert!(h.tool(key));
+        }
+        // all に privateRepos = false だけを書くと、要る道具の既定 (on) が 3 つとも並ぶ
+        let e = host("group = \"all\"\n[tools]\nprivateRepos = false\n").unwrap_err();
+        assert!(
+            e.contains("[tools] privateRepos が off (ホストの値) なのに"),
+            "{e}"
+        );
+        assert!(
+            e.contains("claudePrivateSkills (claude-skills の clone を読む)・herdrHub (")
+                && e.contains("・opReasonSshRelay ("),
+            "{e}"
+        );
+        let h = host(
+            "group = \"all\"\n[tools]\nprivateRepos = false\nclaudePrivateSkills = false\nherdrHub = false\nopReasonSshRelay = false\n",
+        )
+        .unwrap();
+        assert!(!h.tool(PRIVATE_REPOS));
+        // 要らない道具 (devTracker など) は privateRepos が off でも on にできる
+        assert!(host("[tools]\ndevTracker = true\nwindowsClaudeCode = true\n").is_ok());
+    }
+
+    /// --host-file が無いときは、手元の host.toml → dotfiles-private の順に引く。両方あれば手元を読んで Both、どちらも無ければ 2 つの場所を並べる
+    #[test]
+    fn resolve_reads_local_then_private() {
+        let t = TempDir::new("host-resolve");
+        let local = local_path(&t.path().join("home"));
+        assert_eq!(
+            local,
+            t.path()
+                .join("home")
+                .join(".config")
+                .join("dotfiles")
+                .join("host.toml")
+        );
+        let private = t.path().join("private").join("alice@example-host.toml");
+        let h = resolve(&local, &private, groups()).unwrap();
+        assert_eq!(
+            h.source,
+            Source::Missing(vec![local.clone(), private.clone()])
+        );
+        assert_eq!(h.group, "minimum");
+
+        t.write("private/alice@example-host.toml", "group = \"all\"\n");
+        let h = resolve(&local, &private, groups()).unwrap();
+        assert_eq!(h.source, Source::File(private.clone()));
+        assert_eq!(h.group, "all");
+
+        t.write(
+            "home/.config/dotfiles/host.toml",
+            "[runner]\nenable = true\n",
+        );
+        let h = resolve(&local, &private, groups()).unwrap();
+        assert_eq!(
+            h.source,
+            Source::Both {
+                used: local.clone(),
+                other: private.clone()
+            }
+        );
+        // 値は引く順の先 (手元) のもの
+        assert_eq!(h.group, "minimum");
+        assert!(h.runner_enable);
+
+        std::fs::remove_file(&private).unwrap();
+        let h = resolve(&local, &private, groups()).unwrap();
+        assert_eq!(h.source, Source::File(local.clone()));
+        // 手元のファイルの誤りは、ほかのホストの値の誤りと同じく止める
+        t.write(
+            "home/.config/dotfiles/host.toml",
+            "[tools]\nherdrHub = true\n",
+        );
+        let e = resolve(&local, &private, groups()).unwrap_err();
+        assert!(e.contains("host.toml: [tools] privateRepos が off"), "{e}");
+    }
+
+    /// 雛形 (win/templates/host.minimum.toml。bootstrap が手元の host.toml に写す) は minimum で道具を足さず、受け持ちは runner
+    #[test]
+    fn template_is_minimum_with_runner_enabled() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("templates")
+            .join("host.minimum.toml");
+        let h = load(&path, groups()).unwrap();
+        assert_eq!(h.source, Source::File(path.clone()));
+        assert_eq!(h.group, "minimum");
+        assert!(h.overrides.is_empty());
+        assert!(h.runner_enable);
+        assert!(!h.tool(PRIVATE_REPOS));
+        assert_eq!(h.sshd_keys, None);
+        assert_eq!(h.notion, NotionValues::default());
     }
 
     #[test]
@@ -1333,7 +1541,7 @@ mod tests {
         let t = TempDir::new("host");
         let path = t.path().join("alice@example-host.toml");
         let h = load(&path, groups()).unwrap();
-        assert_eq!(h.source, Source::Missing(path.clone()));
+        assert_eq!(h.source, Source::Missing(vec![path.clone()]));
         assert_eq!(h.group, "minimum");
         assert!(!h.runner_enable);
         std::fs::write(&path, "[runner]\nenable = true\n").unwrap();
