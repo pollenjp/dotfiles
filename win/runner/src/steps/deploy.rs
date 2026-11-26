@@ -508,7 +508,7 @@ mod tests {
             "dotfiles apply --steps ssh-config --force"
         );
         let mut out = Vec::new();
-        let ctx = ctx_for("group = \"personal\"\n", &sys, &mut out);
+        let ctx = ctx_for("group = \"minimum\"\n", &sys, &mut out);
         assert_eq!(
             force_command(&ctx, "files"),
             "WSL で nix/scripts/bootstrap-windows-files.sh --force (受け持ちが WSL の setup の間。runner の apply は files を流さない)"

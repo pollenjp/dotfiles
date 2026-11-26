@@ -456,7 +456,7 @@ mod tests {
     /// この PC の $PROFILE にユーザーが手で書いた starship の init の行 (starship の README の形)
     const HAND_LINE: &str = "Invoke-Expression (&starship init powershell)";
     const RUNNER_HOST: &str = "[runner]\nenable = true\n";
-    const WSL_HOST: &str = "group = \"personal\"\n";
+    const WSL_HOST: &str = "group = \"minimum\"\n";
     const APPLY: Mode = Mode::Apply { force: false };
 
     struct Env {

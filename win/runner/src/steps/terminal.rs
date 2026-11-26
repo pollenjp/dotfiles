@@ -873,7 +873,7 @@ mod tests {
     use crate::testutil::{FakeSys, TempDir};
 
     const RUNNER_HOST: &str = "[runner]\nenable = true\n";
-    const WSL_HOST: &str = "group = \"personal\"\n";
+    const WSL_HOST: &str = "group = \"minimum\"\n";
     const APPLY: Mode = Mode::Apply { force: false };
     const SOUND: &str = r"C:\Windows\Media\Windows Information Bar.wav";
     const OTHER: &str = r"C:\Windows\Media\ding.wav";

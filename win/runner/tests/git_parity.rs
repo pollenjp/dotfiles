@@ -6,7 +6,7 @@
 //! - runner の書き方 (`to_git_ini`) で WSL の `programs.git.iniContent` と includes を書くと、home-manager が書く `~/.config/git/config` と
 //!   同じバイト列 (書き方の写しが合っている)
 //! - Windows の config の includeIf より前の節が、WSL の iniContent から Windows に入れないもの (1Password の署名・delta) を除き、lfs の filter の
-//!   git-lfs のパスをそろえたものと同じ。名前とメールのあるホスト (sandbox・1Password の WSL) と無いホスト (client の 1Password)
+//!   git-lfs のパスをそろえたものと同じ。名前とメールのあるホスト (sandbox・1Password の WSL) と無いホスト (minimum の 1Password)
 //!   (Windows だけの core.sshCommand は除いて比べ、WSL に無いことを見る)
 //! - owner ごとの include の名前とメールが WSL の includes の contents と同じ。条件は WSL が `~/workdir` の下 (末尾の / なし。変えていない)、
 //!   Windows が `~/ghq` の下 (末尾の /・/i)
@@ -191,14 +191,14 @@ fn hosts() -> Vec<(Wsl, bool)> {
         (
             wsl(
                 "wsl-1password",
-                r#"(<flake>.lib.mkHome { username = "user"; system = "x86_64-linux"; wsl = { enable = true; windowsUserName = "alice"; }; onePassword.enable = true; }).config"#,
+                r#"(<flake>.lib.mkHome { username = "user"; system = "x86_64-linux"; wsl = { enable = true; windowsUserName = "alice"; }; onePassword.enable = true; modules = [ { dotfiles.git.identity.enable = true; } ]; }).config"#,
             ),
             true,
         ),
         (
             wsl(
-                "client-1password",
-                r#"(<flake>.lib.mkHome { username = "user"; system = "x86_64-linux"; group = "client"; onePassword.enable = true; }).config"#,
+                "minimum-1password",
+                r#"(<flake>.lib.mkHome { username = "user"; system = "x86_64-linux"; group = "minimum"; onePassword.enable = true; }).config"#,
             ),
             false,
         ),

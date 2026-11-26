@@ -692,7 +692,8 @@ mod tests {
             .join("settings.json")
     }
 
-    const ON: &str = "[tools]\nwindowsT3Code = true\n[t3Code]\nclearClaudeEntrypoint = true\n";
+    // Windows の Claude Code は minimum に入らないので、claude-t3 が置くホストとして足す
+    const ON: &str = "[tools]\nwindowsT3Code = true\nwindowsClaudeCode = true\n[t3Code]\nclearClaudeEntrypoint = true\n";
 
     #[test]
     fn step_writes_settings_only_in_apply_and_only_when_changed() {

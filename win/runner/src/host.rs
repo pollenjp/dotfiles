@@ -6,10 +6,11 @@
 //! 入ってよい送り元 (`[sshd] allowUsers`・`allowFrom`。Nix には無い)・
 //! T3 Code の Claude に `CLAUDE_CODE_ENTRYPOINT=""` を渡すか (`[t3Code]`)・Notion へ書く skill の宛先 (`[claude.notion]`。Nix の `dotfiles.claude.notion` と同じ名前と形) だけ。書いていない道具の既定は、Nix がグループごとの素のホストから書き出した `groups.json`
 //! (`nix eval --raw ./nix#lib.windowsGroupsJson`) から引く (dotfiles-private の docs/adr/058_win_runner_bootstrap_* §2 H・
-//! docs/adr/064_win_w02_claude_skills_hub_*)。
+//! docs/adr/064_win_w02_claude_skills_hub_*)。設定グループは道具の集合で、minimum (既定) と all の 2 つ (docs/adr/109_host_groups_minimum_all_*)。
+//! 前のグループの名前 (personal・company・client。ADR 057) は、書き直し方を案内して止める。
 //!
 //! ```toml
-//! group = "personal"            # personal (既定)・company・client
+//! group = "minimum"             # minimum (既定)・all (dotfiles の nix/README.md の「設定グループ」)
 //!
 //! [tools]
 //! windowsTypeClipboard = true
@@ -222,8 +223,8 @@ impl Groups {
             )
         };
         let v: serde_json::Value = serde_json::from_str(text).map_err(|e| bad(&e.to_string()))?;
-        if v["version"] != 1 {
-            return Err(bad("version が 1 でない"));
+        if v["version"] != 2 {
+            return Err(bad("version が 2 でない"));
         }
         let default = v["default"]
             .as_str()
@@ -347,6 +348,9 @@ impl HostValues {
         }
     }
 }
+
+/// やめた設定グループの名前 (dotfiles-private の ADR 057 の 3 つ)。書いたホストは、書き直し方を案内して止める (ADR 109)
+const REMOVED_GROUPS: [&str; 3] = ["personal", "company", "client"];
 
 /// op-reason の SSH の中継のモード (`op-reason.exe --ssh-agent --mode` の値。先頭が書かなかったときの既定)
 pub const SSH_RELAY_MODES: [&str; 2] = ["per-call", "show-only"];
@@ -685,6 +689,12 @@ pub fn parse(text: &str, path: &Path, groups: Groups) -> Result<HostValues, Stri
     let group = match t.get("group") {
         None => groups.default.clone(),
         Some(toml::Value::String(g)) if groups.tools(g).is_some() => g.clone(),
+        Some(toml::Value::String(g)) if REMOVED_GROUPS.contains(&g.as_str()) => {
+            return Err(fail(format!(
+                "group = \"{g}\" は、もう使えません。設定グループは {} の 2 つ (道具の集合) になりました (dotfiles-private の ADR 109)。group = \"minimum\" にして、使う道具を [tools] に書いてください (前の {g} と同じ道具にする書き方は dotfiles の win/README.md の「ホストの値」)",
+                groups.names().join("・")
+            )));
+        }
         Some(v) => {
             // toml の Value は display の feature が無いと Display を持たない
             let shown = match v {
@@ -775,9 +785,9 @@ pub fn parse(text: &str, path: &Path, groups: Groups) -> Result<HostValues, Stri
 mod tests {
     //! ## 確かめること
     //!
-    //! - 埋めた groups.json が読め、グループごとの Windows の道具の既定が Nix の段の決まりどおり (personal は全部・company は ③ の ntn と
-    //!   ② ③ の両方の claude-personal・claude-work・Claude Desktop が off・client は全部 off。type-clipboard はどれも off)
-    //! - group を書かなければ personal、上書きはグループの既定より先に効く、runner.enable の既定は false
+    //! - 埋めた groups.json が読め、グループは minimum と all の 2 つ。runner が読む道具は、minimum では全部 off、all では全部 on
+    //! - group を書かなければ minimum、上書きはグループの既定より先に効く、runner.enable の既定は false
+    //! - 前のグループの名前 (personal・company・client) は、書き直し方 (group = "minimum" と [tools]) を案内して止まる
     //! - 知らないキー・グループ・道具と、bool でない値は誤り。ファイルが無いのは誤りでなく「無い」
     //! - op-reason の SSH の中継 (道具の switch opReasonSshRelay。どのグループでも既定は off) は、on なら [opReason] sshRelayMode のモード
     //!   (書かなければ per-call)、off か 1Password (onePassword) が off なら無し。sshRelayMode の知らない値・[opReason] の知らないキーは誤り
@@ -800,38 +810,53 @@ mod tests {
         parse(text, Path::new("h.toml"), groups())
     }
 
+    /// runner が手順の gate で読む道具 (Nix の lib/groups.nix の runnerTools と同じ)
+    const RUNNER_TOOLS: [&str; 15] = [
+        "windowsClaudeCode",
+        "windowsHerdr",
+        "windowsT3Code",
+        "claudePrivateSkills",
+        "herdrHub",
+        "windowsClaudeAccounts",
+        "windowsClaudeDesktop",
+        "devTracker",
+        "onePassword",
+        "opReasonSshRelay",
+        "windowsNtn",
+        "windowsTailscale",
+        "windowsSshd",
+        "windowsTypeClipboard",
+        "gitIdentity",
+    ];
+
     #[test]
-    fn embedded_groups_follow_tiers() {
+    fn embedded_groups_are_sets() {
         let g = groups();
-        assert_eq!(g.default, "personal");
-        assert_eq!(g.names(), vec!["client", "company", "personal"]);
+        assert_eq!(g.default, "minimum");
+        assert_eq!(g.names(), vec!["all", "minimum"]);
         let tool =
             |group: &str, key: &str| host(&format!("group = \"{group}\"")).unwrap().tool(key);
-        for key in ["windowsClaudeCode", "windowsHerdr", "windowsNtn"] {
-            assert!(tool("personal", key), "{key}");
-            assert!(!tool("client", key), "{key}");
+        // グループは道具の集合: runner が読む道具は minimum に入らず (使うホストが [tools] に書く)、all には全部入る
+        for key in RUNNER_TOOLS {
+            assert!(!tool("minimum", key), "{key}");
+            assert!(tool("all", key), "{key}");
         }
-        assert!(tool("company", "windowsClaudeCode"));
-        assert!(tool("company", "windowsHerdr"));
-        assert!(!tool("company", "windowsNtn"));
-        // claude-personal・claude-work は ② と ③ の両方 (初回の apply で UAC の確認が出るので、company・client では既定で走らせない)
-        assert!(tool("personal", "windowsClaudeAccounts"));
-        assert!(!tool("company", "windowsClaudeAccounts"));
-        assert!(!tool("client", "windowsClaudeAccounts"));
-        // Claude Desktop も ② と ③ の両方 (入れるときに UAC の確認が出るので、company・client では既定で入れない)
-        assert!(tool("personal", "windowsClaudeDesktop"));
-        assert!(!tool("company", "windowsClaudeDesktop"));
-        assert!(!tool("client", "windowsClaudeDesktop"));
-        for group in ["personal", "company", "client"] {
-            assert!(!tool(group, "windowsTypeClipboard"), "{group}");
-            // Tailscale は VPN の道具で、どのグループでも既定は off (入れるホストが [tools] に書く)
-            assert!(!tool(group, "windowsTailscale"), "{group}");
-            // sshd は PC に外から入る口で、どのグループでも既定は off (入れるホストが [tools] に書く)
-            assert!(!tool(group, "windowsSshd"), "{group}");
-            // op-reason の SSH の中継は鍵を使う ssh の通り道を替えるので、どのグループでも既定は off (入れるホストが [tools] に書く)
-            assert!(!tool(group, "opReasonSshRelay"), "{group}");
-            // T3 Code はどのグループでも既定は off (入れるホストが [tools] に書く)
-            assert!(!tool(group, "windowsT3Code"), "{group}");
+    }
+
+    #[test]
+    fn old_group_names_are_rejected_with_a_guide() {
+        for old in ["personal", "company", "client"] {
+            let e = host(&format!("group = \"{old}\"\n")).unwrap_err();
+            assert!(e.starts_with("h.toml: "), "{e}");
+            assert!(
+                e.contains(&format!("group = \"{old}\" は、もう使えません")),
+                "{e}"
+            );
+            assert!(
+                e.contains("group = \"minimum\" にして、使う道具を [tools] に書いてください"),
+                "{e}"
+            );
+            assert!(e.contains("ADR 109"), "{e}");
         }
     }
 
@@ -868,7 +893,7 @@ mod tests {
                 .ssh_relay(),
             None
         );
-        // on ならモード。書かなければ per-call (1Password の switch は、どのグループでも既定が off なので、入れるホストが一緒に書く)
+        // on ならモード。書かなければ per-call (1Password の switch は minimum では既定が off なので、入れるホストが一緒に書く)
         let h = host("[tools]\nonePassword = true\nopReasonSshRelay = true\n").unwrap();
         assert_eq!(h.ssh_relay(), Some("per-call"));
         assert_eq!(h.tool_origin("opReasonSshRelay"), "ホストの値");
@@ -905,7 +930,7 @@ mod tests {
         assert_eq!(h.tool_origin("windowsSshd"), "ホストの値");
         let h = host("").unwrap();
         assert!(!h.tool("windowsSshd"));
-        assert_eq!(h.tool_origin("windowsSshd"), "グループ personal の既定");
+        assert_eq!(h.tool_origin("windowsSshd"), "グループ minimum の既定");
     }
 
     #[test]
@@ -915,21 +940,18 @@ mod tests {
         assert_eq!(h.tool_origin("windowsTailscale"), "ホストの値");
         let h = host("").unwrap();
         assert!(!h.tool("windowsTailscale"));
-        assert_eq!(
-            h.tool_origin("windowsTailscale"),
-            "グループ personal の既定"
-        );
+        assert_eq!(h.tool_origin("windowsTailscale"), "グループ minimum の既定");
     }
 
     #[test]
     fn defaults_and_overrides() {
         let h = host("").unwrap();
-        assert_eq!(h.group, "personal");
+        assert_eq!(h.group, "minimum");
         assert!(!h.runner_enable);
         assert_eq!(h.source, Source::File(PathBuf::from("h.toml")));
-        assert_eq!(h.tool_origin("windowsNtn"), "グループ personal の既定");
+        assert_eq!(h.tool_origin("windowsNtn"), "グループ minimum の既定");
 
-        let h = host("group = \"client\"\n[tools]\nwindowsNtn = true\nwindowsTypeClipboard = true\n[runner]\nenable = true\n").unwrap();
+        let h = host("group = \"minimum\"\n[tools]\nwindowsNtn = true\nwindowsTypeClipboard = true\n[runner]\nenable = true\n").unwrap();
         assert!(h.tool("windowsNtn"));
         assert!(h.tool("windowsTypeClipboard"));
         assert!(!h.tool("windowsClaudeCode"));
@@ -1018,7 +1040,7 @@ mod tests {
             ),
             (
                 "group = \"home\"",
-                "group は client・company・personal のどれかで書いてください",
+                "group は all・minimum のどれかで書いてください",
             ),
             ("group = 1", "group は"),
             (
@@ -1301,8 +1323,8 @@ mod tests {
     /// Windows のエディタ (Windows PowerShell 5.1 の Set-Content -Encoding UTF8 など) が付ける頭の BOM は読み飛ばす
     #[test]
     fn leading_bom_is_ignored() {
-        let h = host("\u{feff}group = \"company\"\n").unwrap();
-        assert_eq!(h.group, "company");
+        let h = host("\u{feff}group = \"all\"\n").unwrap();
+        assert_eq!(h.group, "all");
     }
 
     #[test]
@@ -1311,7 +1333,7 @@ mod tests {
         let path = t.path().join("alice@example-host.toml");
         let h = load(&path, groups()).unwrap();
         assert_eq!(h.source, Source::Missing(path.clone()));
-        assert_eq!(h.group, "personal");
+        assert_eq!(h.group, "minimum");
         assert!(!h.runner_enable);
         std::fs::write(&path, "[runner]\nenable = true\n").unwrap();
         assert!(load(&path, groups()).unwrap().runner_enable);
@@ -1333,15 +1355,24 @@ mod tests {
     fn rejects_broken_groups_json() {
         assert!(Groups::parse("{}").is_err());
         assert!(Groups::parse("not json").is_err());
+        // 前の版 (段の tiers を持っていた version 1) は読まない
         assert!(
-            Groups::parse(r#"{"version":1,"default":"x","groups":{"personal":{"tools":{}}}}"#)
+            Groups::parse(r#"{"version":1,"default":"minimum","groups":{"minimum":{"tools":{}}}}"#)
+                .is_err()
+        );
+        assert!(
+            Groups::parse(r#"{"version":2,"default":"x","groups":{"minimum":{"tools":{}}}}"#)
                 .is_err()
         );
         assert!(
             Groups::parse(
-                r#"{"version":1,"default":"personal","groups":{"personal":{"tools":{"a":1}}}}"#
+                r#"{"version":2,"default":"minimum","groups":{"minimum":{"tools":{"a":1}}}}"#
             )
             .is_err()
+        );
+        assert!(
+            Groups::parse(r#"{"version":2,"default":"minimum","groups":{"minimum":{"tools":{}}}}"#)
+                .is_ok()
         );
     }
 }

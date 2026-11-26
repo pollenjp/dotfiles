@@ -528,7 +528,7 @@ mod tests {
         assert!(apply_blocker(&host_of(Some("")), &mixed).is_none());
         let runner = host_of(Some("[runner]\nenable = true"));
         assert!(apply_blocker(&runner, &shared).is_none());
-        // Windows にしか無い手順が、このホストでは off (グループ client の道具の既定) なら、流すものが無いので止める
+        // Windows にしか無い手順が、このホストでは off (グループ minimum の道具の既定) なら、流すものが無いので止める
         let off: Vec<Box<dyn Step>> = vec![
             Box::new(Fixed(info("s", Gate::Always, true), Kind::Ok)),
             Box::new(Fixed(
@@ -539,7 +539,7 @@ mod tests {
                 Kind::Ok,
             )),
         ];
-        assert!(apply_blocker(&host_of(Some("group = \"client\"")), &off).is_some());
-        assert!(apply_blocker(&host_of(Some("group = \"personal\"")), &off).is_none());
+        assert!(apply_blocker(&host_of(Some("group = \"minimum\"")), &off).is_some());
+        assert!(apply_blocker(&host_of(Some("group = \"all\"")), &off).is_none());
     }
 }

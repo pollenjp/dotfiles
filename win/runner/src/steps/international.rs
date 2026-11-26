@@ -1154,7 +1154,7 @@ mod tests {
     use std::rc::Rc;
 
     const RUNNER_HOST: &str = "[runner]\nenable = true\n";
-    const WSL_HOST: &str = "group = \"personal\"\n";
+    const WSL_HOST: &str = "group = \"minimum\"\n";
     const APPLY: Mode = Mode::Apply { force: false };
     const FORCE: Mode = Mode::Apply { force: true };
     const DRY: Mode = Mode::DryRun { force: false };

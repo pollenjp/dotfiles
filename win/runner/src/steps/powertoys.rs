@@ -1005,7 +1005,7 @@ mod tests {
     use std::rc::Rc;
 
     const RUNNER_HOST: &str = "[runner]\nenable = true\n";
-    const WSL_HOST: &str = "group = \"personal\"\n";
+    const WSL_HOST: &str = "group = \"minimum\"\n";
     const APPLY: Mode = Mode::Apply { force: false };
     /// Install-PowerToys.ps1 -Check の出力 (入っている / 入っていない)
     const INSTALLED_OUT: &str = "PowerToys (winget の Microsoft.PowerToys。版は固定しない)\n  入っている場所 : C:\\Users\\u\\AppData\\Local\\PowerToys\\PowerToys.exe\n  入っている版   : 0.100.2.0\n入っている";

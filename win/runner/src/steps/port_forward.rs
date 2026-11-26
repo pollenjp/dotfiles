@@ -504,7 +504,7 @@ mod tests {
     use std::path::PathBuf;
 
     const RUNNER_HOST: &str = "[runner]\nenable = true\n";
-    const WSL_HOST: &str = "group = \"personal\"\n";
+    const WSL_HOST: &str = "group = \"minimum\"\n";
     const APPLY: Mode = Mode::Apply { force: false };
     const OK_TOML: &str = "[hosts]\nexample-a = [\"3000\", \"8080 api\"]\nexample-b = [\" 15432:db:5432  ポスグレ \"]\n";
 

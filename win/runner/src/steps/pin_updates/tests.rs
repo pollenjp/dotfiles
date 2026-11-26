@@ -307,14 +307,15 @@ struct Ran {
 }
 
 impl World {
-    /// グループ personal の既定のホスト (tailscale は off)・bootstrap の clone は無い・どの名前も固定した版が最新
+    /// グループ minimum に Claude Code・herdr・ntn を足したホスト (tailscale は off)・bootstrap の clone は無い・どの名前も固定した版が最新
     fn new() -> World {
         let t = TempDir::new("pin-updates");
         write_repo(&t.path().join("repo"));
         std::fs::create_dir_all(t.path().join("home")).unwrap();
         let mut w = World {
             t,
-            host: "group = \"personal\"\n".to_string(),
+            host: "group = \"minimum\"\n[tools]\nwindowsClaudeCode = true\nwindowsHerdr = true\nwindowsNtn = true\n"
+                .to_string(),
             env: Vec::new(),
             no_gh: false,
             no_curl: false,
@@ -641,9 +642,10 @@ fn keys_json_note_follows_only_a_herdr_app_update() {
     assert!(!r.calls.contains(&head_call("app", "0.1.16")));
     assert!(r.calls.contains(&head_call("core", "0.1.22")));
 
-    // windowsHerdr が false なら herdr・herdr-app・herdr-core を確かめない
+    // windowsHerdr が false なら herdr・herdr-app・herdr-core を確かめない (ntn・Claude Code は確かめる)
     let mut w = World::new();
-    w.host = "[tools]\nwindowsHerdr = false\n".to_string();
+    w.host =
+        "[tools]\nwindowsHerdr = false\nwindowsClaudeCode = true\nwindowsNtn = true\n".to_string();
     w.set_contents("openssh", dirs(&["10.1.0.0", "10.2.0.0"]));
     w.set_tags("herdr-app", &["v0.1.15", "v0.1.16"]);
     let r = w.run(CHECK);
@@ -699,7 +701,8 @@ fn names_follow_the_host_switches() {
             .collect()
     };
     let mut w = World::new();
-    w.host = "[tools]\nwindowsNtn = false\nwindowsClaudeCode = false\n".to_string();
+    w.host =
+        "[tools]\nwindowsNtn = false\nwindowsClaudeCode = false\nwindowsHerdr = true\n".to_string();
     assert_eq!(
         checked(&w),
         vec![
@@ -708,7 +711,8 @@ fn names_follow_the_host_switches() {
             contents_call("google-japanese-input"),
         ]
     );
-    w.host = "[tools]\nwindowsTailscale = true\n".to_string();
+    w.host = "[tools]\nwindowsTailscale = true\nwindowsClaudeCode = true\nwindowsHerdr = true\nwindowsNtn = true\n"
+        .to_string();
     w.bootstrapped();
     assert_eq!(
         checked(&w),
@@ -717,9 +721,9 @@ fn names_follow_the_host_switches() {
             .map(|s| contents_call(s.name))
             .collect::<Vec<_>>()
     );
-    // グループ client は herdr も ntn も Claude Code も入れない
+    // グループ minimum のまま (道具を足さない) なら、herdr も ntn も Claude Code も入れない
     let mut w = World::new();
-    w.host = "group = \"client\"\n".to_string();
+    w.host = "group = \"minimum\"\n".to_string();
     assert_eq!(
         checked(&w),
         vec![
@@ -1593,7 +1597,7 @@ fn reads_the_real_repo_files() {
             roots: Roots::from_home(t.path()),
             state_dir: t.path().join("state"),
             host: parse(
-                "[tools]\nwindowsTailscale = true\n",
+                "[tools]\nwindowsTailscale = true\nwindowsClaudeCode = true\nwindowsHerdr = true\nwindowsNtn = true\n",
                 Path::new("h.toml"),
                 groups,
             )
@@ -1848,7 +1852,7 @@ exit "${rc}"
             .unwrap();
             std::fs::write(
                 d.join("group.json"),
-                json!({"group": "personal", "tools": {"windowsHerdr": herdr, "windowsTailscale": tailscale}, "version": 1})
+                json!({"group": "minimum", "tools": {"windowsHerdr": herdr, "windowsTailscale": tailscale}, "version": 2})
                     .to_string(),
             )
             .unwrap();
