@@ -1,9 +1,12 @@
-# 設定グループ (dotfiles.group) と段・道具の switch の値を ~/.local/state/dotfiles/group.json に置き、道具どうしの依存を
-# 評価で確かめる (dotfiles-private の docs/adr/057_host_setting_groups_*。表は lib/groups.nix)。
+# 設定グループ (dotfiles.group) と道具の switch の値を ~/.local/state/dotfiles/group.json に置き、道具どうしの依存を
+# 評価で確かめる (dotfiles-private の docs/adr/109_host_groups_minimum_all_*。表は lib/groups.nix)。
 #
-#   {"group":"client","tiers":{"aiTools":false,"personalAccounts":false},"tools":{"ccPages":false,"claude":false,…},"version":1}
+#   {"group":"minimum","tools":{"ccPages":false,"claude":true,…},"version":2}
 #
-#   tools  lib/groups.nix の表の各行の key と、その option の値そのもの (効く条件 requires はかけない)
+#   tools  lib/groups.nix の表の各行の key と、その option の値そのもの (効く条件 requires はかけない。環境の条件 env は既定に
+#          入っているので、グループの既定から来た値ならそのマシンで効く道具だけが true)
+#
+# version 1 (ADR 057) は段の tiers も持っていた。setup は tools の字だけを見るので、どちらの版でも同じに読む。
 #
 # setup.sh が読み、bootstrap-*.sh の冒頭の見出し (# tool: <key>) の key が false なら、その手順を飛ばす。setup.sh は Nix より
 # 前にも走るので jq を使わず、"<key>":false の文字で見る (builtins.toJSON は空白を入れない)。bootstrap-mise.sh も
@@ -18,7 +21,7 @@ let
   cfg = config.dotfiles;
 in
 {
-  # 道具を 1 つずつ足すホスト (自社・客先) で、足し忘れを評価で気づけるようにする。段が全部 on の personal では成り立つ
+  # 道具を 1 つずつ足すホスト (minimum + 道具) で、足し忘れを評価で気づけるようにする。道具が全部 on の all では成り立つ
   assertions = [
     {
       assertion = cfg.claude.privateSkills.enable -> cfg.claude.enable;
@@ -33,7 +36,7 @@ in
       message = ''
         dotfiles.claude.devTracker.enable が true ですが dotfiles.claude.privateSkills.enable が false です。
         Dev Tracker の skill (pjp-dev-tracker) は claude-skills にあるので、claude.privateSkills.enable = true; も書いてください
-        (設定グループが company・client のホストでは、既定で false です)。
+        (設定グループが minimum のホストでは、既定で false です)。
       '';
     }
     {
@@ -47,12 +50,8 @@ in
 
   home.file.".local/state/dotfiles/group.json".text =
     builtins.toJSON {
-      version = 1;
+      version = 2;
       inherit (cfg) group;
-      tiers = {
-        aiTools = cfg.aiTools.enable;
-        personalAccounts = cfg.personalAccounts.enable;
-      };
       tools = builtins.listToAttrs (
         map (t: {
           name = t.key;

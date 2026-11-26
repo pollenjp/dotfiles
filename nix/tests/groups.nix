@@ -1,31 +1,27 @@
-# 設定グループ (dotfiles.group) と、段・道具の switch の既定を、lib/groups.nix の表と突き合わせて評価時に確かめる。
+# 設定グループ (dotfiles.group。道具の集合) と道具の switch の既定を、lib/groups.nix の表と突き合わせて評価時に確かめる
+# (dotfiles-private の docs/adr/109_host_groups_minimum_all_*)。
 #
 # 合わなければ assert で評価が止まり、外れた項目の名前が出る。評価で止まるので、CI の
 # `nix flake check --all-systems --no-build` (全 system の評価) でも落ちる。flake.nix の checks (groups-state) から呼ぶ。
 #
 # ## 確かめること
 #
-#   - 段の switch の既定: personal・グループを書かないホストは ② ③ とも true、company は ② だけ true、client はどちらも false
-#   - 表の各道具の既定が、段の switch を素の値で 4 通り (② ③ の on/off) にしたホストで「その道具の段が全部 on && 段が全部
-#     on のときの値」になる (derived = false の道具と ① の道具は、段によらず段が全部 on のときの値)。options.nix の既定の式と
-#     表の段がずれたら、ここで落ちる
+#   - 表の各道具の既定が、環境の組 5 つ (WSL で win/ を配る・WSL で win/ を配らない・WSL で Windows のユーザー名を書かない・WSL でない
+#     Linux・macOS) と 2 つのグループのどれでも「グループに入る && 全部の環境の条件 && 全部の効く条件の値」になる (従う道具 (follows) は、
+#     従う先の道具の値)。options.nix の既定の式と表がずれたら、ここで落ちる
+#   - all を選んだホストは、5 つの組のどれでも評価が止まらない (グループの既定から来た値で assertion が起きない)
+#   - minimum で on の道具は minimum に入る道具 (osCaBundle・cleanup) だけ
 #   - 表の option が全部ホストの options.dotfiles にあり、bool の option
-#   - グループを書かないホストと group = "personal" のホストで、表の全 option の値が同じ (personal は今までの既定のまま)
-#   - group.json は version・group・tiers と、表の key を全部持つ tools で、改行で終わる。client では段のある道具が全部 false
-#   - 客先で道具を 1 つ足せる (group = "client" と claude.enable = true で、claude だけが on)
-#   - windowsClaudeAccounts (Windows の claude-personal・claude-work) は personal だけ既定で on (初回の apply で UAC の確認が出る
-#     手順なので、company・client では既定で走らせない)
-#   - windowsClaudeDesktop (Windows の Claude Desktop の MSIX) も ② と ③ の両方の道具で、personal だけ既定で on (入れるときに UAC の
-#     確認が出る手順なので、company・client では既定で走らせない)
-#   - opReasonSshRelay (op-reason の SSH の中継。Windows の runner と WSL の option が同じ名前で引く) は表にあり、どのグループでも
-#     既定で off (鍵を使う ssh の通り道を替えるので、入れるホストが書く)
-#   - windowsTypeClipboard (Windows の type-clipboard。自作のアプリで、個人の GitHub の repo の Release から入れる) は ③ の道具で、
-#     既定は段によらず (derived = false)、どのグループでも off (入れるホストが書く)
-#   - linger (systemd の linger。setup の手順 linger が有効にする) は ② の道具で、既定はどのグループでも herdrCore と同じ値。
-#     herdrCore.enable = false のホストでは off。client で linger.enable = true だけを書けば、herdrCore は off のまま linger だけ on
-#   - 依存の assertion: client で devTracker.enable = true だけを書くと評価で止まり、claude.privateSkills.enable と
-#     claude.enable も書けば通る。herdr.hub.enable は herdr.enable と claude.privateSkills.enable が要る
-#   - 知らないグループ ("customer") は評価で止まる
+#   - グループを書かないホストと group = "minimum" のホストで、表の全 option の値が同じ
+#   - group.json は version 2・group・表の key を全部持つ tools だけで、改行で終わる (段の tiers は無い)
+#   - 道具を 1 つ足せる (group = "minimum" と claude.enable = true で、claude だけが minimum の外で on)
+#   - linger は herdrCore に従う: minimum に herdrCore だけを足すと linger も on、all で herdrCore を外すと off。linger だけを書くこともできる
+#   - 依存の assertion は今のまま: minimum で devTracker.enable = true だけを書くと評価で止まり、claude.enable と claude.privateSkills.enable
+#     も書けば通る。herdr.hub.enable は herdr.enable と claude.privateSkills.enable が要る (all で herdr だけを外すと止まる)
+#   - ホストが素の値で書いた環境の誤り (WSL でないのに wsl.exeExecTrace.enable = true) は、今までどおり評価で止まる
+#   - やめたグループの名前 (personal・company・client)・知らないグループ ("customer")・やめた段の switch (aiTools.enable・
+#     personalAccounts.enable) は評価で止まる
+#   - runnerTools は全部が表の道具で、表の runner の印と同じ数 (15)
 {
   lib,
   pkgs,
@@ -50,69 +46,83 @@ let
 
   valueOf = cfg: t: lib.getAttrFromPath t.option cfg.dotfiles;
   values = cfg: map (t: valueOf cfg t) groups.tools;
+  toolNamed = key: builtins.head (builtins.filter (t: t.key == key) groups.tools);
 
-  # 段の switch を素の値で決めたホスト
-  combos = [
-    {
-      aiTools = true;
-      personalAccounts = true;
-    }
-    {
-      aiTools = true;
-      personalAccounts = false;
-    }
-    {
-      aiTools = false;
-      personalAccounts = true;
-    }
-    {
-      aiTools = false;
-      personalAccounts = false;
-    }
-  ];
-  comboCfg =
-    c:
-    cfgOf {
-      modules = [
-        {
-          dotfiles.aiTools.enable = c.aiTools;
-          dotfiles.personalAccounts.enable = c.personalAccounts;
-        }
-      ];
+  # 環境の組 (グループのほかは書かない)。system が違う組 (macOS) も評価だけなら、どの system のランナーでも流せる
+  envs = {
+    wsl-win = {
+      wsl = {
+        enable = true;
+        windowsUserName = "user";
+        windowsFiles.enable = true;
+      };
     };
-  allOn = comboCfg (builtins.head combos);
+    wsl-runner = {
+      wsl = {
+        enable = true;
+        windowsUserName = "user";
+      };
+    };
+    wsl-nouser = {
+      wsl.enable = true;
+    };
+    linux = { };
+    darwin = {
+      system = "aarch64-darwin";
+    };
+  };
+
+  # 表から決まる既定: グループに入る && 全部の環境の条件 && 全部の効く条件の値 (従う道具は従う先の値)
   expected =
-    c: t: (if t.derived then builtins.all (tier: c.${tier}) t.tiers else true) && valueOf allOn t;
+    group: cfg: isLinux: t:
+    if t.follows != null then
+      valueOf cfg (toolNamed t.follows)
+    else
+      groups.inGroup group t
+      && builtins.all (groups.envHolds {
+        cfg = cfg.dotfiles;
+        inherit isLinux;
+      }) t.env
+      && builtins.all (p: lib.getAttrFromPath p cfg.dotfiles) t.requires;
+
+  combos = lib.concatMap (
+    envName:
+    map (group: {
+      inherit envName group;
+      args = envs.${envName} // {
+        inherit group;
+      };
+    }) groups.groupNames
+  ) (builtins.attrNames envs);
+
   mismatches = lib.concatMap (
     c:
     let
-      cfg = comboCfg c;
+      h = hostWith c.args;
+      isLinux = lib.hasSuffix "-linux" (c.args.system or system);
     in
-    map (t: "${t.key} (② ${lib.boolToString c.aiTools}・③ ${lib.boolToString c.personalAccounts})") (
-      builtins.filter (t: valueOf cfg t != expected c t) groups.tools
+    map (t: "${t.key} (${c.group}・${c.envName})") (
+      builtins.filter (t: valueOf h.config t != expected c.group h.config isLinux t) groups.tools
     )
   ) combos;
 
-  tiersOf = cfg: {
-    a = cfg.dotfiles.aiTools.enable;
-    p = cfg.dotfiles.personalAccounts.enable;
-  };
+  # home-manager は assertion が落ちていると config を読んだ時点で throw する ("Failed assertions")
+  evaluates = args: (builtins.tryEval (cfgOf args).home.username).success;
+  throwsOn = v: !(builtins.tryEval (builtins.deepSeq v true)).success;
+
+  allStops = builtins.filter (n: !(evaluates (envs.${n} // { group = "all"; }))) (
+    builtins.attrNames envs
+  );
 
   unset = cfgOf { };
-  personal = cfgOf { group = "personal"; };
-  company = cfgOf { group = "company"; };
-  client = cfgOf { group = "client"; };
+  minimum = cfgOf { group = "minimum"; };
+  all = cfgOf { group = "all"; };
 
   json = cfg: builtins.fromJSON cfg.home.file.".local/state/dotfiles/group.json".text;
   jsonText = cfg: cfg.home.file.".local/state/dotfiles/group.json".text;
 
-  clientClaude = cfgOf {
-    group = "client";
-    claude.enable = true;
-  };
-
-  # home-manager は assertion が落ちていると config を読んだ時点で throw する ("Failed assertions")
-  evaluates = args: (builtins.tryEval (cfgOf args).home.username).success;
+  onIn = cfg: map (t: t.key) (builtins.filter (t: valueOf cfg t) groups.tools);
+  minimumKeys = map (t: t.key) (builtins.filter (t: t.minimum) groups.tools);
 
   missingOptions = builtins.filter (
     t:
@@ -124,35 +134,26 @@ let
 
   cases = [
     {
-      name = "personal・グループを書かないホストは ② ③ とも true";
-      ok =
-        tiersOf unset == {
-          a = true;
-          p = true;
-        }
-        && tiersOf personal == tiersOf unset;
-    }
-    {
-      name = "company は ② だけ true";
-      ok =
-        tiersOf company == {
-          a = true;
-          p = false;
-        };
-    }
-    {
-      name = "client は ② ③ とも false";
-      ok =
-        tiersOf client == {
-          a = false;
-          p = false;
-        };
+      name =
+        "表の各道具の既定が、環境の組 5 つと 2 つのグループで「グループに入る && 環境の条件 && 効く条件」になる"
+        + lib.optionalString (mismatches != [ ]) " (ずれ: ${lib.concatStringsSep "・" mismatches})";
+      ok = mismatches == [ ];
     }
     {
       name =
-        "表の各道具の既定が、段の 4 通りで「段が全部 on && 段が全部 on のときの値」になる"
-        + lib.optionalString (mismatches != [ ]) " (ずれ: ${lib.concatStringsSep "・" mismatches})";
-      ok = mismatches == [ ];
+        "all を選んだホストは、環境の組 5 つのどれでも評価が止まらない"
+        + lib.optionalString (allStops != [ ]) " (止まる組: ${lib.concatStringsSep "・" allStops})";
+      ok = allStops == [ ];
+    }
+    {
+      name = "minimum で on の道具は minimum に入る道具 (osCaBundle・cleanup) だけ";
+      ok =
+        onIn minimum == minimumKeys
+        &&
+          minimumKeys == [
+            "osCaBundle"
+            "cleanup"
+          ];
     }
     {
       name =
@@ -163,117 +164,69 @@ let
       ok = missingOptions == [ ];
     }
     {
-      name = "グループを書かないホストと group = \"personal\" で、表の全 option の値が同じ";
-      ok = values unset == values personal;
+      name = "グループを書かないホストと group = \"minimum\" で、グループは minimum、表の全 option の値が同じ";
+      ok = unset.dotfiles.group == "minimum" && values unset == values minimum;
     }
     {
-      name = "group.json は version・group・tiers と表の key を全部持つ tools で、改行で終わる";
+      name = "group.json は version 2・group・表の key を全部持つ tools だけで、改行で終わる";
       ok =
         let
-          j = json company;
+          j = json all;
         in
-        j.version == 1
-        && j.group == "company"
-        &&
-          j.tiers == {
-            aiTools = true;
-            personalAccounts = false;
-          }
-        && builtins.attrNames j.tools == lib.sort (a: b: a < b) (map (t: t.key) groups.tools)
-        && lib.hasSuffix "\n" (jsonText company);
-    }
-    {
-      name = "client の group.json では、段のある道具が全部 false";
-      ok = builtins.all (t: t.tiers == [ ] || (json client).tools.${t.key} == false) groups.tools;
-    }
-    {
-      name = "group = \"client\" と claude.enable = true で、段のある道具は claude だけが on";
-      ok = builtins.all (
-        t: t.tiers == [ ] || (json clientClaude).tools.${t.key} == (t.key == "claude")
-      ) groups.tools;
-    }
-    {
-      name = "windowsClaudeAccounts は personal だけ既定で on (UAC の確認が出る手順なので company・client は off)";
-      ok =
-        (json personal).tools.windowsClaudeAccounts
-        && !(json company).tools.windowsClaudeAccounts
-        && !(json client).tools.windowsClaudeAccounts;
-    }
-    {
-      name = "windowsClaudeDesktop は ② と ③ の両方の道具で、personal だけ既定で on (UAC の確認が出る手順なので company・client は off)";
-      ok =
-        let
-          t = builtins.head (builtins.filter (t: t.key == "windowsClaudeDesktop") groups.tools);
-        in
-        t.tiers == [
-          "aiTools"
-          "personalAccounts"
+        builtins.attrNames j == [
+          "group"
+          "tools"
+          "version"
         ]
-        && t.derived
-        && (json unset).tools.windowsClaudeDesktop
-        && (json personal).tools.windowsClaudeDesktop
-        && !(json company).tools.windowsClaudeDesktop
-        && !(json client).tools.windowsClaudeDesktop;
+        && j.version == 2
+        && j.group == "all"
+        && builtins.attrNames j.tools == lib.sort (a: b: a < b) (map (t: t.key) groups.tools)
+        && lib.hasSuffix "\n" (jsonText all);
     }
     {
-      name = "opReasonSshRelay は表にあり、どのグループでも既定で off (入れるホストが書く)";
-      ok = builtins.all (cfg: (json cfg).tools ? opReasonSshRelay && !(json cfg).tools.opReasonSshRelay) [
-        unset
-        personal
-        company
-        client
-      ];
+      name = "group = \"minimum\" と claude.enable = true で、minimum の外の道具は claude だけが on";
+      ok =
+        onIn (cfgOf {
+          group = "minimum";
+          claude.enable = true;
+        }) == minimumKeys ++ [ "claude" ];
     }
     {
-      name = "windowsTypeClipboard は ③ の道具で、既定は段によらず、どのグループでも off (入れるホストが書く)";
+      name = "linger は herdrCore に従う (minimum に herdrCore を足すと on、all で herdrCore を外すと off、linger だけも書ける)";
       ok =
         let
-          t = builtins.head (builtins.filter (t: t.key == "windowsTypeClipboard") groups.tools);
-        in
-        t.tiers == [ "personalAccounts" ]
-        && !t.derived
-        && builtins.all (cfg: !(json cfg).tools.windowsTypeClipboard) [
-          unset
-          personal
-          company
-          client
-        ];
-    }
-    {
-      name = "linger は ② の道具で、既定は herdrCore.enable に従う (herdrCore を false にすると off。linger だけ書くこともできる)";
-      ok =
-        let
-          t = builtins.head (builtins.filter (t: t.key == "linger") groups.tools);
-          noCore = cfgOf { modules = [ { dotfiles.herdrCore.enable = false; } ]; };
-          clientLinger = cfgOf {
-            group = "client";
+          coreOnly = cfgOf {
+            group = "minimum";
+            modules = [ { dotfiles.herdrCore.enable = true; } ];
+          };
+          allNoCore = cfgOf {
+            group = "all";
+            modules = [ { dotfiles.herdrCore.enable = false; } ];
+          };
+          lingerOnly = cfgOf {
+            group = "minimum";
             modules = [ { dotfiles.linger.enable = true; } ];
           };
         in
-        t.tiers == [ "aiTools" ]
-        && t.derived
-        && builtins.all (cfg: (json cfg).tools.linger == (json cfg).tools.herdrCore) [
-          unset
-          personal
-          company
-          client
-        ]
-        && !(json noCore).tools.linger
-        && (json clientLinger).tools.linger
-        && !(json clientLinger).tools.herdrCore;
+        (toolNamed "linger").follows == "herdrCore"
+        && !minimum.dotfiles.linger.enable
+        && coreOnly.dotfiles.linger.enable
+        && !allNoCore.dotfiles.linger.enable
+        && lingerOnly.dotfiles.linger.enable
+        && !lingerOnly.dotfiles.herdrCore.enable;
     }
     {
-      name = "client で devTracker.enable = true だけを書くと評価で止まる";
+      name = "minimum で devTracker.enable = true だけを書くと評価で止まる";
       ok =
         !(evaluates {
-          group = "client";
+          group = "minimum";
           claude.devTracker.enable = true;
         });
     }
     {
-      name = "client でも claude.enable・claude.privateSkills.enable と書けば devTracker.enable = true が通る";
+      name = "minimum でも claude.enable・claude.privateSkills.enable と書けば devTracker.enable = true が通る";
       ok = evaluates {
-        group = "client";
+        group = "minimum";
         claude = {
           enable = true;
           privateSkills.enable = true;
@@ -283,25 +236,57 @@ let
       };
     }
     {
-      name = "herdr.hub.enable は herdr.enable と claude.privateSkills.enable が要る";
+      name = "herdr.hub.enable は herdr.enable と claude.privateSkills.enable が要る (all で herdr だけを外すと止まる)";
       ok =
         !(evaluates {
-          group = "company";
+          group = "minimum";
           modules = [ { dotfiles.herdr.hub.enable = true; } ];
         })
         && evaluates {
-          group = "company";
-          claude.privateSkills.enable = true;
-          modules = [ { dotfiles.herdr.hub.enable = true; } ];
+          group = "minimum";
+          claude = {
+            enable = true;
+            privateSkills.enable = true;
+          };
+          modules = [
+            {
+              dotfiles.herdr.enable = true;
+              dotfiles.herdr.hub.enable = true;
+            }
+          ];
         }
-        # personal (hub の既定は on) で herdr だけを外すと止まる
         && !(evaluates {
+          group = "all";
           modules = [ { dotfiles.herdr.enable = false; } ];
         });
     }
     {
-      name = "知らないグループ (\"customer\") は評価で止まる";
-      ok = !(builtins.tryEval (cfgOf { group = "customer"; }).dotfiles.group).success;
+      name = "ホストが素の値で書いた環境の誤り (WSL でないのに exeExecTrace) は、今までどおり評価で止まる";
+      ok = !(evaluates { wsl.exeExecTrace.enable = true; });
+    }
+    {
+      name = "やめたグループ (personal・company・client)・知らないグループ・やめた段の switch は評価で止まる";
+      ok =
+        builtins.all (g: throwsOn (cfgOf { group = g; }).dotfiles.group) [
+          "personal"
+          "company"
+          "client"
+          "customer"
+        ]
+        && !(evaluates {
+          modules = [ { dotfiles.aiTools.enable = true; } ];
+        })
+        && !(evaluates {
+          modules = [ { dotfiles.personalAccounts.enable = false; } ];
+        });
+    }
+    {
+      name = "runnerTools は全部が表の道具で、表の runner の印と同じ数 (15)";
+      ok =
+        builtins.all (k: builtins.any (t: t.key == k) groups.tools) groups.runnerTools
+        &&
+          builtins.length (builtins.filter (t: t.runner) groups.tools) == builtins.length groups.runnerTools
+        && builtins.length groups.runnerTools == 15;
     }
   ];
 
