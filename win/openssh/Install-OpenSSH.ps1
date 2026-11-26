@@ -408,6 +408,9 @@ function Invoke-InstallOpenSsh {
     $packageId = 'Microsoft.OpenSSH.Preview'
     $installDir = Join-Path $env:ProgramFiles 'OpenSSH'
     $target = [version]$Version
+    # Write-Step が読む。ログのファイルにも書くのは、管理者で起動し直した子 (-LogPath) だけ。本体は StrictMode で走り、代入していない変数を
+    # 読むと例外になるので、どの道でも先に代入する (管理者の窓から直に打つと Invoke-OpenSshFix を直に呼び、その Write-Step で止まっていた)
+    $script:StepLog = $null
 
     if ($LogPath) {
         # 管理者で起動し直された子: 揃える段だけをして、結果を $LogPath に書く

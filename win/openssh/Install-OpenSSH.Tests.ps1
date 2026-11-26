@@ -353,6 +353,85 @@ Test-Case '昇格した側で winget が見つからなければ、winget を打
 Test-Case '揃えるのが ssh-agent だけなら、winget が無くても ssh-agent を止めて成功にする' 'True||stop,set-Disabled|0' { Invoke-FixScenario -Plan 'none' -HaveWinget $false }
 Test-Case 'winget があれば打つ' 'True|install|stop,set-Disabled|0' { Invoke-FixScenario -Plan 'install' -HaveWinget $true }
 
+# Invoke-InstallOpenSsh を管理者の窓から直に打った形 (-LogPath なし・Test-IsAdmin が真) で流す。Write-Step と Invoke-OpenSshFix は本物のまま
+# にし、状態の読み取り・動いている ssh.exe など・winget・サービスの cmdlet・ssh-add・Write-Host を偽物に替える。本体と同じく StrictMode の下で、
+# $script:StepLog を一度も代入していない形 (打った直後の本体) から始める。偽物が使う変数は、本体の関数の中の変数 ($agent など) と名前を分ける
+# (偽物は呼んだ側の変数も見えるので、同じ名前だと本体の変数を拾う)
+function Invoke-AdminDirectScenario {
+    param([string]$Plan, [version]$Installed)
+    $adminSaid = [System.Collections.Generic.List[string]]::new()
+    $adminWinget = [System.Collections.Generic.List[string]]::new()
+    $adminAgent = [System.Collections.Generic.List[string]]::new()
+    # 1 回目は揃える前 (ssh-agent が自動・実行中)、2 回目は揃えた後に読み直した状態
+    $adminStates = [System.Collections.Generic.Queue[object]]::new()
+    $adminStates.Enqueue([pscustomobject]@{
+            Installed = $Installed; Plan = $Plan; AgentStatus = 'Running'; AgentStartType = 'Automatic'
+            AgentDisabled = $false; Pinned = $true; Latest = [version]'10.4.0.0'; Inbox = $false; Server = $false
+        })
+    $adminStates.Enqueue([pscustomobject]@{
+            Installed = [version]'10.4.0.0'; Plan = 'none'; AgentStatus = 'Stopped'; AgentStartType = 'Disabled'
+            AgentDisabled = $true; Pinned = $true; Latest = [version]'10.4.0.0'; Inbox = $false; Server = $false
+        })
+    function Get-Command { param($Name, $ErrorAction) [pscustomobject]@{ Name = 'winget' } }
+    function Get-OpenSshState { param($PackageId, $InstallDir, $Target) $adminStates.Dequeue() }
+    function Get-BusyOpenSshProcess { @() }
+    function Test-IsAdmin { $true }
+    function Invoke-Winget { param([string[]]$Arguments) $adminWinget.Add($Arguments[0]); [pscustomobject]@{ ExitCode = 0; Lines = @() } }
+    function Get-Service { param($Name, $ErrorAction) [pscustomobject]@{ Status = 'Running'; StartType = 'Automatic' } }
+    function Stop-Service { param($Name, [switch]$Force) $adminAgent.Add('stop') }
+    function Set-Service { param($Name, $StartupType) $adminAgent.Add("set-$StartupType") }
+    function Get-AgentKeyCount { param($SshAddExe) 2 }
+    function Write-Host { param($Object, $ForegroundColor) $adminSaid.Add("$Object") }
+    Remove-Variable -Name StepLog -Scope Script -ErrorAction SilentlyContinue
+    $savedPf = $env:ProgramFiles
+    $env:ProgramFiles = Join-Path ([IO.Path]::GetTempPath()) "install-openssh-admin-$PID"
+    try {
+        $code = Invoke-InstallOpenSsh -Version '10.4.0.0'
+    } finally {
+        $env:ProgramFiles = $savedPf
+    }
+    $wingetShown = @($adminSaid | Where-Object { $_.StartsWith("winget $Plan --id $Id ") }).Count
+    $stopShown = @($adminSaid | Where-Object { $_ -eq 'ssh-agent を止めた' }).Count
+    $disableShown = @($adminSaid | Where-Object { $_ -eq 'ssh-agent を無効にした' }).Count
+    "$code|$($adminWinget -join ',')|$($adminAgent -join ',')|$wingetShown|$stopShown|$disableShown"
+}
+Test-Case '管理者の窓から直に打つ (-LogPath なし) と、StepLog を代入していない形からでも、winget と ssh-agent の行を画面に出して揃える' '0|upgrade|stop,set-Disabled|1|1|1' {
+    Invoke-AdminDirectScenario -Plan 'upgrade' -Installed '10.0.0.0'
+}
+Test-Case '管理者の窓から直に打ち、ssh-agent だけ直すときも、止めてから無効にするまで進む' '0||stop,set-Disabled|0|1|1' {
+    Invoke-AdminDirectScenario -Plan 'none' -Installed '10.4.0.0'
+}
+
+# 管理者で起動し直した子 (-LogPath): 揃える段の行を画面とログのファイルの両方に書く (親がログを読んで出す)。Write-Step と Invoke-OpenSshFix は
+# 本物のまま、winget・サービスの cmdlet・Write-Host を偽物に替える。ProgramFiles は一時ディレクトリにする (ssh.exe が無いので入れる)。
+# 終わったら、子の道が代入した $script:StepLog を消す (後ろの試験に残さない)
+function Invoke-ChildLogScenario {
+    $childWinget = [System.Collections.Generic.List[string]]::new()
+    function Get-Command { param($Name, $ErrorAction) [pscustomobject]@{ Name = 'winget' } }
+    function Invoke-Winget { param([string[]]$Arguments) $childWinget.Add($Arguments[0]); [pscustomobject]@{ ExitCode = 0; Lines = @() } }
+    function Get-Service { param($Name, $ErrorAction) [pscustomobject]@{ Status = 'Running'; StartType = 'Automatic' } }
+    function Stop-Service { param($Name, [switch]$Force) }
+    function Set-Service { param($Name, $StartupType) }
+    function Write-Host { param($Object, $ForegroundColor) }
+    $savedPf = $env:ProgramFiles
+    $root = Join-Path ([IO.Path]::GetTempPath()) "install-openssh-child-$PID"
+    $env:ProgramFiles = Join-Path $root 'pf'
+    $log = Join-Path $root 'Install-OpenSSH.log'
+    New-Item -ItemType Directory -Force -Path $root | Out-Null
+    try {
+        $code = Invoke-InstallOpenSsh -Version '10.4.0.0' -LogPath $log
+        $logged = @(Get-Content -LiteralPath $log -Encoding utf8)
+    } finally {
+        Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+        $env:ProgramFiles = $savedPf
+        Remove-Variable -Name StepLog -Scope Script -ErrorAction SilentlyContinue
+    }
+    "$code|$($childWinget -join ',')|$($logged.Count)|$($logged[0].StartsWith("winget install --id $Id "))|$($logged[1])|$($logged[2])"
+}
+Test-Case '管理者で起動し直した子 (-LogPath) は、揃える段の行をログのファイルにも書く (親が読んで出す)' '0|install|3|True|ssh-agent を止めた|ssh-agent を無効にした' {
+    Invoke-ChildLogScenario
+}
+
 # 本体の入口: 思わぬ例外でも、終了コード 2 で止まる (成功に見せない)。
 # Linux の pwsh には $env:ProgramFiles が無く、本体の最初で例外になるのを使う
 # (2026-10-06 の本番で、例外のあと外側の exit $LASTEXITCODE が中の winget の 0 を返し「揃いました」と出た)
