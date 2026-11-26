@@ -47,9 +47,14 @@
 # (雛形の heredoc は変えない。変えると雛形の版の印が変わり、全 PC に移す知らせが出るため。ADR 024)。
 #
 #   initial = dotfiles.lib.mkHome {
-#     username = "<$USER>";  system = "<private-host.sh system>";
-#     wsl = { enable = true; windowsUserName = "<private-host.sh windows-user か --windows-user>"; windowsFiles.enable = true; };
+#     username = "<$USER>";  system = "<private-host.sh system>";  group = "minimum";
+#     wsl = { enable = true; windowsUserName = "<private-host.sh windows-user か --windows-user>"; windowsFiles.enable = true;
+#             windowsFiles.{claudeCode,herdr,claudeAccounts,claudeDesktop,ntn}.enable = true; };
+#     claude = { enable = true; privateSkills.enable = true; };
+#     modules = [ { dotfiles.{herdr,herdr.hub,herdrCore,ccPages,ntn,git.identity}.enable = true; } ];
 #   };
+#
+# 道具は、設定グループの既定が personal (ADR 057) だったときに入っていたものと同じ (minimum に足す。ADR 109)。
 #
 # setup はローカル flake の一番上のホストを既定の対象ホストにするので、initial で当たる。dotfiles-private に登録して merge
 # したら、--force で作り直して外す (initial のほかに手で足した値の無い雛形なので、作り直せば clone の nix/ を読む形になる)。
@@ -270,11 +275,33 @@ initial_block() {
         initial = dotfiles.lib.mkHome {
           username = "${initial_username}";
           system = "${initial_system}";
+          # 設定グループは minimum に、新しい PC の手順で使う道具 (Claude Code 一式・dotfiles の skill の claude-skills・herdr・
+          # Windows の Claude Code と herdr など) を足す
+          group = "minimum";
           wsl = {
             enable = true;
             windowsUserName = "${initial_windows_user}";
             windowsFiles.enable = true;
+            windowsFiles.claudeCode.enable = true;
+            windowsFiles.herdr.enable = true;
+            windowsFiles.claudeAccounts.enable = true;
+            windowsFiles.claudeDesktop.enable = true;
+            windowsFiles.ntn.enable = true;
           };
+          claude = {
+            enable = true;
+            privateSkills.enable = true;
+          };
+          modules = [
+            {
+              dotfiles.herdr.enable = true;
+              dotfiles.herdr.hub.enable = true;
+              dotfiles.herdrCore.enable = true;
+              dotfiles.ccPages.enable = true;
+              dotfiles.ntn.enable = true;
+              dotfiles.git.identity.enable = true;
+            }
+          ];
         };
 EOB
 }

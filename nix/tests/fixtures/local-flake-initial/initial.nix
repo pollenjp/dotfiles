@@ -8,10 +8,32 @@
   initial = dotfiles.lib.mkHome {
     username = "pollenjp";
     system = "x86_64-linux";
+    # 設定グループは minimum に、新しい PC の手順で使う道具 (Claude Code 一式・dotfiles の skill の claude-skills・herdr・
+    # Windows の Claude Code と herdr など) を足す
+    group = "minimum";
     wsl = {
       enable = true;
       windowsUserName = "alice";
       windowsFiles.enable = true;
+      windowsFiles.claudeCode.enable = true;
+      windowsFiles.herdr.enable = true;
+      windowsFiles.claudeAccounts.enable = true;
+      windowsFiles.claudeDesktop.enable = true;
+      windowsFiles.ntn.enable = true;
     };
+    claude = {
+      enable = true;
+      privateSkills.enable = true;
+    };
+    modules = [
+      {
+        dotfiles.herdr.enable = true;
+        dotfiles.herdr.hub.enable = true;
+        dotfiles.herdrCore.enable = true;
+        dotfiles.ccPages.enable = true;
+        dotfiles.ntn.enable = true;
+        dotfiles.git.identity.enable = true;
+      }
+    ];
   };
 }
