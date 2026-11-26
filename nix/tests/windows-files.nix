@@ -8,10 +8,9 @@
 # ## 確かめること
 #
 #   - win/ を配らないマシンでも windows-files.json を置き、enable・typeClipboard・ntn・claudeCode は false、windowsHome は null
-#     (ntn・claudeCode の option は既定の true のままでも、評価は止まらない)
-#   - win/ を配るマシンは windowsHome (/mnt/c/Users/<名前>) を持ち、type-clipboard は既定で入れない (typeClipboard は false)。
-#     ntn と Claude Code は既定で入れる (ntn・claudeCode は true)
-#   - windowsFiles.ntn.enable = false なら ntn だけが false、windowsFiles.claudeCode.enable = false なら claudeCode だけが false
+#   - win/ を配るマシンは windowsHome (/mnt/c/Users/<名前>) を持つ。minimum では type-clipboard・ntn・Claude Code を既定で入れず
+#     (typeClipboard・ntn・claudeCode は false)、all なら入れる (どれも true)
+#   - all で windowsFiles.ntn.enable = false なら ntn だけが false、windowsFiles.claudeCode.enable = false なら claudeCode だけが false
 #   - windowsFiles.typeClipboard.enable = true なら typeClipboard が true になる (bootstrap-windows-type-clipboard.sh が入れる)
 #   - windowsFiles.enable = false のマシンで typeClipboard.enable = true にすると、評価で止まる (配らないと
 #     Install-TypeClipboard.ps1 が届かない)
@@ -27,11 +26,13 @@
 }:
 
 let
-  configWith =
-    wsl:
+  configWith = configIn "minimum";
+  # グループを選んだホスト (Windows の道具の既定はグループで決まる。all なら win/ を配るマシンで on)
+  configIn =
+    group: wsl:
     (mkHome {
       username = "tester";
-      inherit system wsl;
+      inherit system group wsl;
     }).config;
 
   stateOf = cfg: builtins.fromJSON cfg.home.file.".local/state/dotfiles/windows-files.json".text;
@@ -86,7 +87,12 @@ let
     windowsUserName = "alice";
     windowsFiles.enable = true;
   };
-  noNtn = configWith {
+  filesAll = configIn "all" {
+    enable = true;
+    windowsUserName = "alice";
+    windowsFiles.enable = true;
+  };
+  noNtn = configIn "all" {
     enable = true;
     windowsUserName = "alice";
     windowsFiles = {
@@ -94,7 +100,7 @@ let
       ntn.enable = false;
     };
   };
-  noClaudeCode = configWith {
+  noClaudeCode = configIn "all" {
     enable = true;
     windowsUserName = "alice";
     windowsFiles = {
@@ -134,27 +140,36 @@ let
         };
     }
     {
-      name = "win/ を配るマシンは windowsHome を持ち、type-clipboard は既定で入れず、ntn と Claude Code は既定で入れる";
+      name = "win/ を配るマシンは windowsHome を持ち、minimum では type-clipboard・ntn・Claude Code を既定で入れない (all なら入れる)";
       ok =
         stateOf files == {
-          claudeCode = true;
+          claudeCode = false;
           enable = true;
-          ntn = true;
+          ntn = false;
           typeClipboard = false;
           version = 1;
           windowsHome = "/mnt/c/Users/alice";
         }
-        && !files.dotfiles.wsl.windowsFiles.typeClipboard.enable;
+        && !files.dotfiles.wsl.windowsFiles.typeClipboard.enable
+        &&
+          stateOf filesAll == {
+            claudeCode = true;
+            enable = true;
+            ntn = true;
+            typeClipboard = true;
+            version = 1;
+            windowsHome = "/mnt/c/Users/alice";
+          };
     }
     {
-      name = "windowsFiles.ntn.enable = false なら ntn だけが false";
+      name = "all で windowsFiles.ntn.enable = false なら ntn だけが false";
       ok =
         (stateOf noNtn).ntn == false
         && (stateOf noNtn).claudeCode == true
         && (stateOf noNtn).enable == true;
     }
     {
-      name = "windowsFiles.claudeCode.enable = false なら claudeCode だけが false";
+      name = "all で windowsFiles.claudeCode.enable = false なら claudeCode だけが false";
       ok =
         (stateOf noClaudeCode).claudeCode == false
         && (stateOf noClaudeCode).ntn == true

@@ -4,9 +4,10 @@
 mkHome {
   username = "grace";
   system = "x86_64-linux";
-  group = "company";
+  group = "minimum";
   claude = {
     devTracker.enable = true;
+    enable = true;
     notion.profile = "work";
     privateSkills.enable = true;
   };

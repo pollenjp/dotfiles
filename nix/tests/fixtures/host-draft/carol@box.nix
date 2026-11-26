@@ -8,7 +8,9 @@ mkHome {
   onePassword.enable = true;
   claude = {
     devTracker.enable = true;
+    enable = true;
     notion.profile = "work";
+    privateSkills.enable = true;
   };
   modules = [
     {

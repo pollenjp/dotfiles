@@ -11,13 +11,13 @@
 #
 #   - releases.json の形: app と core の版は X.Y.Z、generation は 1 以上の整数、sha256 は app の windows-x86_64 と、core の
 #     linux-aarch64・linux-x86_64・windows-x86_64 の 4 つで、どれも 64 桁の小文字の hex (Install-HerdrApp.ps1 と CI も読む)
-#   - Linux では既定で入る: home.packages に releases.json の core の版の herdr-core があり、~/.local/bin/herdr-core と hc が
+#   - グループ all の Linux では既定で入る: home.packages に releases.json の core の版の herdr-core があり、~/.local/bin/herdr-core と hc が
 #     その bin/herdr-core へのリンクで、前からあるファイルを置き換える (force)。リンクを張る前 (writeBoundary の後・linkGeneration
 #     の前) に、前に写したふつうのファイルを消す activation がある (中身が同じだと home-manager は置き換えないため)
 #   - Linux の package は、その system の公式の版つき URL (core/<版>/herdr-core-linux-<arch>.tar.gz) を、releases.json の
 #     sha256 で落とす
 #   - enable = false なら、package もリンクも置かない
-#   - macOS では既定で入らない。enable = true にすると assertion で評価が止まる (公式の Linux 版しか入れない)。module の
+#   - macOS では all でも既定で入らない (環境の条件)。enable = true にすると assertion で評価が止まる (公式の Linux 版しか入れない)。module の
 #     assertion は Linux でだけ通り、message は Linux のホストだけと言う
 {
   lib,
@@ -35,6 +35,8 @@ let
     (mkHome {
       username = "tester";
       inherit system modules;
+      # グループ all のホスト (herdr-core は all の道具で、Linux でだけ既定で入る)
+      group = "all";
     }).config;
 
   herdrCores = cfg: builtins.filter (p: (p.pname or "") == "herdr-core") cfg.home.packages;

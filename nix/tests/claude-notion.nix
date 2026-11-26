@@ -24,7 +24,13 @@ let
     claude:
     (mkHome {
       username = "tester";
-      inherit system claude;
+      inherit system;
+      # Claude Code 一式と claude-skills (Dev Tracker に要る) は minimum に入らない (使うホストが足す) ので、作り物のホストで足す
+      claude = {
+        enable = true;
+        privateSkills.enable = true;
+      }
+      // claude;
     }).config;
 
   stateOf = cfg: builtins.fromJSON cfg.home.file.".local/state/dotfiles/claude-notion.json".text;

@@ -25,6 +25,9 @@ let
     (mkHome {
       username = "tester";
       inherit system;
+      # Claude Code 一式と herdr は minimum に入らない (使うホストが足す) ので、作り物のホストで足す
+      claude.enable = true;
+      modules = [ { dotfiles.herdr.enable = true; } ];
     }).config;
 
   file = cfg.home.file.".claude/skills/herdr" or null;

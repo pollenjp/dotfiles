@@ -24,7 +24,9 @@ let
     modules:
     (mkHome {
       username = "tester";
-      inherit system modules;
+      inherit system;
+      # cc-pages は minimum に入らない (使うホストが足す) ので、作り物のホストで足す
+      modules = [ { dotfiles.ccPages.enable = true; } ] ++ modules;
     }).config;
   withPort = port: configWith [ { dotfiles.ccPages.port = port; } ];
 

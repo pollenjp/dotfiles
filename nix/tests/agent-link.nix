@@ -35,6 +35,8 @@ let
     (mkHome {
       username = "tester";
       inherit system;
+      # herdr は minimum に入らない (使うホストが足す) ので、作り物のホストで足す
+      modules = [ { dotfiles.herdr.enable = true; } ];
     }).config;
 
   isLinux = pkgs.stdenv.hostPlatform.isLinux;
