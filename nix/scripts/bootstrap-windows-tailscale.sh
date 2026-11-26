@@ -11,13 +11,13 @@
 # ^ setup.sh が読む実行順と、設定グループで飛ばす道具。bootstrap-windows-files.sh (order: 90) が Install-Tailscale.ps1 を
 #   置いた後、衝突で exit 1 しうる bootstrap-windows-google-ime.sh (98) より前に走らせる。machine スコープで UAC の出る
 #   bootstrap-windows-openssh.sh と同じ 96 で、同じ値は辞書順なのでこちらが後 (どちらも相手を使わない)。Tailscale を入れない
-#   ホスト (tools.windowsTailscale が false。どのグループでも既定) では setup が流さない。仕組みは nix/README.md「bootstrap の実行順」。
+#   ホスト (tools.windowsTailscale が false。minimum の既定) では setup が流さない。仕組みは nix/README.md「bootstrap の実行順」。
 #
 # ## 何のために
 #
 # Windows の Tailscale は winget の Tailscale.Tailscale (MSI) で入れ、版は win/tailscale/Install-Tailscale.ps1 の -Version の
 # 既定値で固定する (win/README.md の「Tailscale を入れる」)。VPN の道具で、会社の PC などには勝手に入れないよう、道具の switch
-# (dotfiles.wsl.windowsFiles.tailscale.enable) はどのグループでも既定で off にしてある。入れるのは新しいマシンの最初だけで、
+# (dotfiles.wsl.windowsFiles.tailscale.enable) は minimum では既定で off (all の win/ を配るマシンでは on)。入れるのは新しいマシンの最初だけで、
 # その後は Tailscale が自分で上がる (自動更新) ので、入っている版の方が新しくても下げず、揃っている扱いにする。
 # tailnet へのログイン (tailscale up・GUI のログイン) には触らない。
 #
@@ -125,14 +125,14 @@ if [[ $(jq -r '.enable' "${state_file}") != true ]]; then
   echo "このマシンは Windows 側へ配りません (dotfiles.wsl.windowsFiles.enable = false)。"
   exit 0
 fi
-# Tailscale を入れるマシンか (home/modules/group.nix が書く)。どのグループでも既定は off なので、ファイルや欄が無い (道具を足す前の
+# Tailscale を入れるマシンか (home/modules/group.nix が書く)。前はどのグループでも既定が off だったので、ファイルや欄が無い (道具を足す前の
 # 世代)・壊れているときも入れないマシンとして扱う
 windows_tailscale=false
 if [[ -r ${group_file} ]]; then
   windows_tailscale=$(jq -r '.tools.windowsTailscale // false' "${group_file}" 2>/dev/null) || windows_tailscale=false
 fi
 if [[ ${windows_tailscale} != true ]]; then
-  echo "このマシンには Windows の Tailscale を入れません (dotfiles.wsl.windowsFiles.tailscale.enable = false。どのグループでも既定は off)。"
+  echo "このマシンには Windows の Tailscale を入れません (dotfiles.wsl.windowsFiles.tailscale.enable が false。minimum では既定で off)。"
   exit 0
 fi
 windows_home=$(jq -r '.windowsHome // ""' "${state_file}")

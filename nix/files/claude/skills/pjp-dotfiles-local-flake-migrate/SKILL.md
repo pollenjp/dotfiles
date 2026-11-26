@@ -125,6 +125,10 @@ dotfiles の ADR 109 で、設定グループは道具の集合 (`minimum`・`al
   入る道具が前と同じかをユーザーと確かめる
 - `group = "personal"`・`"company"`・`"client"` を書いた `tmp` は、評価が止まる (案内が出る)。同じく `group = "minimum";` と道具の行に
   書き直す
+- 前の版の `setup-local-flake.sh --initial` が書いた `initial` (グループを書いていない。登録の途中の PC) も `minimum` に縮む。initial の
+  ほかに手で足した値の無い雛形なので、値を移さずに `~/dotfiles/setup-local-flake.sh --force --initial` で今の `initial` に作り直す
+- 縮んだ後は、この skill (`~/.claude/skills/`) も世代から外れていることがある。そのときは本体の
+  `nix/files/claude/skills/pjp-dotfiles-local-flake-migrate/SKILL.md` を読んで進める
 
 ## 衝突の解き方
 

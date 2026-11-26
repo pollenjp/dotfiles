@@ -392,7 +392,7 @@ impl Step for GitConfig {
             id: "git-config",
             order: 50,
             title: "git の設定 (~/.config/git/config・ignore) を、WSL の home-manager と同じ git.toml から置く (署名と delta は除く)",
-            // Linux の git.nix (① エンジニアの道具) と同じくどのホストにも置く。名前とメールだけ gitIdentity で切り替える
+            // Linux の git.nix (minimum の基本の道具) と同じくどのホストにも置く。名前とメールだけ gitIdentity で切り替える
             gate: Gate::Always,
             ported: true,
             windows_only: true,

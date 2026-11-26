@@ -45,12 +45,12 @@ hint = "PowerShell で Install-Herdr -Check を打つと、固定した版との
 [[files]]
 src = "ntn/Install-Ntn.ps1"
 dst = "%USERPROFILE%/.config/powershell/Install-Ntn.ps1"
-hint = "PowerShell で Install-Ntn -Check を打つと、固定した版との差が分かる (setup --update が入れて揃えるのは dotfiles.wsl.windowsFiles.ntn.enable = true (既定) のマシン。ntn.exe が動いていれば揃えずに知らせる)"
+hint = "PowerShell で Install-Ntn -Check を打つと、固定した版との差が分かる (setup --update が入れて揃えるのは dotfiles.wsl.windowsFiles.ntn.enable = true のマシン (既定はグループで決まり、all の win/ を配るマシンで on)。ntn.exe が動いていれば揃えずに知らせる)"
 
 [[files]]
 src = "claude-code/Install-ClaudeCode.ps1"
 dst = "%USERPROFILE%/.config/powershell/Install-ClaudeCode.ps1"
-hint = "PowerShell で Install-ClaudeCode -Check を打つと、固定した版との差が分かる (setup --update が入れて揃えるのは dotfiles.wsl.windowsFiles.claudeCode.enable = true (既定) のマシン。Windows の Claude Code が動いていれば揃えずに知らせる)"
+hint = "PowerShell で Install-ClaudeCode -Check を打つと、固定した版との差が分かる (setup --update が入れて揃えるのは dotfiles.wsl.windowsFiles.claudeCode.enable = true のマシン (既定はグループで決まり、all の win/ を配るマシンで on)。Windows の Claude Code が動いていれば揃えずに知らせる)"
 
 [[files]]
 src = "herdr-app/Install-HerdrApp.ps1"
@@ -118,7 +118,7 @@ hint = "PowerShell で Install-T3Code -Check を打つと、固定した版と�
 [[files]]
 src = "claude-desktop/Install-ClaudeDesktop.ps1"
 dst = "%USERPROFILE%/.config/powershell/Install-ClaudeDesktop.ps1"
-hint = "PowerShell で Install-ClaudeDesktop -Check を打つと、固定した版との差が分かる (runner の dotfiles apply が入れるのはホストの値の [tools] windowsClaudeDesktop が on のマシン (既定は personal) だけで、入っていないときだけ MSIX を入れる (UAC の確認が 1 回出る)。入っていれば上げない。サインインは手でする)"
+hint = "PowerShell で Install-ClaudeDesktop -Check を打つと、固定した版との差が分かる (runner の dotfiles apply が入れるのはホストの値の [tools] windowsClaudeDesktop が on のマシン (既定はグループで決まり、all で on) だけで、入っていないときだけ MSIX を入れる (UAC の確認が 1 回出る)。入っていれば上げない。サインインは手でする)"
 
 [[files]]
 src = "ghq/Install-Ghq.ps1"

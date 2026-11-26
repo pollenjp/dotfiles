@@ -21,7 +21,7 @@
 # 足して入れ、鍵だけ・AllowUsers と Match Address で tailnet と localhost に限る sshd_config と、Windows Firewall の拒否の規則 (tailnet からは 22 番
 # だけ、22 番には tailnet と localhost からだけ) と、鍵 (administrators_authorized_keys) と、自動の起動を揃える
 # (win/README.md の「sshd」、dotfiles-private の ADR 078)。PC に外から入る口を開けるので、道具の switch
-# (dotfiles.wsl.windowsFiles.sshd.enable) はどのグループでも既定で off にしてある。
+# (dotfiles.wsl.windowsFiles.sshd.enable) は minimum では既定で off (all の win/ を配るマシンでは on)。
 #
 # ## 何をするか
 #
@@ -134,14 +134,14 @@ if [[ $(jq -r '.enable' "${state_file}") != true ]]; then
   echo "このマシンは Windows 側へ配りません (dotfiles.wsl.windowsFiles.enable = false)。"
   exit 0
 fi
-# sshd を入れるマシンか (home/modules/group.nix が書く)。どのグループでも既定は off なので、ファイルや欄が無い (道具を足す前の
+# sshd を入れるマシンか (home/modules/group.nix が書く)。前はどのグループでも既定が off だったので、ファイルや欄が無い (道具を足す前の
 # 世代)・壊れているときも入れないマシンとして扱う
 windows_sshd=false
 if [[ -r ${group_file} ]]; then
   windows_sshd=$(jq -r '.tools.windowsSshd // false' "${group_file}" 2>/dev/null) || windows_sshd=false
 fi
 if [[ ${windows_sshd} != true ]]; then
-  echo "このマシンには Windows の sshd を入れません (dotfiles.wsl.windowsFiles.sshd.enable = false。どのグループでも既定は off)。"
+  echo "このマシンには Windows の sshd を入れません (dotfiles.wsl.windowsFiles.sshd.enable が false。minimum では既定で off)。"
   exit 0
 fi
 windows_home=$(jq -r '.windowsHome // ""' "${state_file}")

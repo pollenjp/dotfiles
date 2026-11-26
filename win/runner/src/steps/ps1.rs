@@ -764,7 +764,7 @@ pub const SPECS: &[Ps1Spec] = &[
         ],
     },
     // ghq と fzf (Windows にしか無い手順。WSL の setup には無い。dotfiles.ps1 の cdrepo が使う。dotfiles-private の
-    // docs/adr/092_win_cdrepo_ghq_fzf_*)。どちらも ① エンジニアの道具の CLI で、Linux はどのグループでも入れるので、いつも on。ntn と同じく
+    // docs/adr/092_win_cdrepo_ghq_fzf_*)。どちらも minimum の基本の道具の CLI で、Linux はどのグループでも入れるので、いつも on。ntn と同じく
     // 常駐も UAC も無いので、版のずれも揃える (Policy::Sync)
     Ps1Spec {
         id: "ghq",
@@ -843,7 +843,7 @@ pub const SPECS: &[Ps1Spec] = &[
         notices: &[],
         alerts: &[],
     },
-    // starship (プロンプト。Windows にしか無い手順。WSL の setup には無い。$PROFILE の init の 1 行は手順 starship-init が足す)。① エンジニアの
+    // starship (プロンプト。Windows にしか無い手順。WSL の setup には無い。$PROFILE の init の 1 行は手順 starship-init が足す)。minimum の基本の
     // 道具で、Linux はどのグループでも home-manager が入れるので、いつも on。fzf と同じく winget の既定の installer (machine スコープの MSI) を
     // 避けて portable を入れ、版のずれも揃える (Policy::Sync)。MSI の starship が入っていれば、ps1 は portable を入れずに 1 を返し、締めの行は
     // 「→ ※ の手順で直す」だけになる。その行の印で外し方を出す

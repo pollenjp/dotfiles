@@ -4,7 +4,7 @@
 //! (`[tools]`。`group.json` の `tools` と同じ名前)・受け持ちの印 (`[runner] enable`)・op-reason の SSH の中継のモード (`[opReason]`)・
 //! sshd に入れる公開鍵 (`[sshd] authorizedKeys`。Nix の `wsl.windowsFiles.sshd.authorizedKeys` と同じ意味)・sshd の AllowUsers のユーザーと
 //! 入ってよい送り元 (`[sshd] allowUsers`・`allowFrom`。Nix には無い)・
-//! T3 Code の Claude に `CLAUDE_CODE_ENTRYPOINT=""` を渡すか (`[t3Code]`)・Notion へ書く skill の宛先 (`[claude.notion]`。Nix の `dotfiles.claude.notion` と同じ名前と形) だけ。書いていない道具の既定は、Nix がグループごとの素のホストから書き出した `groups.json`
+//! T3 Code の Claude に `CLAUDE_CODE_ENTRYPOINT=""` を渡すか (`[t3Code]`)・Notion へ書く skill の宛先 (`[claude.notion]`。Nix の `dotfiles.claude.notion` と同じ名前と形) だけ。書いていない道具の既定は、Nix が表 (`nix/lib/groups.nix`) から書き出した `groups.json`
 //! (`nix eval --raw ./nix#lib.windowsGroupsJson`) から引く (dotfiles-private の docs/adr/058_win_runner_bootstrap_* §2 H・
 //! docs/adr/064_win_w02_claude_skills_hub_*)。設定グループは道具の集合で、minimum (既定) と all の 2 つ (docs/adr/109_host_groups_minimum_all_*)。
 //! 前のグループの名前 (personal・company・client。ADR 057) は、書き直し方を案内して止める。
@@ -789,7 +789,7 @@ mod tests {
     //! - group を書かなければ minimum、上書きはグループの既定より先に効く、runner.enable の既定は false
     //! - 前のグループの名前 (personal・company・client) は、書き直し方 (group = "minimum" と [tools]) を案内して止まる
     //! - 知らないキー・グループ・道具と、bool でない値は誤り。ファイルが無いのは誤りでなく「無い」
-    //! - op-reason の SSH の中継 (道具の switch opReasonSshRelay。どのグループでも既定は off) は、on なら [opReason] sshRelayMode のモード
+    //! - op-reason の SSH の中継 (道具の switch opReasonSshRelay。minimum では既定で off、all では on) は、on なら [opReason] sshRelayMode のモード
     //!   (書かなければ per-call)、off か 1Password (onePassword) が off なら無し。sshRelayMode の知らない値・[opReason] の知らないキーは誤り
     //! - sshd の公開鍵 ([sshd] authorizedKeys) は、書かなければ None (null)、[] は鍵 0 本、list はその行のまま。改行を含む値・
     //!   authorized_keys の行として読めない値 (鍵の種類か base64 が無い・# で始まる)・文字列でない値・[sshd] の知らないキーは誤り

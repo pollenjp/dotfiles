@@ -44,7 +44,7 @@ let
     {
       name = "all";
       label = "全部";
-      description = "道具を全部入れる (minimum の全部と、ほかの道具の switch の全部)。環境が合わない道具 (WSL だけ・win/ を配るマシンだけ・Linux だけなど) は、そのマシンでは入らない";
+      description = "道具を全部入れる (minimum の全部と、ほかの道具の switch の全部)。環境が合わない道具 (WSL だけ・win/ を配るマシンだけ・Linux だけなど) は、そのマシンでは入らない。道具の前提 (1Password の署名の鍵・Windows の側の SSH の中継・Notion の宛先など) もそろう PC で選ぶ (README の「設定グループ」)";
     }
   ];
 
@@ -80,7 +80,7 @@ let
     };
     windowsUser = {
       label = "Windows のユーザー名がある (WSL)";
-      doc = "WSL なら `wsl.windowsUserName` (WSL でなければいつも)";
+      doc = "WSL なら `wsl.onePassword.windowsUserName` (既定は `wsl.windowsUserName`) が null でない (WSL でなければいつも)";
       off = "Windows のユーザー名が無い";
     };
   };

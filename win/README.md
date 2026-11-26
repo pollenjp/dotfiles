@@ -4312,6 +4312,7 @@ Linux の `nix/pkgs/t3-code` の `version` の 2 か所で、同じ版にする�
   ```toml
   [tools]
   windowsT3Code = true
+  windowsClaudeCode = true      # T3 Code の会話だけの Claude の設定を置く手順 claude-t3 の switch (minimum では既定で off)
 
   [t3Code]
   clearClaudeEntrypoint = true   # クレジットを使う間だけ (下の「CLAUDE_CODE_ENTRYPOINT」)

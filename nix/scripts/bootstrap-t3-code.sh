@@ -7,7 +7,7 @@
 # tool: t3Code (dotfiles.t3Code.enable)
 # order: 70
 #
-# ^ setup.sh が読む道具の名前と実行順。t3Code が off のホスト (どのグループでも既定) では、setup はこの手順を飛ばす。claude のアカウント
+# ^ setup.sh が読む道具の名前と実行順。t3Code が off のホスト (minimum の既定) では、setup はこの手順を飛ばす。claude のアカウント
 #   t3 (~/.claude-t3) を用意する bootstrap-claude-accounts.sh (order: 60) より後。
 #
 # ## 何を読むか

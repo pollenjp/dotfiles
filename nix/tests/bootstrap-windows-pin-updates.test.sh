@@ -17,7 +17,7 @@
 #     true なら確かめる (group.json が無い前の世代も確かめる)
 #   - --candidates と --list --json は group.json を見ず、tools.windowsHerdr が false のマシンでも herdr・herdr-app・herdr-core を出す
 #   - tailscale は group.json の tools.windowsTailscale が true のマシンでだけ確かめる (false・欄の無い前の世代・group.json が無い
-#     ときは確かめない。どのグループでも既定は off)。--candidates と --list --json はいつも出す
+#     ときは確かめない。前の世代は false と読む)。--candidates と --list --json はいつも出す
 #   - bootstrap の 4 つ (git・gh・vs-buildtools・rustup。win/bootstrap/Install-Bootstrap.ps1) と、Windows の runner が入れる ghq・fzf・starship は、
 #     setup の手順では Windows の ghq に dotfiles の clone がある (<windowsHome>/ghq/github.com/pollenjp/dotfiles/.git がある) マシンでだけ
 #     確かめる。--candidates と --list --json はいつも出す
@@ -371,7 +371,7 @@ else
 fi
 
 # 4h. tailscale は group.json の tools.windowsTailscale が true のマシンでだけ確かめる。false・欄が無い (前の世代)・group.json が
-#     無いときは確かめない (どのグループでも既定は off。入れていない道具の版を知らせない)。ほかの名前は今までどおり確かめる
+#     無いときは確かめない (前の世代は false と読む。入れていない道具の版を知らせない)。ほかの名前は今までどおり確かめる
 d=$(new_case t4ts-on "${state_on}")
 printf '%s\n' '{"group":"all","tools":{"windowsHerdr":true,"windowsTailscale":true},"version":2}' \
   >"${d}/home/.local/state/dotfiles/group.json"

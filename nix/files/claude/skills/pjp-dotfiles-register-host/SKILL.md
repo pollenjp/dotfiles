@@ -220,7 +220,7 @@ ntn・git の名前とメール・Windows の Claude Code・herdr・ntn・claude
 
 `nix/hosts/<名前>.nix` (と README)・出し直した要約 (`docs/hosts/` の md と HTML 版)・hostmap を commit して PR を出す。merge は
 ユーザー。PR の本文に元にしたホストと compare の結果 (drvPath が同じ。「同じ (shared/ の値だけ違う)」なら、そう書いて shared/ が足す値を
-並べる) を書く。グループや道具の switch を変えた (group を書いた・③ の道具を足した、など) なら、要約の何が変わったかも書く。
+並べる) を書く。グループや道具の switch を変えた (group を書いた・道具の行を足した、など) なら、要約の何が変わったかも書く。
 
 ### 6. merge のあと (その PC)
 
@@ -329,9 +329,10 @@ pjp-dotfiles-local-flake-migrate の「確認の形」に、次を足す。
 | 要約の md・HTML 版を手で直す | 生成物 (md の末尾に断りがある)。ホストのファイルか本体を直して `summaries` で出し直す (md の「📝 Notion で開く」の行だけは Notion に写す道具が書く) |
 | 前の置き場 (`nix/hosts/<名前>.md`・`nix/hosts/README.md`) に要約を出す・残す | 要約は `docs/hosts/` に移した (ADR 093。dotfiles-private の main では消してある)。移す前に切った branch に残っていたら消し、新しい本体で `summaries` を流し直す (`nix/hosts/README.md` は `docs/hosts/` への案内だけの手書きのファイル) |
 | 古い本体 (その PC の checkout) で `summaries` を流す | 新しい本体が書いた要約を古い形に戻す。dotfiles の origin/main を写した本体を `--nix-dir` に渡す |
-| 自社のグループにして、使っていた ③ の道具 (Dev Tracker・1Password・ntn など) を足し忘れる | グループを変えると ③ の既定が off になる。今使っているものを 1 つずつ聞いて足し、要約で on/off を確かめる (Dev Tracker を足して claude-skills を足し忘れると、評価で止まる) |
+| `minimum` にして、使っていた道具 (Claude Code・Dev Tracker・1Password・ntn など) を足し忘れる | `minimum` では基本の道具のほかは既定で off。今使っているものを 1 つずつ聞いて足し、要約で on/off を確かめる (Dev Tracker を足して claude-skills を足し忘れると、評価で止まる) |
 | 登録したのに `tmp` を残す | `tmp` が登録したホストより先に選ばれる (ローカル flake のホストが先)。外す |
 | 登録したのに `initial` を残す | `tmp` と同じく、登録したホストより先に選ばれる (setup が外し方を出す)。`setup-local-flake.sh --force` で作り直して外す |
+| 前の版の `--initial` が書いた `initial` (グループを書いていない) を元にする | 本体を新しくすると `minimum` に縮んでいて、Claude Code まわりが入っていない。登録の前に `setup-local-flake.sh --force --initial` で今の `initial` に作り直してから元にする |
 | 型を元にした下書きをそのまま登録する | 型には PC の値が無い (WSL・署名・Dev Tracker など)。要る値を聞いて足す |
 | 段階 3 で消えたホストを、今の本体で draft・compare する | 評価できない (3)。消す前の本体を写して `--nix-dir` に渡す (「前提」) |
 | 値を書き足した flake を `setup-local-flake.sh --force` で作り直す | 値と足したホストが消える (退避も無い)。値があれば local-flake-migrate.sh で移す |

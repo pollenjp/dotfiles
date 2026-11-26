@@ -11,7 +11,7 @@
 | グループ | 使う PC と何を入れるか | 入る道具の switch |
 | --- | --- | --- |
 | `minimum` | どの PC にも初めからあってほしいもの (基本の道具と、証明書の束・掃除)。ほとんどのホストはこれにして、使う道具をホストのファイルで足す (グループを書かないホストもこれ) | 2 / 28 |
-| `all` | 道具を全部入れる (minimum の全部と、ほかの道具の switch の全部)。環境が合わない道具 (WSL だけ・win/ を配るマシンだけ・Linux だけなど) は、そのマシンでは入らない | 28 / 28 |
+| `all` | 道具を全部入れる (minimum の全部と、ほかの道具の switch の全部)。環境が合わない道具 (WSL だけ・win/ を配るマシンだけ・Linux だけなど) は、そのマシンでは入らない。道具の前提 (1Password の署名の鍵・Windows の側の SSH の中継・Notion の宛先など) もそろう PC で選ぶ (README の「設定グループ」) | 28 / 28 |
 
 `minimum` ⊂ `all`。グループを書かないホストは `minimum`。
 
@@ -56,7 +56,7 @@ on の道具は、そのグループのホストで既定で on になる。た�
 | Windows の Claude Desktop (MSIX) | `wsl.windowsFiles.claudeDesktop.enable` | off | on | `wsl.windowsFiles.enable` |
 | Notion Dev Tracker | `claude.devTracker.enable` | off | on |  |
 | Dev Tracker の見回り役 | `claude.devTracker.inbox.enable` | off | on | Linux (macOS でない) |
-| 1Password | `onePassword.enable` | off | on | WSL なら `wsl.windowsUserName` (WSL でなければいつも) |
+| 1Password | `onePassword.enable` | off | on | WSL なら `wsl.onePassword.windowsUserName` (既定は `wsl.windowsUserName`) が null でない (WSL でなければいつも) |
 | op-reason の SSH の中継 | `opReason.sshRelay.enable` | off | on | `wsl.enable`・`wsl.windowsFiles.enable` が false・`onePassword.enable` |
 | ntn (Notion の CLI) | `ntn.enable` | off | on |  |
 | Windows の ntn | `wsl.windowsFiles.ntn.enable` | off | on | `wsl.windowsFiles.enable` |
