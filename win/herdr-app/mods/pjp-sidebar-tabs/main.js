@@ -16,7 +16,7 @@
 //   書き直し) で替わっても、描き直しで追いつく。agents() も同じ (agent の状態が変わると描き直る)。なので timer は回さない
 // - 押すと layout.select {stack, child}。選んだ子は herdr-app が clicks (layouts\.state\) に残し、再起動をまたぐ。layout のファイルの active
 //   (runner が書く spaces) が前と変わらない限り、ファイルを書き直しても clicks の選んだ子が残る
-// - キーでも替わる: dotfiles の keys.json の section layout:pjp-main が、Ctrl+Shift+← / → に同じ layout.select (child は spaces / agents) を
+// - キーでも替わる: dotfiles の keys.json の section layout:pjp-main が、Ctrl+Alt+← / → に同じ layout.select (child は spaces / agents) を
 //   当てる (runner の herdr-app-keys が書き足す)。この mod は命令を受けず、layout の描き直しで追いつく
 // - herdr-app は出ていない slot の copy を描かない (一度も出していなければ起こしもしない)。同梱の agents は描くときにだけ setAgentOrder を呼んで
 //   agent.next・agent.prev が辿る順 (一覧の順) を渡すので、agents の子を隠している間は順が届かず、space・tab の順に落ちる (prefix の小窓の
