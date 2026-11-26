@@ -1038,7 +1038,7 @@ Windows の新しい PC の WSL には、初めは SSH 鍵 (1Password) も gh �
 [ADR 045](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/045_wsl_initial_host_20261108T121659JST/README.md))。
 
 前提: Windows に PowerShell 7 (入れ方は問わない。7.6 より古くないもの。例: `winget install --id Microsoft.PowerShell --exact --source winget`
-で MSIX が入る) と WSL を入れてある。
+で MSIX が入る。普段のアカウントが管理者でない PC は MSI で入れる: [`win/README.md`](../win/README.md#powershell-7-の-msix-の限り)) と WSL を入れてある。
 
 ```sh
 # 1. SSH 鍵も gh のログインも無いうちに

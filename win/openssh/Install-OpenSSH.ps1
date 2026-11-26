@@ -16,7 +16,10 @@ sshd (MSI の Server の機能) は入れない (ADDLOCAL=Client)。ただし In
 Client だけで上げると sshd が消える)。上げ直した MSI は 22 番の受信の許可を有効に戻すので、続けて Install-Sshd で揃える。
 
 管理者が要るのは winget と ssh-agent を直す段だけで、そのときだけ UAC で自分を
-起動し直す。-Check は何も変えない。
+起動し直す。-Check は何も変えない。起動し直す host は今の pwsh だが、今の pwsh が MSIX (WindowsApps の下) なら MSI の pwsh を使い、MSI の
+pwsh も無く普段のアカウントが管理者でなければ、UAC を出さずに止める (管理者でない PC は UAC で別の管理者のアカウントに昇格し、その側では
+使う人ごとに登録される MSIX の pwsh を起こせない。bootstrap を流し直すと MSI が入る)。昇格した側で winget が見つからない (そのアカウントに
+App Installer が登録されていない) ときは、わけと登録の手を書いて止まる (登録はしない)。
 
 BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無い UTF-8 を CP932 として読む)。
 
@@ -184,6 +187,52 @@ function Get-OpenSshIfMissingMessage {
     '入れられなかった。上の出力を確かめ、Install-OpenSSH -IfMissing を打ち直す (UAC で「いいえ」を押したなら、打ち直して「はい」を押す)'
 }
 
+# トークンのグループの SID (Install-Bootstrap.ps1 と同じ)。WindowsIdentity の Claims のうち、種類が有効なグループ (groupsid) か deny-only の
+# グループ (denyonlysid) のものの値。種類の名前空間は種類ごとに違うので、最後の語で見る。WindowsIdentity.Groups は deny-only のグループを除く
+# (UAC で権限を落とした管理者の BUILTIN\Administrators が入らない) ので使わない
+function Select-TokenGroupSids {
+    param([object[]]$Claims)
+    foreach ($claim in @($Claims | Where-Object { $null -ne $_ })) {
+        if ("$($claim.Type)" -match '/(groupsid|denyonlysid)$') { "$($claim.Value)" }
+    }
+}
+
+# 普段のアカウントが管理者か (Install-Bootstrap.ps1 と同じ)。トークンのグループの SID の並びに BUILTIN\Administrators (S-1-5-32-544) があれば
+# 管理者 (UAC で権限を落とした管理者のトークンでも deny-only のグループで入る)
+function Test-AdministratorsSid {
+    param([string[]]$Sids)
+    @($Sids) -contains 'S-1-5-32-544'
+}
+
+# 自分を管理者で起動し直すときの host。今の pwsh が MSIX (WindowsApps の下) なら、MSI の pwsh があればそれを使う (MSIX は使う人ごとに登録
+# されるので、UAC で別の管理者のアカウントの資格情報を入れると、昇格した側で起こせない)。MSI の pwsh が無く、普段のアカウントが管理者でなければ
+# 空を返す (UAC を出さずに止める。管理者でない PC は UAC で別の管理者のアカウントに昇格する)。ほか (管理者の PC の MSIX・MSI・
+# Windows PowerShell 5.1・ほかの pwsh) は今の host
+function Select-ElevationHost {
+    param([string]$CurrentHost, [string]$MsiPwsh, [bool]$MsiPwshExists, [bool]$AccountAdmin)
+    if ("$CurrentHost" -notmatch '\\WindowsApps\\') { return $CurrentHost }
+    if ($MsiPwshExists) { return $MsiPwsh }
+    if ($AccountAdmin) { return $CurrentHost }
+    ''
+}
+
+# 昇格し直さずに止めるとき (Select-ElevationHost が空) の行。管理者でない PC には、bootstrap が MSI の PowerShell 7 を入れる
+function Format-ElevationStopNote {
+    param([string]$CurrentHost, [string]$MsiPwsh)
+    "UAC は出さずに止めた (この pwsh は MSIX: $CurrentHost)"
+    "※ 普段のアカウントが管理者でない PC では、UAC で別の管理者のアカウントの資格情報を入れて昇格する。MSIX の PowerShell 7 は使う人ごとに登録されるので、昇格した側 (そのアカウント) では起こせない。MSI の PowerShell 7 ($MsiPwsh) も無い。bootstrap (dotfiles の clone の win\bootstrap\Install-Bootstrap.ps1) を普通の PowerShell で流し直すと、管理者でない PC には MSI の PowerShell 7 が入る (UAC で管理者の資格情報を入れる。bootstrap を流さない PC は、win/README.md の「PowerShell 7 の MSIX の限り」の winget のコマンドで MSI を足す)。入ったら、新しい窓で打ち直す"
+}
+
+# 管理者で起動し直した側で winget が見つからないときの行。UAC で別の管理者のアカウントの資格情報を入れて昇格すると、そのアカウントには
+# App Installer (winget) が登録されていないことがある (winget は Windows にサインインしたときに使う人ごとに登録される。その PC に一度も
+# サインインしていないアカウントには無い)。登録はこちらではしない (別のアカウントの状態を変えるため)。手は Microsoft の winget の文書
+# (https://learn.microsoft.com/windows/package-manager/winget/) のもの
+function Format-WingetMissingNote {
+    param([string]$Account)
+    "winget が見つからない (昇格した側のアカウント: $Account)"
+    '※ UAC で別の管理者のアカウントの資格情報を入れたなら、そのアカウントには winget (App Installer) が登録されていないことがある (winget は Windows にサインインしたときに使う人ごとに登録され、この PC に一度もサインインしていないアカウントには無い)。そのアカウントでこの PC に一度サインインするか、そのアカウントの管理者の PowerShell (Windows PowerShell を「管理者として実行」で開き、UAC でそのアカウントの資格情報を入れる) で Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe を打ってから、流し直す。普段のアカウントのまま昇格したなら、Microsoft Store の「アプリ インストーラー」を入れる (更新する)'
+}
+
 # ---------------------------------------------------------------------------
 # Windows に触る関数 (実機で -Check と本番を打って確かめる)
 # ---------------------------------------------------------------------------
@@ -198,6 +247,18 @@ function Write-Step {
 function Test-IsAdmin {
     $id = [Security.Principal.WindowsIdentity]::GetCurrent()
     ([Security.Principal.WindowsPrincipal]$id).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+# 普段のアカウントが管理者か (Install-Bootstrap.ps1 と同じ)。今のトークンのグループの SID (WindowsIdentity の Claims) から決める
+# (Test-AdministratorsSid)。読めなければ (Windows でない・例外) 管理者でないとみなす
+function Test-AccountAdmin {
+    $sids = @()
+    try {
+        $sids = @(Select-TokenGroupSids -Claims @([Security.Principal.WindowsIdentity]::GetCurrent().Claims))
+    } catch {
+        $sids = @()
+    }
+    Test-AdministratorsSid -Sids $sids
 }
 
 # winget を打ち、出力の行 (進み具合の表示は除く) と終了コードを返す
@@ -260,7 +321,15 @@ function Get-BusyOpenSshProcess {
 function Invoke-OpenSshFix {
     param([string]$Plan, [string]$PackageId, [string]$Version, [switch]$Server)
     $ok = $true
-    foreach ($arguments in @(Get-WingetCommands -Plan $Plan -PackageId $PackageId -Version $Version -Server:$Server)) {
+    $commands = @(Get-WingetCommands -Plan $Plan -PackageId $PackageId -Version $Version -Server:$Server)
+    # 昇格した側 (UAC で資格情報を入れた別の管理者のアカウント) に winget が登録されていなければ、winget を打たずにわけと手を書いて失敗にする
+    # (登録はしない。親は winget を確かめてから昇格するので、同じアカウントのまま昇格したときはここに来ない)
+    if (($commands.Count -gt 0) -and (-not (Get-Command winget -ErrorAction SilentlyContinue))) {
+        foreach ($line in @(Format-WingetMissingNote -Account $env:USERNAME)) { Write-Step $line }
+        $commands = @()
+        $ok = $false
+    }
+    foreach ($arguments in $commands) {
         Write-Step "winget $($arguments -join ' ')"
         $result = Invoke-Winget -Arguments $arguments
         $result.Lines | Select-Object -Last 5 | ForEach-Object { Write-Step "  $_" }
@@ -286,39 +355,40 @@ function Invoke-OpenSshFix {
     $ok
 }
 
-# 自分を起動し直す pwsh が MSIX (WindowsApps の下) のときに、昇格できなかったわけとして出す行。MSIX は使う人ごとに登録されるので、UAC で
-# 別の管理者のアカウントの資格情報を入れると、そのアカウントでは pwsh を起こせない見込み (win/README.md の「PowerShell 7 の MSIX の限り」)。
-# MSIX でなければ何も返さない
-function Format-MsixElevationNote {
-    param([string]$HostExe)
-    if ("$HostExe" -notmatch '\\WindowsApps\\') { return }
-    '※ この pwsh は MSIX (使う人ごとに登録される) なので、UAC で別の管理者のアカウントの資格情報を入れると、昇格した側で pwsh を起こせない。普段のアカウントが管理者でない PC では、MSI の PowerShell 7 を足してから新しい窓で流し直す (win/README.md の「PowerShell 7 の MSIX の限り」)'
-}
-
-# 自分を管理者で起動し直して終わるのを待ち、子が書いたログを出す。成功なら $true
+# 自分を管理者で起動し直して終わるのを待ち、子が書いたログを出す。成功なら $true。起動し直す host は Select-ElevationHost で選ぶ (今の pwsh が
+# MSIX なら MSI の pwsh を使い、それも無い管理者でない PC では UAC を出さずに止める。win/README.md の「PowerShell 7 の MSIX の限り」)
 function Invoke-Elevated {
     param([string]$Version, [switch]$Force)
+    $current = (Get-Process -Id $PID).Path
+    # MSI の既定の置き場所 (字でつなぐ。Join-Path は、テストを流す Linux の pwsh で ProgramFiles が無いと落ちる)
+    $msiPwsh = "$env:ProgramFiles\PowerShell\7\pwsh.exe"
+    $hostExe = Select-ElevationHost -CurrentHost $current -MsiPwsh $msiPwsh -MsiPwshExists (Test-Path -LiteralPath $msiPwsh -PathType Leaf) -AccountAdmin (Test-AccountAdmin)
+    if (-not $hostExe) {
+        foreach ($line in @(Format-ElevationStopNote -CurrentHost $current -MsiPwsh $msiPwsh)) { Write-Host $line }
+        return $false
+    }
     $log = Join-Path $env:LOCALAPPDATA 'dotfiles\Install-OpenSSH.log'
     New-Item -ItemType Directory -Force -Path (Split-Path -Parent $log) | Out-Null
     Remove-Item -LiteralPath $log -ErrorAction SilentlyContinue
-    $hostExe = (Get-Process -Id $PID).Path
     # Start-Process は配列を空白でつなぐだけなので、パスは自分で "" で囲む
     $argumentList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $PSCommandPath),
         '-Version', $Version, '-LogPath', ('"{0}"' -f $log))
     if ($Force) { $argumentList += '-Force' }
+    if ($hostExe -ne $current) {
+        Write-Host "昇格した側は MSI の PowerShell 7 ($hostExe) で動かす (今の pwsh は MSIX で、UAC で別の管理者のアカウントに昇格すると起こせない)"
+    }
     Write-Host 'UAC で管理者の PowerShell を起動する (終わると閉じる)'
     try {
         $process = Start-Process -FilePath $hostExe -ArgumentList $argumentList -Verb RunAs -Wait -PassThru
     } catch {
         Write-Host "管理者で起動できなかった (UAC で断った?): $($_.Exception.Message)"
-        foreach ($line in @(Format-MsixElevationNote -HostExe $hostExe)) { Write-Host $line }
         return $false
     }
     if (Test-Path -LiteralPath $log) {
         Get-Content -LiteralPath $log -Encoding utf8 | ForEach-Object { Write-Host "  [管理者] $_" }
     } elseif ($process.ExitCode -ne 0) {
-        # 子がログを書く前に落ちた (昇格した側で pwsh が動かなかったなど)
-        foreach ($line in @(Format-MsixElevationNote -HostExe $hostExe)) { Write-Host $line }
+        # 子がログを書く前に落ちた
+        Write-Host ('管理者の PowerShell がログを書く前に終わった (終了コード 0x{0:X8})' -f $process.ExitCode)
     }
     $process.ExitCode -eq 0
 }

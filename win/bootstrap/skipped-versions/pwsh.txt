@@ -1,11 +1,11 @@
 ﻿# Windows の PowerShell 7 (winget の Microsoft.PowerShell) で、上げずに見送った版 (win/bootstrap/Install-Bootstrap.ps1 が、入っていない
-# PC に winget の MSIX で入れるもの)。
+# PC に winget で入れるもの。普段のアカウントが管理者の PC は MSIX、管理者でない PC は MSI)。
 #
 # nix/scripts/check-winget-version.sh pwsh (GitHub Actions の winget-versions が週 1 回流す) と、setup の
 # bootstrap-windows-pin-updates.sh が読み、ここに書いた版は、固定した版より新しくても知らせない。
 # 手順は win/README.md の「bootstrap の固定した版の新しい版が出たとき」。
-# 読むのは 7.6 の線 (7.6. で始まる版) だけ。7.7 からの版は別の package (Microsoft.PowerShell) の MSIX で、bootstrap が入れる 7.6 の MSIX
-# (Microsoft.PowerShell-LTS) の上げ先にならないので、ここに書かなくても知らせない
+# 読むのは 7.6 の線 (7.6. で始まる版) だけ。7.7 からの版は MSI が無く、MSIX は別の package (Microsoft.PowerShell) で、bootstrap が入れる
+# 7.6 (MSIX の Microsoft.PowerShell-LTS・MSI) の上げ先にならないので、ここに書かなくても知らせない
 # (check-winget-version.sh の series_re。次の線に移すときは、series_re と固定した版を一緒に上げる)。
 #
 # 1 行に 1 つ、「版 理由」を空白で区切って書く。版は winget の版 (X.Y.Z.0 の 4 つの数) の形で書く。

@@ -141,6 +141,66 @@ Test-Case '表に出す入れ方は MSIX・MSI と、ほかの形のパス' 'MSI
 # Get-PwshPinVersion: bootstrap が入れた PowerShell 7 に足す pin の版 (固定した版の線)
 Test-Case 'pin の版は固定した版の線 (7.6.10.0 → 7.6.*)。読めなければ空' '7.6.*|' { "$(Get-PwshPinVersion -Version '7.6.10.0')|$(Get-PwshPinVersion -Version 'x')" }
 
+# ---------------------------------------------------------------------------
+# 普段のアカウントが管理者か (PowerShell 7 の入れ方を決める)
+# ---------------------------------------------------------------------------
+
+# WindowsIdentity の Claims の偽物 (Type と Value)。UAC で権限を落とした管理者のトークンでは、BUILTIN\Administrators (S-1-5-32-544) が
+# deny-only のグループ (denyonlysid) で入る。Claims の種類の名前空間は種類ごとに違う (groupsid は 2008 の、denyonlysid は 2005 の名前空間)
+function New-Claim { param([string]$Type, [string]$Value) [pscustomobject]@{ Type = $Type; Value = $Value } }
+$claimNs = 'http://schemas.microsoft.com/ws/2008/06/identity/claims'
+$claimNs2005 = 'http://schemas.xmlsoap.org/ws/2005/05/identity/claims'
+$filteredAdminClaims = @(
+    (New-Claim "$claimNs2005/name" 'PC\u')
+    (New-Claim "$claimNs/primarysid" 'S-1-5-21-1-2-3-1001')
+    (New-Claim "$claimNs/primarygroupsid" 'S-1-5-21-1-2-3-513')
+    (New-Claim "$claimNs/groupsid" 'S-1-5-21-1-2-3-513')
+    (New-Claim "$claimNs/groupsid" 'S-1-1-0')
+    (New-Claim "$claimNs2005/denyonlysid" 'S-1-5-114')
+    (New-Claim "$claimNs2005/denyonlysid" 'S-1-5-32-544')
+    (New-Claim "$claimNs/groupsid" 'S-1-5-32-545')
+    (New-Claim "$claimNs/denyonlyprimarygroupsid" 'S-1-5-21-9-9-9-513')
+)
+$standardUserClaims = @(
+    (New-Claim "$claimNs/primarysid" 'S-1-5-21-1-2-3-1002')
+    (New-Claim "$claimNs/groupsid" 'S-1-1-0')
+    (New-Claim "$claimNs/groupsid" 'S-1-5-32-545')
+    (New-Claim "$claimNs/groupsid" 'S-1-5-11')
+)
+
+# Select-TokenGroupSids: Claims から、有効なグループ (groupsid) と deny-only のグループ (denyonlysid) の SID を拾う
+Test-Case 'トークンのグループの SID は groupsid と denyonlysid の値 (primarysid・primarygroupsid・denyonlyprimarygroupsid・name は拾わない)' 'S-1-5-21-1-2-3-513 S-1-1-0 S-1-5-114 S-1-5-32-544 S-1-5-32-545' {
+    @(Select-TokenGroupSids -Claims $filteredAdminClaims) -join ' '
+}
+Test-Case 'Claims が空なら SID も空' '0' { @(Select-TokenGroupSids -Claims @()).Count }
+
+# Test-AdministratorsSid: SID の並びに BUILTIN\Administrators (S-1-5-32-544) があれば管理者
+Test-Case 'S-1-5-32-544 があれば管理者、無ければ (Users の S-1-5-32-545 だけ・空) 管理者でない' 'True False False False' {
+    "$(Test-AdministratorsSid -Sids @('S-1-1-0', 'S-1-5-32-544')) $(Test-AdministratorsSid -Sids @('S-1-1-0', 'S-1-5-32-545')) $(Test-AdministratorsSid -Sids @()) $(Test-AdministratorsSid -Sids $null)"
+}
+Test-Case 'UAC で権限を落とした管理者 (deny-only の S-1-5-32-544) は管理者、普通のユーザーは管理者でない' 'True False' {
+    "$(Test-AdministratorsSid -Sids @(Select-TokenGroupSids -Claims $filteredAdminClaims)) $(Test-AdministratorsSid -Sids @(Select-TokenGroupSids -Claims $standardUserClaims))"
+}
+# Test-AccountAdmin: 今のトークンを読む。読めなければ (Windows でない・例外) 管理者でないとみなす
+Test-Case '今のトークンを読む関数は、例外を出さずに真偽を返す (Windows でなければ読めないので管理者でない)' 'True True' {
+    $admin = Test-AccountAdmin
+    "$($admin -is [bool]) $(if ($IsWindows) { $true } else { -not $admin })"
+}
+
+# Test-PwshInstallNeeded: PowerShell 7 を入れるか。入っていないときと、管理者でない PC で MSIX でない pwsh が無いとき (MSI を入れる)
+Test-Case 'PowerShell 7 を入れるのは、入っていないときと、管理者でない PC で MSIX しか無いとき' 'True True False True False' {
+    $none = [pscustomobject]@{ Exists = $false; NonMsix = $false }
+    $msixOnly = [pscustomobject]@{ Exists = $true; NonMsix = $false }
+    $withMsi = [pscustomobject]@{ Exists = $true; NonMsix = $true }
+    @(
+        (Test-PwshInstallNeeded -Package $none -AccountAdmin $true)
+        (Test-PwshInstallNeeded -Package $none -AccountAdmin $false)
+        (Test-PwshInstallNeeded -Package $msixOnly -AccountAdmin $true)
+        (Test-PwshInstallNeeded -Package $msixOnly -AccountAdmin $false)
+        (Test-PwshInstallNeeded -Package $withMsi -AccountAdmin $false)
+    ) -join ' '
+}
+
 # Get-RustupVersionFromOutput: rustup --version の出力から版を拾う (info の行や rustc の行が混ざる)
 Test-Case 'rustup: 版を拾う (ほかの行が先にあっても)' '1.29.3' { Get-RustupVersionFromOutput -Lines @('info: This is the version for the rustup toolchain manager, not the rustc compiler.', 'rustup 1.29.3 (8c9a7b0c1 2026-11-03)') }
 Test-Case 'rustup: rustc の行は版と読まない' '' { Get-RustupVersionFromOutput -Lines @('rustc 1.91.0 (f8297e351 2025-10-28)') }
@@ -220,16 +280,22 @@ Test-Case 'winget が 0 で終わったら取り消しではない' 'False' { Te
 Test-Case 'install は版を名指しし、道具ごとの引数を後ろに足す' 'install --id Git.Git --exact --source winget --silent --accept-source-agreements --disable-interactivity --version 2.56.0.4 --accept-package-agreements --scope machine' { (Get-WingetInstallArguments -PackageId 'Git.Git' -Version '2.56.0.4' -Silent $true -Extra @('--scope', 'machine')) -join ' ' }
 Test-Case '--silent を付けないとき (winget の既定の、進み具合の窓が出る形)' 'install --id GitHub.cli --exact --source winget --accept-source-agreements --disable-interactivity --version 2.103.3 --accept-package-agreements --installer-type wix' { (Get-WingetInstallArguments -PackageId 'GitHub.cli' -Version '2.103.3' -Silent $false -Extra @('--installer-type', 'wix')) -join ' ' }
 
-# Get-BootstrapPackages: 入れる順と、道具ごとの引数。gh は -Private のときだけ
-$packages = @(Get-BootstrapPackages -GitVersion '2.56.0.4' -GhVersion '2.103.3' -PwshVersion '7.6.10.0' -VsBuildToolsVersion '17.14.44' -RustupVersion '1.29.3' -Private)
-$publicPackages = @(Get-BootstrapPackages -GitVersion '2.56.0.4' -GhVersion '2.103.3' -PwshVersion '7.6.10.0' -VsBuildToolsVersion '17.14.44' -RustupVersion '1.29.3')
+# Get-BootstrapPackages: 入れる順と、道具ごとの引数。gh は -Private のときだけ。PowerShell 7 の入れ方は、普段のアカウントが管理者かで決まる
+$packages = @(Get-BootstrapPackages -GitVersion '2.56.0.4' -GhVersion '2.103.3' -PwshVersion '7.6.10.0' -VsBuildToolsVersion '17.14.44' -RustupVersion '1.29.3' -Private -AccountAdmin $true)
+$publicPackages = @(Get-BootstrapPackages -GitVersion '2.56.0.4' -GhVersion '2.103.3' -PwshVersion '7.6.10.0' -VsBuildToolsVersion '17.14.44' -RustupVersion '1.29.3' -AccountAdmin $true)
+$userPackages = @(Get-BootstrapPackages -GitVersion '2.56.0.4' -GhVersion '2.103.3' -PwshVersion '7.6.10.0' -VsBuildToolsVersion '17.14.44' -RustupVersion '1.29.3' -AccountAdmin $false)
 Test-Case '-Private の入れる順は Git・gh・PowerShell 7・Build Tools・rustup (rustup-init が MSVC を見るので Build Tools を先に)' 'git gh pwsh vs-buildtools rustup' { ($packages | ForEach-Object { $_.Name }) -join ' ' }
 Test-Case '既定の形は gh を入れない (Git・PowerShell 7・Build Tools・rustup)' 'git pwsh vs-buildtools rustup' { ($publicPackages | ForEach-Object { $_.Name }) -join ' ' }
 Test-Case '道具ごとの ID と版' 'Git.Git=2.56.0.4 GitHub.cli=2.103.3 Microsoft.PowerShell=7.6.10.0 Microsoft.VisualStudio.2022.BuildTools=17.14.44 Rustlang.Rustup=1.29.3' { ($packages | ForEach-Object { "$($_.PackageId)=$($_.Version)" }) -join ' ' }
 Test-Case 'Git は machine の scope' '--scope machine' { $packages[0].Args -join ' ' }
 Test-Case 'gh は MSI (wix)' '--installer-type wix' { $packages[1].Args -join ' ' }
 # 7.6 の winget の版は MSI もあるので msix を名指しする (ユーザー単位に入り、UAC が要らない)
-Test-Case 'PowerShell 7 は winget の MSIX' '--installer-type msix' { $packages[2].Args -join ' ' }
+Test-Case '管理者の PC の PowerShell 7 は winget の MSIX' '--installer-type msix' { $packages[2].Args -join ' ' }
+# 管理者でない PC は MSI (マシン単位。UAC で別の管理者のアカウントに昇格した側でも起こせる)。per-machine の MSI なので gh と同じく
+# --silent を付けず、UAC で管理者の資格情報を入れる
+Test-Case '管理者でない PC の PowerShell 7 は winget の MSI (wix) で、--silent を付けない' 'pwsh|--installer-type wix --custom USE_MU=0 ENABLE_MU=0|False' { "$($userPackages[1].Name)|$($userPackages[1].Args -join ' ')|$($userPackages[1].Silent)" }
+# MSI の USE_MU・ENABLE_MU はどちらも既定が 1 (Microsoft Update の更新に入り、ENABLE_MU は Microsoft Update を自動更新に使う側へ入れる)
+Test-Case 'PowerShell 7 の MSI は Microsoft Update の更新に入れない' 'USE_MU=0 ENABLE_MU=0' { Get-PwshMsiCustomArgument }
 Test-Case 'Build Tools は C++ のワークロード・x64 の MSVC・Windows SDK を入れる' '--custom|--norestart --addProductLang En-us --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows11SDK.26100' { $packages[3].Args -join '|' }
 Test-Case 'rustup は MSVC の host にし、toolchain を入れない' '--custom|--default-host x86_64-pc-windows-msvc --default-toolchain none' { $packages[4].Args -join '|' }
 # per-machine の MSI (gh) を、管理者でない PowerShell から quiet (--silent) で流すと UAC が出ずに落ちる。Build Tools は 10 分以上
@@ -284,11 +350,13 @@ function New-Package {
     $p = [ordered]@{
         Name = $Name; Title = $Title; PackageId = $Id; Target = $Target; Exists = $true; Installed = $Target; Pinned = $true
         InstallPath = $null; MissingComponents = @(); SelfUpdateDisabled = $true; DefaultHost = $Msvc; Path = $null; OnPath = $false; Kind = $null
+        NonMsix = $false
     }
     foreach ($k in $Change.Keys) { $p[$k] = $Change[$k] }
     [pscustomobject]$p
 }
-# PowerShell 7 の揃っている状態: PATH で先に当たる MSIX の実行エイリアスの 7.6.10 (pin は見ないので無い)。$Change で差し替える
+# PowerShell 7 の揃っている状態: PATH で先に当たる MSIX の実行エイリアスの 7.6.10 (pin は見ないので無い。MSIX でない pwsh は無い)。
+# 状態は普段のアカウントが管理者の PC (New-State・New-PublicState の AccountAdmin)。$Change で差し替える
 function New-PwshPackage {
     param([hashtable]$Change = @{})
     $c = @{ Installed = '7.6.10'; Pinned = $false; Path = $aliasPwsh; OnPath = $true; Kind = 'msix' }
@@ -315,8 +383,9 @@ function New-HostFile {
 function New-State {
     param([hashtable]$Change = @{}, [hashtable]$Git = @{}, [hashtable]$Gh = @{}, [hashtable]$Pwsh = @{}, [hashtable]$Vs = @{}, [hashtable]$Rustup = @{}, [hashtable]$Dotfiles = @{}, [hashtable]$Private = @{})
     $s = [ordered]@{
-        Elevated   = $false
-        Arch       = 'AMD64'
+        Elevated     = $false
+        AccountAdmin = $true
+        Arch         = 'AMD64'
         Sac        = 'off'
         Private    = $true
         Packages   = @(
@@ -339,8 +408,9 @@ function New-PublicState {
     $repo = @{ Url = 'https://github.com/pollenjp/dotfiles.git'; Origin = 'https://github.com/pollenjp/dotfiles.git' }
     foreach ($k in $Dotfiles.Keys) { $repo[$k] = $Dotfiles[$k] }
     $s = [ordered]@{
-        Elevated   = $false
-        Arch       = 'AMD64'
+        Elevated     = $false
+        AccountAdmin = $true
+        Arch         = 'AMD64'
         Sac        = 'off'
         Private    = $false
         Packages   = @(
@@ -388,6 +458,20 @@ Test-Case 'PowerShell 7 は pin を見ない (bootstrap が入れたときだけ
 Test-Case 'PowerShell 7 が 7.6.0 より古ければ bootstrap では直らない差' 'PowerShell 7=manual' { Get-Kinds (New-State -Pwsh @{ Installed = '7.4.13'; Kind = 'msi'; Path = $msiPwsh }) }
 Test-Case 'PowerShell 7 の版が読めなければ bootstrap では直らない差' 'PowerShell 7=manual' { Get-Kinds (New-State -Pwsh @{ Installed = $null }) }
 Test-Case 'PowerShell 7 が PATH の外でだけ見つかれば bootstrap では直らない差 (runner と herdr は PATH の pwsh を起こす)' 'PowerShell 7=manual' { Get-Kinds (New-State -Pwsh @{ OnPath = $false }) }
+# 普段のアカウントが管理者でない PC: PowerShell 7 が MSIX でしか見つからなければ (PATH のディレクトリと MSI の置き場所に MSIX でない pwsh が
+# 無ければ) 入っていないもの (流せば MSI を足す)。UAC で別の管理者のアカウントに昇格した側では、MSIX の pwsh を起こせないため
+$userAdmin = @{ AccountAdmin = $false }
+Test-Case '管理者でない PC で PowerShell 7 が MSIX しか無ければ、入っていないもの (流せば MSI を足す。終了コード 3)' 'PowerShell 7=missing|3' {
+    $s = New-State $userAdmin
+    "$(Get-Kinds $s)|$(Get-BootstrapExitCode -Rows @(Get-BootstrapRows -State $s))"
+}
+Test-Case '管理者でない PC でも、MSI か PATH のほかの形の pwsh があれば揃っている (先に当たるのが MSIX でも)' '||' {
+    "$(Get-Kinds (New-State $userAdmin -Pwsh @{ Kind = 'msi'; Path = $msiPwsh; NonMsix = $true }))|$(Get-Kinds (New-State $userAdmin -Pwsh @{ Kind = 'other'; Path = 'C:\tools\pwsh\pwsh.exe'; NonMsix = $true }))|$(Get-Kinds (New-State $userAdmin -Pwsh @{ NonMsix = $true }))"
+}
+Test-Case '管理者でない PC で MSIX しか無ければ、古くても PATH の外でも MSI を足す (MSI はマシンの PATH に入る)' 'PowerShell 7=missing|PowerShell 7=missing' {
+    "$(Get-Kinds (New-State $userAdmin -Pwsh @{ Installed = '7.5.4' }))|$(Get-Kinds (New-State $userAdmin -Pwsh @{ OnPath = $false }))"
+}
+Test-Case '管理者でない PC のまっさらな PC も、入っていない・無いものだけ (終了コード 3)' '3' { $s = New-FreshPublicState; $s.AccountAdmin = $false; Get-BootstrapExitCode -Rows @(Get-BootstrapRows -State $s) }
 Test-Case 'SAC がオンでも止める理由にはせず、bootstrap では直らない差 (警告して続ける)' 'Smart App Control=manual' { Get-Kinds (New-State @{ Sac = 'on' }) }
 Test-Case 'SAC が評価モードなら bootstrap では直らない差' 'Smart App Control=manual' { Get-Kinds (New-State @{ Sac = 'eval' }) }
 Test-Case 'SAC の無い Windows は直すことが無い' '' { Get-Kinds (New-State @{ Sac = 'unavailable' }) }
@@ -427,6 +511,23 @@ Test-Case 'PowerShell 7 が古ければ、入れた形のまま上げるか、�
 }
 Test-Case 'PowerShell 7 が PATH の外でだけ見つかれば、ディレクトリを Path に足すと ※ で出す' "⚠ PowerShell 7 : 7.6.10 (MSIX) → PATH に無い|※ PowerShell 7 ($aliasPwsh) のディレクトリが PATH に無い (runner と herdr は PATH の pwsh を起こす)。ユーザーの環境変数 Path に足す" {
     $l = Get-Lines (New-State -Pwsh @{ OnPath = $false }); "$(@($l | Where-Object { $_ -like '*PowerShell 7 :*' })[0])|$(@($l | Where-Object { $_ -like '※*' })[0])"
+}
+# 管理者でない PC の PowerShell 7 の行: 入れるのは MSI で、わけ (昇格した側で MSIX の pwsh を起こせない) を ※ で出す
+$msiNote = '※ 普段のアカウントが管理者でない PC では、UAC で別の管理者のアカウントの資格情報を入れて昇格する。MSIX の PowerShell 7 は使う人ごとに登録されるので、昇格した側 (そのアカウント) では起こせず、Install-OpenSSH・Install-Sshd が自分を昇格し直せない。MSI はマシン単位に入り、どのアカウントからも起こせる (win/README.md の「PowerShell 7 の MSIX の限り」)'
+Test-Case '管理者でない PC で PowerShell 7 が入っていなければ、winget の MSI で入れると出し、わけを ※ で出す' "⚠ PowerShell 7 : 入っていない → 7.6.10.0 を winget の MSI で入れる (管理者でない PC。マシン単位に入り、UAC で管理者の資格情報を入れる)|$msiNote" {
+    $l = Get-Lines (New-State $userAdmin -Pwsh $fresh); "$(@($l | Where-Object { $_ -like '*PowerShell 7 :*' })[0])|$(@($l | Where-Object { $_ -like '※*' })[0])"
+}
+Test-Case '管理者でない PC で MSIX しか無ければ、見つかった版と入れ方・MSI も入れることを出し、わけを ※ で出す' "⚠ PowerShell 7 : 7.6.10 (MSIX) → 管理者でない PC なので、MSI の 7.6.10.0 も入れる (UAC で管理者の資格情報を入れる)|$msiNote" {
+    $l = Get-Lines (New-State $userAdmin); "$(@($l | Where-Object { $_ -like '*PowerShell 7 :*' })[0])|$(@($l | Where-Object { $_ -like '※*' })[0])"
+}
+Test-Case '管理者でない PC で MSIX の版が読めなくても、MSI を足すと出す' '⚠ PowerShell 7 : 版が読めない (MSIX) → 管理者でない PC なので、MSI の 7.6.10.0 も入れる (UAC で管理者の資格情報を入れる)' {
+    @(Get-Lines (New-State $userAdmin -Pwsh @{ Installed = $null }) | Where-Object { $_ -like '*PowerShell 7 :*' })[0]
+}
+Test-Case '管理者でない PC で MSI が古ければ、外してから流し直すと MSI で入ると ※ で出す' '※ PowerShell 7 (C:\Program Files\PowerShell\7\pwsh.exe) が古い。入れた形のまま上げる (MSI は winget upgrade --id Microsoft.PowerShell --exact --version 7.6.10.0 --include-pinned --installer-type wix で、UAC が出る。Microsoft Store の MSIX は Store のライブラリで更新する) か、外してから流し直す (winget の MSI で 7.6.10.0 を入れる)' {
+    @(Get-Lines (New-State $userAdmin -Pwsh @{ Installed = '7.4.13'; Kind = 'msi'; Path = $msiPwsh; NonMsix = $true }) | Where-Object { $_ -like '※*' })[0]
+}
+Test-Case '管理者でない PC で MSI があれば、行は版と入れ方だけ' '  PowerShell 7 : 7.6.10 (MSI)' {
+    @(Get-Lines (New-State $userAdmin -Pwsh @{ Kind = 'msi'; Path = $msiPwsh; NonMsix = $true }) | Where-Object { $_ -like '*PowerShell 7 :*' })[0]
 }
 Test-Case '版のずれは ※ で上げ方と下げ方を出す' '⚠ Git for Windows : 2.55.0.5 (固定した版は 2.56.0.4)|※ Git for Windows を固定した版に揃えるのは bootstrap ではしない。上げるなら winget upgrade --id Git.Git --exact --version 2.56.0.4 --include-pinned、下げるなら winget uninstall --id Git.Git の後に流し直す' {
     $l = Get-Lines (New-State -Git @{ Installed = '2.55.0.5' }); "$(@($l | Where-Object { $_ -like '*Git for Windows :*' })[0])|$(@($l | Where-Object { $_ -like '※*' })[0])"
@@ -532,9 +633,10 @@ foreach ($d in @('path-dir', 'WindowsApps')) {
 }
 # settings.toml の既定の host は GNU のまま。rustup show が MSVC を出せば、host は rustup show から読んでいる
 Set-Content -LiteralPath (Join-Path $stateRoot 'settings.toml') -Value "version = `"12`"`ndefault_host_tuple = `"x86_64-pc-windows-gnu`"`nauto_self_update = `"disable`"`n"
+# MSIX の実行エイリアスは Windows の字 (\WindowsApps\) で渡す (入れ方を WindowsApps の下かで決めるので)
 $statePaths = [pscustomobject]@{
     Git = (Join-Path $stateRoot 'git.exe'); Gh = (Join-Path $stateRoot 'gh.exe'); Pwsh = (Join-Path $stateRoot 'pwsh.exe'); Rustup = (Join-Path $stateRoot 'rustup.exe')
-    PwshAlias = (Join-Path (Join-Path $stateRoot 'WindowsApps') 'pwsh.exe')
+    PwshAlias = "$stateRoot\WindowsApps\pwsh.exe"
     RustupSettings = (Join-Path $stateRoot 'settings.toml'); VsWhere = (Join-Path $stateRoot 'vswhere.exe'); VsSetup = (Join-Path $stateRoot 'setup.exe')
     GhqRoot = (Join-Path $stateRoot 'ghq'); HostFile = (Join-Path $stateRoot 'host.toml')
 }
@@ -567,20 +669,23 @@ function Invoke-Native {
     }
     [pscustomobject]@{ ExitCode = 0; Lines = $lines }
 }
-$statePackages = @(Get-BootstrapPackages -GitVersion '2.56.0.4' -GhVersion '2.103.3' -PwshVersion '7.6.10.0' -VsBuildToolsVersion '17.14.44' -RustupVersion '1.29.3')
+$statePackages = @(Get-BootstrapPackages -GitVersion '2.56.0.4' -GhVersion '2.103.3' -PwshVersion '7.6.10.0' -VsBuildToolsVersion '17.14.44' -RustupVersion '1.29.3' -AccountAdmin $false)
 $env:RUSTUP_AUTO_INSTALL = 'keep'
 try {
-    $readState = Get-BootstrapState -Packages $statePackages -Paths $statePaths -Arch 'AMD64'
+    $readState = Get-BootstrapState -Packages $statePackages -Paths $statePaths -Arch 'AMD64' -AccountAdmin $false
     $afterEnv = $env:RUSTUP_AUTO_INSTALL
     $readNative = @($script:NativeLog)
     $readWinget = @($script:WingetLog)
     # PATH に pwsh が無ければ MSI の置き場所、それも無ければ MSIX の実行エイリアスを読む (どちらも PATH の外)。どれも無ければ入っていない
     $script:RegistryPath = ''
-    $msiRead = @((Get-BootstrapState -Packages $statePackages -Paths $statePaths -Arch 'AMD64').Packages | Where-Object { $_.Name -eq 'pwsh' })[0]
+    $msiRead = @((Get-BootstrapState -Packages $statePackages -Paths $statePaths -Arch 'AMD64' -AccountAdmin $true).Packages | Where-Object { $_.Name -eq 'pwsh' })[0]
     Remove-Item -LiteralPath $statePaths.Pwsh
-    $aliasRead = @((Get-BootstrapState -Packages $statePackages -Paths $statePaths -Arch 'AMD64').Packages | Where-Object { $_.Name -eq 'pwsh' })[0]
+    $aliasRead = @((Get-BootstrapState -Packages $statePackages -Paths $statePaths -Arch 'AMD64' -AccountAdmin $true).Packages | Where-Object { $_.Name -eq 'pwsh' })[0]
+    # MSIX の実行エイリアスのディレクトリ (ユーザーの PATH の既定の項目) が PATH にあり、MSI が無い
+    $script:RegistryPath = "$stateRoot\WindowsApps"
+    $aliasOnPathRead = @((Get-BootstrapState -Packages $statePackages -Paths $statePaths -Arch 'AMD64' -AccountAdmin $true).Packages | Where-Object { $_.Name -eq 'pwsh' })[0]
     Remove-Item -LiteralPath $statePaths.PwshAlias
-    $noneRead = @((Get-BootstrapState -Packages $statePackages -Paths $statePaths -Arch 'AMD64').Packages | Where-Object { $_.Name -eq 'pwsh' })[0]
+    $noneRead = @((Get-BootstrapState -Packages $statePackages -Paths $statePaths -Arch 'AMD64' -AccountAdmin $true).Packages | Where-Object { $_.Name -eq 'pwsh' })[0]
 } finally {
     $env:RUSTUP_AUTO_INSTALL = $null
     Remove-Item -LiteralPath $stateRoot -Recurse -Force
@@ -604,6 +709,13 @@ Test-Case 'pin を読むのは PowerShell 7 のほかの道具だけ (PowerShell
 Test-Case 'PATH に無ければ MSI の置き場所、それも無ければ MSIX の実行エイリアスを読み (どちらも PATH の外)、どれも無ければ入っていない' "$($statePaths.Pwsh)=False|$($statePaths.PwshAlias)=False|False" {
     "$($msiRead.Path)=$($msiRead.OnPath)|$($aliasRead.Path)=$($aliasRead.OnPath)|$($noneRead.Exists)"
 }
+# NonMsix: PATH のディレクトリと MSI の置き場所に、MSIX でない pwsh があるか (管理者でない PC は、無ければ MSI を足す)。先に当たる pwsh が
+# MSIX でも、後ろに MSIX でない pwsh があれば True
+Test-Case 'MSIX でない pwsh は PATH のほかの形・MSI の置き場所で見つけ、MSIX (実行エイリアス。PATH にあっても) だけなら無い' 'other=True|msi=True|msix=False|msix=False|=False' {
+    (@($readPwsh, $msiRead, $aliasRead, $aliasOnPathRead, $noneRead) | ForEach-Object { "$($_.Kind)=$($_.NonMsix)" }) -join '|'
+}
+Test-Case 'PATH にある実行エイリアスは PATH の中として読む' 'True' { $aliasOnPathRead.OnPath }
+Test-Case '状態には、普段のアカウントが管理者かを渡されたまま持つ' 'False' { $readState.AccountAdmin }
 Test-Case '既定の形は gh を読まず (auth status も打たない)、手元のホストの値と dotfiles-private の clone の有無を読む' 'False|False|True|False' {
     "$($readState.Private)|$(@($readNative | Where-Object { $_ -like 'gh.exe *' }).Count -gt 0)|$($readState.HostFile.Exists)|$($readState.HostFile.PrivateClone)"
 }
@@ -618,6 +730,8 @@ Test-Case 'Build Tools は vswhere から版・置き場所・足りないもの
 # 呼んだものを $script:Calls に「何を・どれに」で書き留める偽物
 function Test-WingetAvailable { $script:HaveWinget }
 function Get-OsArchitecture { 'AMD64' }
+# 普段のアカウントが管理者か (流れの最初の状態の AccountAdmin と同じ値にする)
+function Test-AccountAdmin { $script:AccountAdmin }
 function Get-BootstrapSac { $script:Sac }
 function Get-BootstrapPaths {
     [pscustomobject]@{
@@ -636,6 +750,8 @@ function Invoke-Winget {
     if (($verb -eq 'pin') -and ($Arguments -contains '--version')) { $range = " $($Arguments[[array]::IndexOf($Arguments, '--version') + 1])" }
     if ($verb -eq 'pin') { $verb = "pin-$($Arguments[1])" }
     if (($verb -eq 'install') -and ($Arguments -notcontains '--silent')) { $verb = 'install-with-progress' }
+    # PowerShell 7 を入れた引数は全部控える (MSIX か MSI か・--silent の有無を見る)
+    if (($Arguments[0] -eq 'install') -and ($id -eq 'Microsoft.PowerShell')) { $script:PwshInstallArgs = $Arguments -join ' ' }
     $script:Calls.Add("$verb $id$range")
     $code = 0
     if ($script:Fail.ContainsKey("$verb $id")) { $code = $script:Fail["$verb $id"] }
@@ -690,13 +806,16 @@ function Invoke-Flow {
     $script:FailLines = $FailLines
     $script:LoginCode = $LoginCode
     $script:HaveWinget = $Winget
-    # 最初に確かめる SAC は、最初の状態と同じ値にする
+    $script:PwshInstallArgs = ''
+    # 最初に確かめる SAC と、普段のアカウントが管理者かは、最初の状態と同じ値にする
     $script:Sac = $States[0].Sac
+    $script:AccountAdmin = [bool]$States[0].AccountAdmin
     $out = @(Invoke-InstallBootstrap -GitVersion '2.56.0.4' -GhVersion '2.103.3' -PwshVersion '7.6.10.0' -VsBuildToolsVersion '17.14.44' -RustupVersion '1.29.3' -Private:(-not $Public) -Check:$Check 6>&1)
     [pscustomobject]@{
-        Calls = ($script:Calls -join ' | ')
-        Text  = (@($out | Where-Object { $_ -isnot [int] } | ForEach-Object { "$_" }) -join "`n")
-        Code  = @($out | Where-Object { $_ -is [int] })[-1]
+        Calls    = ($script:Calls -join ' | ')
+        Text     = (@($out | Where-Object { $_ -isnot [int] } | ForEach-Object { "$_" }) -join "`n")
+        Code     = @($out | Where-Object { $_ -is [int] })[-1]
+        PwshArgs = $script:PwshInstallArgs
     }
 }
 
@@ -755,6 +874,31 @@ Test-Case 'PowerShell 7 の install が落ちたら pin を足さずに 1' '1 [i
 Test-Case 'PowerShell 7 の pin を足せなくても進み、足せなかったと出す' '0 [install Microsoft.PowerShell | pin-add Microsoft.PowerShell 7.6.*] True' {
     $r = Invoke-Flow -States @((New-State -Pwsh $fresh), (New-State), (New-State)) -Fail @{ 'pin-add Microsoft.PowerShell' = 1 }
     "$($r.Code) [$($r.Calls)] $($r.Text -like '*PowerShell 7: winget pin add が失敗した (終了コード 0x00000001)*')"
+}
+Test-Case '管理者の PC は PowerShell 7 を MSIX で --silent で入れ、7.6 の線に留める pin を足す' '0 [install Microsoft.PowerShell | pin-add Microsoft.PowerShell 7.6.*] install --id Microsoft.PowerShell --exact --source winget --silent --accept-source-agreements --disable-interactivity --version 7.6.10.0 --accept-package-agreements --installer-type msix True' {
+    $r = Invoke-Flow -States @((New-State -Pwsh $fresh), (New-State), (New-State))
+    "$($r.Code) [$($r.Calls)] $($r.PwshArgs) $($r.Text -like '*PowerShell 7: winget pin を足した (7.6.* に留める。winget upgrade --all は 7.7 へ上げない)*')"
+}
+
+# 普段のアカウントが管理者でない PC: PowerShell 7 は MSI (--silent を付けず、UAC で管理者の資格情報を入れる) で入れ、MSIX しか無ければ MSI を足す
+$userMsiArgs = 'install --id Microsoft.PowerShell --exact --source winget --accept-source-agreements --disable-interactivity --version 7.6.10.0 --accept-package-agreements --installer-type wix --custom USE_MU=0 ENABLE_MU=0'
+# MSI を入れた後の状態 (MSI の置き場所はマシンの PATH に入り、先に当たる)
+function New-UserMsiState { New-State @{ AccountAdmin = $false } -Pwsh @{ Kind = 'msi'; Path = $msiPwsh; NonMsix = $true } }
+Test-Case '管理者でない PC で PowerShell 7 が入っていなければ、MSI を UAC で入れ、7.6 の線に留める pin を足す' "0 [install-with-progress Microsoft.PowerShell | pin-add Microsoft.PowerShell 7.6.*] $userMsiArgs True" {
+    $r = Invoke-Flow -States @((New-State @{ AccountAdmin = $false } -Pwsh $fresh), (New-UserMsiState), (New-UserMsiState))
+    "$($r.Code) [$($r.Calls)] $($r.PwshArgs) $($r.Text -like '*  (管理者でない PC なので、PowerShell 7 は MSI (マシン単位) で入れる。UAC で管理者の資格情報を入れる)*')"
+}
+Test-Case '管理者でない PC で PowerShell 7 が MSIX しか無ければ、MSI を足して 0' "0 [install-with-progress Microsoft.PowerShell | pin-add Microsoft.PowerShell 7.6.*] $userMsiArgs" {
+    $r = Invoke-Flow -States @((New-State @{ AccountAdmin = $false }), (New-UserMsiState), (New-UserMsiState))
+    "$($r.Code) [$($r.Calls)] $($r.PwshArgs)"
+}
+Test-Case '管理者でない PC で MSI があれば、PowerShell 7 は何も打たない' '0 []' { $r = Invoke-Flow -States @((New-UserMsiState)); "$($r.Code) [$($r.Calls)]" }
+Test-Case '管理者でない PC の -Check で MSIX しか無ければ、何も打たずに 3' '3 []' { $r = Invoke-Flow -States @((New-State @{ AccountAdmin = $false })) -Check; "$($r.Code) [$($r.Calls)]" }
+Test-Case '管理者でない PC で MSI が入らなければ (UAC を断ったなど)、pin を足さずに 1' '1 [install-with-progress Microsoft.PowerShell] True' {
+    $s = New-State @{ AccountAdmin = $false }
+    $key = 'install-with-progress Microsoft.PowerShell'
+    $r = Invoke-Flow -States @($s, $s) -Fail @{ $key = -1978334964 }
+    "$($r.Code) [$($r.Calls)] $($r.Text -like '*PowerShell 7 のインストーラーが取り消された (UAC で「はい」を押さなかった・窓を閉じた)*')"
 }
 Test-Case 'rustup の既定の host が GNU なら、rustup set default-host で MSVC に直す' '0 [native set default-host x86_64-pc-windows-msvc]' {
     $gnu = New-State -Rustup @{ DefaultHost = $Gnu }
