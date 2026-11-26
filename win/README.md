@@ -155,7 +155,7 @@ dotfiles apply
    | --- | --- | --- | --- |
    | Git for Windows | `Git.Git` | `2.56.0.4` (`-GitVersion`) | machine の scope (`C:\Program Files\Git`)。インストーラーの選択肢は既定のまま |
    | GitHub CLI (`-Private` だけ) | `GitHub.cli` | `2.103.3` (`-GhVersion`) | MSI (`C:\Program Files\GitHub CLI`)。`--silent` を付けないので、UAC と進み具合の小さな窓が出る (per-machine の MSI は、quiet だと管理者でない PowerShell から UAC を出せずに落ちる) |
-   | PowerShell 7 | `Microsoft.PowerShell` | `7.6.10.0` (`-PwshVersion`) | 入っていないときだけ入れる。普段のアカウントが管理者の PC は MSIX (`--installer-type msix`。ユーザー単位に入るので UAC は出ない。`--silent`)、管理者でない PC は MSI (`--installer-type wix --custom "USE_MU=0 ENABLE_MU=0"`。`C:\Program Files\PowerShell\7`。`--silent` を付けないので、UAC で管理者の資格情報を入れる。Microsoft Update の更新には入れない)。管理者でない PC で MSIX しか無ければ MSI を足す。入れた直後に、7.6 の線に留める pin (`--version 7.6.*`) を足す。7.6 (LTS) の MSIX は package `Microsoft.PowerShell-LTS` で、7.7 からの MSIX (別の package `Microsoft.PowerShell`) へは上がらない。7.7 からは MSI も無い |
+   | PowerShell 7 | `Microsoft.PowerShell` | `7.6.10.0` (`-PwshVersion`) | 入っていないときだけ入れる。普段のアカウントが管理者の PC は MSIX (`--installer-type msix`。ユーザー単位に入るので UAC は出ない。`--silent`)、管理者でない PC は MSI (`--installer-type wix --custom "USE_MU=0 ENABLE_MU=0"`。`C:\Program Files\PowerShell\7`。`--silent` を付けないので、UAC で管理者の資格情報を入れる。Microsoft Update の更新には入れない)。管理者でない PC で MSIX しか無ければ MSI を `--force` で足す (入っている MSIX があると、winget は install を upgrade に替えて止まるため)。入れた直後に、7.6 の線に留める pin (`--version 7.6.*`) を足す。7.6 (LTS) の MSIX は package `Microsoft.PowerShell-LTS` で、7.7 からの MSIX (別の package `Microsoft.PowerShell`) へは上がらない。7.7 からは MSI も無い |
    | Visual Studio Build Tools 2022 | `Microsoft.VisualStudio.2022.BuildTools` | `17.14.44` (`-VsBuildToolsVersion`) | C++ のワークロード (`Workload.VCTools`。必須の部品だけ)・x64 の MSVC (`VC.Tools.x86.x64`)・Windows SDK (`Windows11SDK.26100`)・英語の言語パック。MSVC と SDK は rustup が自分で入れるときと同じ部品。`--silent` を付けないので、UAC と進み具合の窓が出る。数 GB を落とすので 10 分以上かかることがある |
    | rustup | `Rustlang.Rustup` | `1.29.3` (`-RustupVersion`) | 既定の host を MSVC (`--default-host x86_64-pc-windows-msvc`) にし、toolchain は入れない (`--default-toolchain none`。版は runner の `rust-toolchain.toml` が決める)。自己更新を止める (`rustup set auto-self-update disable`) |
 
@@ -224,7 +224,12 @@ bootstrap は PowerShell 7 を、入れ方を問わず (MSI・MSIX (Microsoft St
   pin で留め、Windows Update の設定にも触らない)
 - PowerShell 7 が MSIX でしか見つからない (PATH のディレクトリと MSI の置き場所に MSIX でない pwsh が無い) ときは、表の行を ⚠ (入っていない
   もの。`-Check` の終了コード 3) にし、見つかった版と入れ方・MSI も入れること・そのわけを出す。引数なしで流すと MSI を足す (MSIX が古い・PATH の
-  外でも、MSI の置き場所はマシンの PATH に入り、新しい窓ではユーザーの PATH の実行エイリアスより先に当たる)
+  外でも、MSI の置き場所はマシンの PATH に入り、新しい窓ではユーザーの PATH の実行エイリアスより先に当たる)。このときだけ `--force` を付けて直に
+  入れる: winget の install は、入っている package (MSIX も `Microsoft.PowerShell` に結ばれる) が見つかると upgrade に替わり、`--version` が入って
+  いる版より新しくなければ止まり、新しくても入れ方 (MSIX → MSI) を替えない (`winget install --help` の文: 既定では入っているかを見て upgrade を
+  試み、`--force` で直に入れる)。入っていない PC には付けない (`--force` は、安全に関わらない問題も越えて続ける意味も持つ)
+- MSIX と MSI が並んで入っていても、入れた直後の `winget pin add --id Microsoft.PowerShell --exact --version 7.6.*` は落ちない (`--id` を渡した
+  pin add は入っているものを探さず、available の package に付ける。winget-cli の PinCommand.cpp)。7.7 には MSI が無いので、MSI が 7.7 へ上がることも無い
 - 普段のアカウントが管理者の PC は、今までどおり入れ方を問わず認める (MSIX だけでも揃っている。昇格しても同じアカウントなので、MSIX の pwsh を起こせる)
 
 #### PowerShell 7 の MSIX の限り
@@ -250,8 +255,11 @@ MSIX は使う人ごとに登録され、実体は `C:\Program Files\WindowsApps
   ユーザーの PATH の実行エイリアスより先に当たる:
 
   ```powershell
-  winget install --id Microsoft.PowerShell --exact --source winget --version 7.6.10.0 --installer-type wix --custom "USE_MU=0 ENABLE_MU=0"   # UAC が出る
+  winget install --id Microsoft.PowerShell --exact --source winget --version 7.6.10.0 --installer-type wix --custom "USE_MU=0 ENABLE_MU=0" --force   # UAC が出る
   ```
+
+  `--force` を付けるのは、入っている MSIX があると、winget が install を upgrade に替えて止まるため (MSIX から MSI へは替えない。`winget install --help`
+  の文: 既定では入っているかを見て upgrade を試み、`--force` で直に入れる)
 
 - 昇格した側 (UAC で資格情報を入れた別の管理者のアカウント) には、winget (App Installer) が登録されていないことがある。winget は Windows に
   サインインしたときに使う人ごとに登録されるので、その PC に一度もサインインしていないアカウントには無い。`Install-OpenSSH` (winget の

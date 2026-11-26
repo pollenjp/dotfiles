@@ -27,7 +27,8 @@ docs/adr/058_win_runner_bootstrap_*・docs/adr/111_win_runner_without_gh_*)。ma
      ほかの pwsh)、7.6.0 より古くなければ入っているとみなし、版も pin も揃えない。入っていなければ 7.6 (LTS) の版を winget で入れ、7.6 の線に
      留める pin (7.6.*) を足す。普段のアカウントが管理者の PC は MSIX (ユーザー単位で入り、UAC は出ない)、管理者でない PC は MSI (マシン単位。
      UAC で管理者の資格情報を入れる。Microsoft Update の更新には入れない)。管理者でない PC は UAC で別の管理者のアカウントに昇格し、その側では
-     使う人ごとに登録される MSIX の pwsh を起こせないので、MSIX の pwsh しか無ければ MSI も入れる。Build Tools には C++ のワークロード・MSVC (x64)・
+     使う人ごとに登録される MSIX の pwsh を起こせないので、MSIX の pwsh しか無ければ MSI も入れる (--force で直に入れる。入っている MSIX があると、
+     winget の install は upgrade に替わって止まる)。Build Tools には C++ のワークロード・MSVC (x64)・
      Windows SDK を入れ、入っている Build Tools に足りないものは Visual Studio Installer で足す。rustup は MSVC の host
      (x86_64-pc-windows-msvc) にし、toolchain は入れず、自己更新を止める (rustup-init が MSVC の有無を見るので、Build Tools を rustup より
      先に入れる)。GNU の host にしないのは、windows-sys 0.61 (windows-link の raw-dylib) の build に MinGW の dlltool と as が要り、GNU の
@@ -227,6 +228,15 @@ function Test-PwshInstallNeeded {
     param($Package, [bool]$AccountAdmin)
     if (-not $Package.Exists) { return $true }
     (-not $AccountAdmin) -and (-not $Package.NonMsix)
+}
+
+# PowerShell 7 の MSI を --force で直に入れるか。pwsh がもう入っている (管理者でない PC で MSIX しか無い) ときだけ。winget の install は、
+# 入っている package (MSIX も Microsoft.PowerShell に結ばれる) が見つかると upgrade に替わり、--version が入っている版より新しくなければ止まり、
+# 新しくても入れ方 (MSIX → MSI) を替えない (winget-cli の InstallCommand.cpp・UpdateFlow.cpp。winget install --help の文: 既定では入っているかを
+# 見て upgrade を試み、--force で直に入れる)。入っていない PC には付けない (--force は安全に関わらない問題も越えて続ける意味も持つ)
+function Test-PwshForceInstall {
+    param($Package, [bool]$AccountAdmin)
+    [bool]$Package.Exists -and (Test-PwshInstallNeeded -Package $Package -AccountAdmin $AccountAdmin)
 }
 
 # PowerShell 7 の MSI に渡す property (winget の --custom。msiexec の引数の後ろに足される)。Microsoft Update の更新に入れない (どちらも
@@ -1179,7 +1189,10 @@ function Invoke-InstallBootstrap {
         } elseif ($s.Exists) {
             continue
         }
-        $arguments = @(Get-WingetInstallArguments -PackageId $p.PackageId -Version $p.Version -Silent $p.Silent -Extra $p.Args)
+        $extra = @($p.Args)
+        # MSIX しか無い管理者でない PC で MSI を足すときは、入っている MSIX に引かれて upgrade に替わらないよう、直に入れる
+        if (($p.Name -eq 'pwsh') -and (Test-PwshForceInstall -Package $s -AccountAdmin $accountAdmin)) { $extra += '--force' }
+        $arguments = @(Get-WingetInstallArguments -PackageId $p.PackageId -Version $p.Version -Silent $p.Silent -Extra $extra)
         Write-Host ''
         Write-Host "winget $($arguments -join ' ')"
         if ($p.Name -eq 'vs-buildtools') { Write-Host '  (Build Tools は数 GB を落として入れるので、10 分以上かかることがある。UAC と進み具合の窓が出る)' }
@@ -1194,7 +1207,9 @@ function Invoke-InstallBootstrap {
             }
         }
         # PowerShell 7 は、入れたときだけ固定した版の線に留める pin (gating) を足す (MSIX も MSI も。ほかの形で入っていた PowerShell 7 には
-        # 足さない。線の中の新しい版は winget upgrade --all でも Microsoft Store でも上がってよい)
+        # 足さない。線の中の新しい版は winget upgrade --all でも Microsoft Store でも上がってよい)。MSIX と MSI が並んで入っていても、--id を
+        # 渡した pin add は入っているものを探さず、available の package (ID と source) に付けるので、1 つに決められずに落ちることは無い
+        # (winget-cli の PinCommand.cpp)
         if (($p.Name -eq 'pwsh') -and ($result.ExitCode -eq 0)) {
             $pinVersion = Get-PwshPinVersion -Version $p.Version
             if ($pinVersion) {

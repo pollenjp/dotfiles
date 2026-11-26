@@ -201,6 +201,22 @@ Test-Case 'PowerShell 7 を入れるのは、入っていないときと、管�
     ) -join ' '
 }
 
+# Test-PwshForceInstall: PowerShell 7 の MSI を --force で直に入れるか。pwsh がもう入っている (管理者でない PC で MSIX しか無い) ときだけ。
+# winget の install は、入っている package (MSIX も Microsoft.PowerShell に結ばれる) が見つかると upgrade に替わり、入れ方 (MSIX → MSI) を
+# 替えずに止まる。入っていない PC には付けない (--force は安全に関わらない問題も越えて続ける)
+Test-Case 'MSI を --force で入れるのは、管理者でない PC で MSIX しか無いときだけ (入っていない・MSI がある・管理者の PC には付けない)' 'False False True False False' {
+    $none = [pscustomobject]@{ Exists = $false; NonMsix = $false }
+    $msixOnly = [pscustomobject]@{ Exists = $true; NonMsix = $false }
+    $withMsi = [pscustomobject]@{ Exists = $true; NonMsix = $true }
+    @(
+        (Test-PwshForceInstall -Package $none -AccountAdmin $true)
+        (Test-PwshForceInstall -Package $none -AccountAdmin $false)
+        (Test-PwshForceInstall -Package $msixOnly -AccountAdmin $false)
+        (Test-PwshForceInstall -Package $msixOnly -AccountAdmin $true)
+        (Test-PwshForceInstall -Package $withMsi -AccountAdmin $false)
+    ) -join ' '
+}
+
 # Get-RustupVersionFromOutput: rustup --version の出力から版を拾う (info の行や rustc の行が混ざる)
 Test-Case 'rustup: 版を拾う (ほかの行が先にあっても)' '1.29.3' { Get-RustupVersionFromOutput -Lines @('info: This is the version for the rustup toolchain manager, not the rustc compiler.', 'rustup 1.29.3 (8c9a7b0c1 2026-11-03)') }
 Test-Case 'rustup: rustc の行は版と読まない' '' { Get-RustupVersionFromOutput -Lines @('rustc 1.91.0 (f8297e351 2025-10-28)') }
@@ -888,7 +904,8 @@ Test-Case '管理者でない PC で PowerShell 7 が入っていなければ、
     $r = Invoke-Flow -States @((New-State @{ AccountAdmin = $false } -Pwsh $fresh), (New-UserMsiState), (New-UserMsiState))
     "$($r.Code) [$($r.Calls)] $($r.PwshArgs) $($r.Text -like '*  (管理者でない PC なので、PowerShell 7 は MSI (マシン単位) で入れる。UAC で管理者の資格情報を入れる)*')"
 }
-Test-Case '管理者でない PC で PowerShell 7 が MSIX しか無ければ、MSI を足して 0' "0 [install-with-progress Microsoft.PowerShell | pin-add Microsoft.PowerShell 7.6.*] $userMsiArgs" {
+# 入っている MSIX があると winget の install は upgrade に替わって止まるので、--force で直に入れる (入っていない PC の上の試験には付かない)
+Test-Case '管理者でない PC で PowerShell 7 が MSIX しか無ければ、MSI を --force で足して 0' "0 [install-with-progress Microsoft.PowerShell | pin-add Microsoft.PowerShell 7.6.*] $userMsiArgs --force" {
     $r = Invoke-Flow -States @((New-State @{ AccountAdmin = $false }), (New-UserMsiState), (New-UserMsiState))
     "$($r.Code) [$($r.Calls)] $($r.PwshArgs)"
 }
