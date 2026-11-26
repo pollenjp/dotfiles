@@ -195,15 +195,19 @@ let
       name = "linger は herdrCore に従う (minimum に herdrCore を足すと on、all で herdrCore を外すと off、linger だけも書ける)";
       ok =
         let
+          # herdr-core は Linux のホストだけ (macOS で on にすると assertion で止まる)。評価だけなので、どの system の check でも Linux で組む
           coreOnly = cfgOf {
+            system = "x86_64-linux";
             group = "minimum";
             modules = [ { dotfiles.herdrCore.enable = true; } ];
           };
           allNoCore = cfgOf {
+            system = "x86_64-linux";
             group = "all";
             modules = [ { dotfiles.herdrCore.enable = false; } ];
           };
           lingerOnly = cfgOf {
+            system = "x86_64-linux";
             group = "minimum";
             modules = [ { dotfiles.linger.enable = true; } ];
           };
