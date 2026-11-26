@@ -473,10 +473,14 @@ let
     {
       name = "line はグループと環境を 1 行にし、text は効かない道具に合わない条件を添える";
       ok =
-        (hostWith { group = "minimum"; }).hostSummary.line == "minimum (ホストで選んだ) · 環境: Linux (WSL でない)"
+        let
+          # 作り物のホストは、この check の system で組む (aarch64-darwin では macOS)
+          env = if lib.hasSuffix "-darwin" system then "macOS" else "Linux (WSL でない)";
+        in
+        (hostWith { group = "minimum"; }).hostSummary.line == "minimum (ホストで選んだ) · 環境: ${env}"
         && lib.hasInfix "    Windows の ntn: – (win/ を配らない) (ホストのファイル) [wsl.windowsFiles.ntn.enable]" (hostWith winNtnNoFiles)
         .hostSummary.text
-        && lib.hasInfix "  環境: Linux (WSL でない)\n" (hostWith { }).hostSummary.text;
+        && lib.hasInfix "  環境: ${env}\n" (hostWith { }).hostSummary.text;
     }
   ];
 
