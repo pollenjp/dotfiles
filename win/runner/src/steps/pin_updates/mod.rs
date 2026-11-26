@@ -25,6 +25,8 @@
 //! - 依存の更新の skill が読む JSON の口 (`--list --json`・`--candidates --json`) と、人が読む `--candidates` は写さない (WSL の script に残す)。
 //!   読む側は Linux の会話から repo の root で打ち、口は WSL の記録を見ないので、受け持ちを runner に切り替えた後も Linux で動く
 //! - Windows にも記録の置き場にも何も書かない。check・dry-run・apply は同じことをする (GitHub を読んで知らせるだけ)
+//! - on/off は道具の switch `privateRepos` (gh にログインして pollenjp の private な repo を使うホスト。dotfiles-private の
+//!   docs/adr/111_win_runner_without_gh_*)。gh にログインできない PC (客先の PC など) では流さない (↷)
 
 mod herdr;
 mod winget;
@@ -34,6 +36,7 @@ mod tests;
 
 use super::{Gate, Mode, Outcome, Step, StepInfo};
 use crate::context::{Ctx, ghq_owner_dir};
+use crate::host::PRIVATE_REPOS;
 use crate::process::{CommandSpec, Exit};
 use crate::report::Kind;
 use std::cmp::Ordering;
@@ -166,7 +169,8 @@ impl Step for PinUpdates {
             id: "pin-updates",
             order: 97,
             title: "固定した版より新しい版が出ていないかを知らせる",
-            gate: Gate::Always,
+            // GitHub は gh (ログイン) で読む。privateRepos (gh のログインを使うホスト) が off なら流さない (ADR 111)
+            gate: Gate::Tool(PRIVATE_REPOS),
             ported: true,
             windows_only: false,
         }

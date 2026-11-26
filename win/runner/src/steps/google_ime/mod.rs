@@ -6,7 +6,9 @@
 //! spec §8 の 5 (protobuf は要るメッセージだけを手で読み書きする。`pb.rs`・`textpb.rs`・`ime.rs`)。
 //!
 //! - 読むテキスト: dotfiles の `win/google-japanese-input/` (`config.txtpb`・`keymap.tsv`・あれば `romaji.tsv`) と、dotfiles-private の clone の
-//!   `google-japanese-input/dictionaries/` (無ければ辞書は飛ばす)
+//!   `google-japanese-input/dictionaries/` (無ければ辞書は飛ばして ⚠)。道具の switch `privateRepos` が off のホスト (gh にログインできない PC など) は
+//!   辞書を扱わず (Windows の辞書にも触らない。⚠ にしない)、設定だけを置く。取り込みも辞書を書かない (dotfiles-private の
+//!   docs/adr/111_win_runner_without_gh_*)
 //! - ファイルごとに、時刻などを外した中身の digest で判定する (WSL と同じ):
 //!
 //!   | Windows 側 | すること |
@@ -40,6 +42,7 @@ mod textpb;
 use super::{Gate, Mode, Outcome, Step, StepInfo};
 use crate::context::{Ctx, join_segments};
 use crate::fsutil::{self, RunBackup};
+use crate::host::PRIVATE_REPOS;
 use crate::process::{CommandSpec, Exit};
 use crate::record::Records;
 use crate::report::Kind;
@@ -131,6 +134,8 @@ struct Prepared {
     paths: Paths,
     /// 辞書のテキストのディレクトリ (無ければ辞書は飛ばす)
     dict: Option<PathBuf>,
+    /// 辞書を扱わないホスト (privateRepos が off。辞書の正本は private な dotfiles-private)。飛ばしても ⚠ にしない
+    dict_unused: bool,
     records: Records,
     /// 締めの行に添える ※ (辞書を飛ばした)
     notes: Vec<String>,
@@ -201,7 +206,15 @@ fn prepare(ctx: &mut Ctx, for_import: bool) -> Result<Prepared, Outcome> {
     }
     let mut dict = Some(paths.dict_dir.clone());
     let mut notes = Vec::new();
-    if !paths.dict_dir.is_dir() {
+    let dict_unused = !ctx.host.tool(PRIVATE_REPOS);
+    if dict_unused {
+        // 辞書の正本は private な dotfiles-private。privateRepos が off のホスト (gh にログインできない PC など) では辞書を扱わず、Windows の
+        // 辞書にも触らない (設定だけを置く。dotfiles-private の docs/adr/111_win_runner_without_gh_*)
+        ctx.say(
+            "辞書は扱いません (privateRepos が off。辞書の正本は dotfiles-private)。設定だけを置きます。",
+        );
+        dict = None;
+    } else if !paths.dict_dir.is_dir() {
         if for_import && paths.private.join(".git").is_dir() {
             if let Err(e) = std::fs::create_dir_all(&paths.dict_dir) {
                 ctx.say(format!(
@@ -233,6 +246,7 @@ fn prepare(ctx: &mut Ctx, for_import: bool) -> Result<Prepared, Outcome> {
     Ok(Prepared {
         paths,
         dict,
+        dict_unused,
         records,
         notes,
     })
@@ -386,8 +400,19 @@ struct Tally {
     killed: Option<Killed>,
 }
 
+/// 辞書を扱ったか (締めの行の書き方と、行の種類を決める)
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DictUse {
+    /// 辞書も組み立てて置いた
+    Used,
+    /// 辞書のテキストが無いので飛ばした (⚠)
+    Skipped,
+    /// 辞書を扱わないホスト (privateRepos が off)
+    Unused,
+}
+
 impl Tally {
-    fn summary(&self, mode: Mode, dict: bool) -> String {
+    fn summary(&self, mode: Mode, dict: DictUse) -> String {
         let mut s = format!(
             "置く {} / 上書き {} / 同じ {} / 衝突 {}",
             self.copied, self.updated, self.same, self.conflicts
@@ -395,8 +420,10 @@ impl Tally {
         if !self.errors.is_empty() {
             s.push_str(&format!(" / エラー {}", self.errors.len()));
         }
-        if !dict {
-            s.push_str(" (辞書は飛ばした)");
+        match dict {
+            DictUse::Used => {}
+            DictUse::Skipped => s.push_str(" (辞書は飛ばした)"),
+            DictUse::Unused => s.push_str(" (辞書は扱わない)"),
         }
         match &self.killed {
             Some(Killed::Done) => s.push_str("。変換サーバーを落とした"),
@@ -451,6 +478,7 @@ fn sync(ctx: &mut Ctx, mode: Mode, show_words: bool) -> Outcome {
     let Prepared {
         paths,
         dict,
+        dict_unused,
         mut records,
         notes,
     } = match prepare(ctx, false) {
@@ -676,10 +704,15 @@ fn sync(ctx: &mut Ctx, mode: Mode, show_words: bool) -> Outcome {
         }
     }
 
-    let summary = tally.summary(mode, dict.is_some());
+    let dict_use = match (&dict, dict_unused) {
+        (Some(_), _) => DictUse::Used,
+        (None, true) => DictUse::Unused,
+        (None, false) => DictUse::Skipped,
+    };
+    let summary = tally.summary(mode, dict_use);
     ctx.say("");
     ctx.say(&summary);
-    let mut outcome = Outcome::new(tally.kind(mode, dict.is_none()), summary);
+    let mut outcome = Outcome::new(tally.kind(mode, dict_use == DictUse::Skipped), summary);
     if tally.conflicts > 0 {
         outcome = outcome.note(if ctx.host.runner_enable {
             format!(
@@ -1017,6 +1050,7 @@ pub fn import(ctx: &mut Ctx) -> Outcome {
         dict,
         mut records,
         notes,
+        ..
     } = match prepare(ctx, true) {
         Ok(p) => p,
         Err(o) => return o,

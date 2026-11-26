@@ -5,6 +5,8 @@
 //! PowerShell 7 のコマンド pf (`win/port-forward/Start-PortForward.ps1`) は、ssh の Host を選んだ次の画面にこの組を出す。その PC で足した組は pf が
 //! 同じ場所の `local.json` に持ち、この手順は触らない。
 //!
+//! - on/off は道具の switch `privateRepos` (pollenjp の private な repo を使うホスト。dotfiles-private の docs/adr/111_win_runner_without_gh_*)。
+//!   off のホストでは流さない (↷。置いてある hosts.json も消さない)
 //! - 正本は dotfiles-private の clone (runner の clone の隣か bootstrap の置き場。`Ctx::sibling`) の `ssh/port-forward.toml`。無ければ何も書かない
 //!   (置いてある hosts.json も消さない)。WSL は Nix の `builtins.fromTOML` で読むが、Windows には Nix が無いので、runner は toml の crate で読む
 //!   (TOML 1.1。Nix が止める `\e` などを通すのは win/manifest.toml と同じ)
@@ -23,6 +25,7 @@ use super::deploy::{self, Action, Problem, Tally};
 use super::{Gate, Mode, Outcome, Step, StepInfo};
 use crate::context::{Ctx, join_segments};
 use crate::fsutil;
+use crate::host::PRIVATE_REPOS;
 use crate::jv::jq_string;
 use crate::record::FileRecords;
 use crate::report::Kind;
@@ -47,7 +50,8 @@ impl Step for PortForward {
             id: "port-forward",
             order: 99,
             title: "dotfiles-private の port forwarding の組を JSON にして置く",
-            gate: Gate::Always,
+            // 正本は private な dotfiles-private。privateRepos が off のホストでは流さない (ADR 111。前に置いた hosts.json はそのまま)
+            gate: Gate::Tool(PRIVATE_REPOS),
             ported: true,
             windows_only: false,
         }
@@ -926,7 +930,9 @@ mod tests {
                 .any(|l| l == format!("# order: {}", info.order))
         );
         assert!(!text.lines().any(|l| l.starts_with("# tool: ")));
-        assert_eq!(info.gate, Gate::Always);
+        // WSL の script は `# tool:` を持たない (win/ を配る WSL は dotfiles-private を読める)。runner は private な repo を使わない PC のために
+        // privateRepos で on/off する (dotfiles-private の docs/adr/111_win_runner_without_gh_*)
+        assert_eq!(info.gate, Gate::Tool("privateRepos"));
         assert!(
             text.contains(&format!("\nnote='{NOTE}'\n")),
             "WSL の script の note と違う"

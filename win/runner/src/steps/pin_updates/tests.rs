@@ -1231,7 +1231,7 @@ fn every_mode_only_reads() {
             info.ported,
             info.windows_only
         ),
-        ("pin-updates", 97, Gate::Always, true, false)
+        ("pin-updates", 97, Gate::Tool("privateRepos"), true, false)
     );
 }
 
