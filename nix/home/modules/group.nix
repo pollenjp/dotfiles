@@ -28,7 +28,8 @@ in
       message = ''
         dotfiles.claude.privateSkills.enable が true ですが dotfiles.claude.enable が false です。
         claude-skills は ~/.claude に繋ぐ Claude Code の skill 置き場なので、Claude Code を入れるホストでだけ有効にしてください
-        (claude.enable = true; も書く)。
+        (claude.enable = true; も書く)。グループ all で Claude Code を外すなら、claude.privateSkills.enable = false; と、それに頼る
+        道具 (claude.devTracker.enable・dotfiles.herdr.hub.enable) の false も書いてください。
       '';
     }
     {
@@ -36,14 +37,16 @@ in
       message = ''
         dotfiles.claude.devTracker.enable が true ですが dotfiles.claude.privateSkills.enable が false です。
         Dev Tracker の skill (pjp-dev-tracker) は claude-skills にあるので、claude.privateSkills.enable = true; も書いてください
-        (設定グループが minimum のホストでは、既定で false です)。
+        (設定グループが minimum のホストでは、既定で false です)。グループ all で claude-skills を外すなら、claude.devTracker.enable = false;
+        も書いてください。
       '';
     }
     {
       assertion = cfg.herdr.hub.enable -> (cfg.herdr.enable && cfg.claude.privateSkills.enable);
       message = ''
         dotfiles.herdr.hub.enable が true ですが dotfiles.herdr.enable か dotfiles.claude.privateSkills.enable が false です。
-        集約ハブ ~/h は herdr の会話の受け口で、作る hub-init.sh は claude-skills にあります。両方を true にしてください。
+        集約ハブ ~/h は herdr の会話の受け口で、作る hub-init.sh は claude-skills にあります。両方を true にしてください
+        (グループ all で herdr か claude-skills を外すなら、dotfiles.herdr.hub.enable = false; を書く)。
       '';
     }
   ];

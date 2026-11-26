@@ -101,6 +101,7 @@ in
       message = ''
         dotfiles.claude.devTracker.inbox.enable = true は dotfiles.claude.devTracker.enable = true のマシンでだけ使えます。
         Dev Tracker のチケットのコメントを、ハブの会話へ届ける見回り役です (pjp-dev-tracker の ticket.sh inbox)。
+        グループ all で Dev Tracker を外すなら、claude.devTracker.inbox.enable = false; も書いてください。
       '';
     }
   ];
