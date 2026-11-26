@@ -82,7 +82,7 @@
 #   - git は git-for-windows/git の release の tag (v<X.Y.Z>.windows.<N>) を、winget の版 (N が 1 なら X.Y.Z、ほかは X.Y.Z.N) に
 #     突き合わせる (prerelease の rc は数えない)。gh は cli/cli の release。pwsh・vs-buildtools・rustup は winget-pkgs に載った日で、
 #     GitHub の release は引かない
-#   - pwsh は 7.6 の線 (series_re) の版だけを読む: winget-pkgs の 7.7 の版 (MSIX だけ) は新しい版にも版の形の誤りにも数えず、
+#   - pwsh は 7.6 の線 (series_re) の版だけを読む: winget-pkgs の 7.7 の版 (別の package の MSIX) は新しい版にも版の形の誤りにも数えず、
 #     Preview のディレクトリ (Microsoft.PowerShell.Preview) は版として読まない。「winget の版」の行に線のことを添える。7.6 の線の新しい版は
 #     ほかの名前と同じく、載って 30 日で exit 1 (manifest の URL と -PwshVersion の既定値を変える手順)
 #   - 名前だけ渡すと、repo の win/bootstrap/Install-Bootstrap.ps1 と win/bootstrap/skipped-versions/<名前>.txt を読む
@@ -1753,14 +1753,14 @@ else
   ng "rustup: ID が無い" "rc=$(rc "${d}") calls=$(calls "${d}") $(outerr "${d}")"
 fi
 
-# bpw1. pwsh: 7.6 の線の版だけを読む。winget-pkgs の 7.7 の版 (MSIX だけ) と Preview のディレクトリがあっても、固定した版が 7.6 の線の
+# bpw1. pwsh: 7.6 の線の版だけを読む。winget-pkgs の 7.7 の版 (別の package の MSIX) と Preview のディレクトリがあっても、固定した版が 7.6 の線の
 #       最新なら exit 0 で ⚠ を出さない。manifests/m/Microsoft/PowerShell を見て、GitHub の release は引かない
 pkg=pwsh
 d=$(new_case bpw1 7.6.10.0 -)
 put_commits "${d}" 7.7.0.0 "$(ago 40)"
 FAKE_GH_CONTENTS=$(contents_json 7.6.9.0 7.6.10.0 7.7.0.0 Preview) run "${d}" 0
 if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" -F 'Windows の PowerShell 7 (winget の Microsoft.PowerShell)' \
-  && seen "${d}" -F '7.6 の線だけを読む (7.7 から MSI が無い)' && ! seen "${d}" -F '7.7.0.0' \
+  && seen "${d}" -F '7.6 の線だけを読む (7.7 は別の package の MSIX)' && ! seen "${d}" -F '7.7.0.0' \
   && called "${d}" -xF 'api repos/microsoft/winget-pkgs/contents/manifests/m/Microsoft/PowerShell' \
   && ! called "${d}" -F 'releases' && ! called "${d}" -F 'commits'; then
   ok "pwsh: 7.6 の線の版だけを読み、7.7 の版と Preview のディレクトリは数えない (GitHub も、7.7 の版の載った日も引かない)"

@@ -107,10 +107,39 @@ Test-Case 'git: 版の行が無ければ空' '' { Get-GitVersionFromOutput -Line
 Test-Case 'gh: 1 行目の版を拾う' '2.103.3' { Get-GhVersionFromOutput -Lines @('gh version 2.103.3 (2026-10-26)', 'https://github.com/cli/cli/releases/tag/v2.103.3') }
 Test-Case 'gh: 版の行が無ければ空' '' { Get-GhVersionFromOutput -Lines @('gh: command failed') }
 
-# Get-PwshVersionFromOutput: pwsh --version の出力を winget の Microsoft.PowerShell の版 (4 つの数) にする
-Test-Case 'pwsh: PowerShell 7.6.10 は winget の 7.6.10.0' '7.6.10.0' { Get-PwshVersionFromOutput -Lines @('PowerShell 7.6.10') }
-Test-Case 'pwsh: 行末の CR と前後の空白を落とす' '7.6.10.0' { Get-PwshVersionFromOutput -Lines @("  PowerShell 7.6.10`r") }
+# Get-PwshVersionFromOutput: pwsh --version の出力から版 (3 つの数) を拾う
+Test-Case 'pwsh: PowerShell 7.6.10 は 7.6.10' '7.6.10' { Get-PwshVersionFromOutput -Lines @('PowerShell 7.6.10') }
+Test-Case 'pwsh: 行末の CR と前後の空白を落とす' '7.7.0' { Get-PwshVersionFromOutput -Lines @("  PowerShell 7.7.0`r") }
 Test-Case 'pwsh: preview とほかの行は版と読まない' '' { Get-PwshVersionFromOutput -Lines @('PowerShell 7.7.0-preview.5', 'error') }
+
+# Test-PwshVersionAccepted: PowerShell 7 として認める版か (7.6.0 より古くない。入れ方は問わない)
+Test-Case 'pwsh: 7.6.0・7.6.10・7.7.0 は認め、7.5.4・7.4.13 と読めない版は認めない' '7.6.0=True 7.6.10=True 7.7.0=True 7.5.4=False 7.4.13=False =False x=False' {
+    (@('7.6.0', '7.6.10', '7.7.0', '7.5.4', '7.4.13', '', 'x') | ForEach-Object { "$_=$(Test-PwshVersionAccepted -Version $_)" }) -join ' '
+}
+
+# Get-PwshCandidates: 新しい窓の PATH のディレクトリごとの pwsh.exe を順に、その後ろに MSI の置き場所と MSIX の実行エイリアスを足す
+$msiPwsh = 'C:\Program Files\PowerShell\7\pwsh.exe'
+$aliasPwsh = 'C:\Users\u\AppData\Local\Microsoft\WindowsApps\pwsh.exe'
+# PATH の項目は PATH の字のまま並ぶ (2 つ目は小文字)。MSI の置き場所と実行エイリアスは PATH にあるので、後ろに重ねない
+Test-Case 'pwsh を探す順は PATH (空の項目と引用符と末尾の \ を落とす) → MSI の置き場所 → MSIX の実行エイリアスで、同じパスは 1 つ (大文字小文字は問わない)' 'C:\Program Files\PowerShell\7\pwsh.exe=True|c:\users\u\appdata\local\microsoft\windowsapps\pwsh.exe=True|C:\Tools\pwsh.exe=True' {
+    $pathValue = 'C:\Program Files\PowerShell\7\;;c:\users\u\appdata\local\microsoft\windowsapps;"C:\Tools"'
+    (@(Get-PwshCandidates -PathValue $pathValue -MsiPath $msiPwsh -AliasPath $aliasPwsh) | ForEach-Object { "$($_.Path)=$($_.OnPath)" }) -join '|'
+}
+Test-Case 'PATH に無い MSI の置き場所と MSIX の実行エイリアスは、PATH の後ろに PATH の外として並ぶ' 'C:\Windows\system32\pwsh.exe=True|C:\Program Files\PowerShell\7\pwsh.exe=False|C:\Users\u\AppData\Local\Microsoft\WindowsApps\pwsh.exe=False' {
+    (@(Get-PwshCandidates -PathValue 'C:\Windows\system32' -MsiPath $msiPwsh -AliasPath $aliasPwsh) | ForEach-Object { "$($_.Path)=$($_.OnPath)" }) -join '|'
+}
+
+# Get-PwshInstallKind・Format-PwshInstallKind: 入れ方 (WindowsApps の下は MSIX、MSI の置き場所は MSI、ほかはパスを出す)
+Test-Case 'pwsh の入れ方は、実行エイリアスと WindowsApps の実体が msix、MSI の置き場所が msi、ほかは other' 'msix msix msi other' {
+    $real = 'C:\Program Files\WindowsApps\Microsoft.PowerShell-LTS_7.6.10.0_x64__8wekyb3d8bbwe\pwsh.exe'
+    (@($aliasPwsh, $real, 'c:\program files\powershell\7\PWSH.EXE', 'C:\tools\pwsh\pwsh.exe') | ForEach-Object { Get-PwshInstallKind -Path $_ -MsiPath $msiPwsh }) -join ' '
+}
+Test-Case '表に出す入れ方は MSIX・MSI と、ほかの形のパス' 'MSIX|MSI|C:\tools\pwsh\pwsh.exe' {
+    "$(Format-PwshInstallKind -Kind 'msix' -Path $aliasPwsh)|$(Format-PwshInstallKind -Kind 'msi' -Path $msiPwsh)|$(Format-PwshInstallKind -Kind 'other' -Path 'C:\tools\pwsh\pwsh.exe')"
+}
+
+# Get-PwshPinVersion: bootstrap が入れた PowerShell 7 に足す pin の版 (固定した版の線)
+Test-Case 'pin の版は固定した版の線 (7.6.10.0 → 7.6.*)。読めなければ空' '7.6.*|' { "$(Get-PwshPinVersion -Version '7.6.10.0')|$(Get-PwshPinVersion -Version 'x')" }
 
 # Get-RustupVersionFromOutput: rustup --version の出力から版を拾う (info の行や rustc の行が混ざる)
 Test-Case 'rustup: 版を拾う (ほかの行が先にあっても)' '1.29.3' { Get-RustupVersionFromOutput -Lines @('info: This is the version for the rustup toolchain manager, not the rustc compiler.', 'rustup 1.29.3 (8c9a7b0c1 2026-11-03)') }
@@ -199,13 +228,18 @@ Test-Case '既定の形は gh を入れない (Git・PowerShell 7・Build Tools�
 Test-Case '道具ごとの ID と版' 'Git.Git=2.56.0.4 GitHub.cli=2.103.3 Microsoft.PowerShell=7.6.10.0 Microsoft.VisualStudio.2022.BuildTools=17.14.44 Rustlang.Rustup=1.29.3' { ($packages | ForEach-Object { "$($_.PackageId)=$($_.Version)" }) -join ' ' }
 Test-Case 'Git は machine の scope' '--scope machine' { $packages[0].Args -join ' ' }
 Test-Case 'gh は MSI (wix)' '--installer-type wix' { $packages[1].Args -join ' ' }
-# 7.6 の winget の版は MSIX もあるので wix を名指しする。Microsoft Update の自動更新に入れない (固定した版から動かさない)
-Test-Case 'PowerShell 7 は MSI (wix) で、Microsoft Update の自動更新に入れない' '--installer-type|wix|--custom|USE_MU=0 ENABLE_MU=0' { $packages[2].Args -join '|' }
+# 7.6 の winget の版は MSI もあるので msix を名指しする (ユーザー単位に入り、UAC が要らない)
+Test-Case 'PowerShell 7 は winget の MSIX' '--installer-type msix' { $packages[2].Args -join ' ' }
 Test-Case 'Build Tools は C++ のワークロード・x64 の MSVC・Windows SDK を入れる' '--custom|--norestart --addProductLang En-us --add Microsoft.VisualStudio.Workload.VCTools --add Microsoft.VisualStudio.Component.VC.Tools.x86.x64 --add Microsoft.VisualStudio.Component.Windows11SDK.26100' { $packages[3].Args -join '|' }
 Test-Case 'rustup は MSVC の host にし、toolchain を入れない' '--custom|--default-host x86_64-pc-windows-msvc --default-toolchain none' { $packages[4].Args -join '|' }
-# per-machine の MSI (gh・PowerShell 7) を、管理者でない PowerShell から quiet (--silent) で流すと UAC が出ずに落ちる。Build Tools は 10 分以上
-# かかるので進み具合の窓を出す。Git は installer が自分で昇格し、rustup は user に入るので --silent でよい
-Test-Case 'gh・PowerShell 7・Build Tools は --silent を付けない (UAC と進み具合の窓を出す)' 'git=True gh=False pwsh=False vs-buildtools=False rustup=True' { ($packages | ForEach-Object { "$($_.Name)=$($_.Silent)" }) -join ' ' }
+# per-machine の MSI (gh) を、管理者でない PowerShell から quiet (--silent) で流すと UAC が出ずに落ちる。Build Tools は 10 分以上
+# かかるので進み具合の窓を出す。Git は installer が自分で昇格し、PowerShell 7 の MSIX と rustup は user に入るので --silent でよい
+Test-Case 'gh・Build Tools は --silent を付けない (UAC と進み具合の窓を出す)' 'git=True gh=False pwsh=True vs-buildtools=False rustup=True' { ($packages | ForEach-Object { "$($_.Name)=$($_.Silent)" }) -join ' ' }
+
+# Get-WingetPinAddArguments: pin (pinning) と、版の範囲に留める pin (gating)
+Test-Case 'pin add は版を渡さなければ pinning、渡せば gating (その範囲に留める)' 'pin add --id Git.Git --exact --accept-source-agreements --disable-interactivity|pin add --id Microsoft.PowerShell --exact --version 7.6.* --accept-source-agreements --disable-interactivity' {
+    "$((Get-WingetPinAddArguments -PackageId 'Git.Git') -join ' ')|$((Get-WingetPinAddArguments -PackageId 'Microsoft.PowerShell' -Version '7.6.*') -join ' ')"
+}
 
 # ---------------------------------------------------------------------------
 # clone
@@ -249,10 +283,17 @@ function New-Package {
     param([string]$Name, [string]$Title, [string]$Id, [string]$Target, [hashtable]$Change = @{})
     $p = [ordered]@{
         Name = $Name; Title = $Title; PackageId = $Id; Target = $Target; Exists = $true; Installed = $Target; Pinned = $true
-        InstallPath = $null; MissingComponents = @(); SelfUpdateDisabled = $true; DefaultHost = $Msvc
+        InstallPath = $null; MissingComponents = @(); SelfUpdateDisabled = $true; DefaultHost = $Msvc; Path = $null; OnPath = $false; Kind = $null
     }
     foreach ($k in $Change.Keys) { $p[$k] = $Change[$k] }
     [pscustomobject]$p
+}
+# PowerShell 7 の揃っている状態: PATH で先に当たる MSIX の実行エイリアスの 7.6.10 (pin は見ないので無い)。$Change で差し替える
+function New-PwshPackage {
+    param([hashtable]$Change = @{})
+    $c = @{ Installed = '7.6.10'; Pinned = $false; Path = $aliasPwsh; OnPath = $true; Kind = 'msix' }
+    foreach ($k in $Change.Keys) { $c[$k] = $Change[$k] }
+    New-Package 'pwsh' 'PowerShell 7' 'Microsoft.PowerShell' '7.6.10.0' $c
 }
 function New-Repo {
     param([string]$Name, [hashtable]$Change = @{})
@@ -281,7 +322,7 @@ function New-State {
         Packages   = @(
             (New-Package 'git' 'Git for Windows' 'Git.Git' '2.56.0.4' $Git)
             (New-Package 'gh' 'GitHub CLI' 'GitHub.cli' '2.103.3' $Gh)
-            (New-Package 'pwsh' 'PowerShell 7' 'Microsoft.PowerShell' '7.6.10.0' $Pwsh)
+            (New-PwshPackage $Pwsh)
             (New-Package 'vs-buildtools' 'Visual Studio Build Tools 2022' 'Microsoft.VisualStudio.2022.BuildTools' '17.14.44' $Vs)
             (New-Package 'rustup' 'rustup' 'Rustlang.Rustup' '1.29.3' $Rustup)
         )
@@ -304,7 +345,7 @@ function New-PublicState {
         Private    = $false
         Packages   = @(
             (New-Package 'git' 'Git for Windows' 'Git.Git' '2.56.0.4' $Git)
-            (New-Package 'pwsh' 'PowerShell 7' 'Microsoft.PowerShell' '7.6.10.0' $Pwsh)
+            (New-PwshPackage $Pwsh)
             (New-Package 'vs-buildtools' 'Visual Studio Build Tools 2022' 'Microsoft.VisualStudio.2022.BuildTools' '17.14.44' $Vs)
             (New-Package 'rustup' 'rustup' 'Rustlang.Rustup' '1.29.3' $Rustup)
         )
@@ -336,7 +377,17 @@ Test-Case '揃っていれば直すことは無い' '' { Get-Kinds (New-State) }
 Test-Case 'まっさらな PC (-Private) は、入っていない・無いものだけ' 'Git for Windows=missing GitHub CLI=missing PowerShell 7=missing Visual Studio Build Tools 2022=missing rustup=missing gh のログイン=missing dotfiles=missing dotfiles-private=missing claude-skills=missing' { Get-Kinds (New-FreshState) }
 Test-Case 'まっさらな PC (既定の形) は gh の行が無く、手元のホストの値を写す' 'Git for Windows=missing PowerShell 7=missing Visual Studio Build Tools 2022=missing rustup=missing dotfiles=missing ホストの値 (手元)=missing' { Get-Kinds (New-FreshPublicState) }
 Test-Case '既定の形で揃っていれば直すことは無い' '' { Get-Kinds (New-PublicState) }
-Test-Case 'PowerShell 7 の版のずれは bootstrap では直らない差' 'PowerShell 7=manual' { Get-Kinds (New-State -Pwsh @{ Installed = '7.6.9.0' }) }
+# PowerShell 7 は入れ方を問わず、7.6.0 より古くなければ揃っている (固定した版と比べず、pin も見ない)
+Test-Case 'PowerShell 7 は固定した版と違っても、7.6.0 より古くなければ揃っている (Microsoft Store の 7.7.0・7.6 の線の古い版)' '||' {
+    "$(Get-Kinds (New-State -Pwsh @{ Installed = '7.7.0' }))|$(Get-Kinds (New-State -Pwsh @{ Installed = '7.6.0' }))|$(Get-Kinds (New-PublicState -Pwsh @{ Installed = '7.6.9' }))"
+}
+Test-Case 'PowerShell 7 は MSI でも PATH のほかの形でも、版が足りていれば揃っている' '|' {
+    "$(Get-Kinds (New-State -Pwsh @{ Kind = 'msi'; Path = $msiPwsh }))|$(Get-Kinds (New-State -Pwsh @{ Kind = 'other'; Path = 'C:\tools\pwsh\pwsh.exe' }))"
+}
+Test-Case 'PowerShell 7 は pin を見ない (bootstrap が入れたときだけ足す)' '' { Get-Kinds (New-State -Pwsh @{ Pinned = $false }) }
+Test-Case 'PowerShell 7 が 7.6.0 より古ければ bootstrap では直らない差' 'PowerShell 7=manual' { Get-Kinds (New-State -Pwsh @{ Installed = '7.4.13'; Kind = 'msi'; Path = $msiPwsh }) }
+Test-Case 'PowerShell 7 の版が読めなければ bootstrap では直らない差' 'PowerShell 7=manual' { Get-Kinds (New-State -Pwsh @{ Installed = $null }) }
+Test-Case 'PowerShell 7 が PATH の外でだけ見つかれば bootstrap では直らない差 (runner と herdr は PATH の pwsh を起こす)' 'PowerShell 7=manual' { Get-Kinds (New-State -Pwsh @{ OnPath = $false }) }
 Test-Case 'SAC がオンでも止める理由にはせず、bootstrap では直らない差 (警告して続ける)' 'Smart App Control=manual' { Get-Kinds (New-State @{ Sac = 'on' }) }
 Test-Case 'SAC が評価モードなら bootstrap では直らない差' 'Smart App Control=manual' { Get-Kinds (New-State @{ Sac = 'eval' }) }
 Test-Case 'SAC の無い Windows は直すことが無い' '' { Get-Kinds (New-State @{ Sac = 'unavailable' }) }
@@ -368,6 +419,15 @@ Test-Case 'Git の行は版を出す' '  Git for Windows : 2.56.0.4' { @(Get-Lin
 Test-Case 'rustup の行は版と既定の host を出す' '  rustup : 1.29.3 (既定の host は x86_64-pc-windows-msvc)' { @(Get-Lines (New-State) | Where-Object { $_ -like '*rustup :*' })[0] }
 Test-Case '既定の host が読めなければ、rustup の行は読めないと出す (空のまま出さない)' '  rustup : 1.29.3 (既定の host が読めない)' { @(Get-Lines (New-State -Rustup @{ DefaultHost = $null }) | Where-Object { $_ -like '*rustup :*' })[0] }
 Test-Case '入っていなければ固定した版を入れると出す' '⚠ GitHub CLI : 入っていない → 2.103.3 を入れる' { @(Get-Lines (New-State -Gh $fresh) | Where-Object { $_ -like '*GitHub CLI :*' })[0] }
+Test-Case 'PowerShell 7 が入っていなければ、固定した版を winget の MSIX で入れると出す (UAC は出ない)' '⚠ PowerShell 7 : 入っていない → 7.6.10.0 を winget の MSIX で入れる (ユーザー単位。UAC は出ない)' {
+    @(Get-Lines (New-State -Pwsh $fresh) | Where-Object { $_ -like '*PowerShell 7 :*' })[0]
+}
+Test-Case 'PowerShell 7 が古ければ、入れた形のまま上げるか、外して流し直すと ※ で出す' '⚠ PowerShell 7 : 7.4.13 (MSI) → 7.6.0 より古い|※ PowerShell 7 (C:\Program Files\PowerShell\7\pwsh.exe) が古い。入れた形のまま上げる (MSI は winget upgrade --id Microsoft.PowerShell --exact --version 7.6.10.0 --include-pinned --installer-type wix で、UAC が出る。Microsoft Store の MSIX は Store のライブラリで更新する) か、外してから流し直す (winget の MSIX で 7.6.10.0 を入れる)' {
+    $l = Get-Lines (New-State -Pwsh @{ Installed = '7.4.13'; Kind = 'msi'; Path = $msiPwsh }); "$(@($l | Where-Object { $_ -like '*PowerShell 7 :*' })[0])|$(@($l | Where-Object { $_ -like '※*' })[0])"
+}
+Test-Case 'PowerShell 7 が PATH の外でだけ見つかれば、ディレクトリを Path に足すと ※ で出す' "⚠ PowerShell 7 : 7.6.10 (MSIX) → PATH に無い|※ PowerShell 7 ($aliasPwsh) のディレクトリが PATH に無い (runner と herdr は PATH の pwsh を起こす)。ユーザーの環境変数 Path に足す" {
+    $l = Get-Lines (New-State -Pwsh @{ OnPath = $false }); "$(@($l | Where-Object { $_ -like '*PowerShell 7 :*' })[0])|$(@($l | Where-Object { $_ -like '※*' })[0])"
+}
 Test-Case '版のずれは ※ で上げ方と下げ方を出す' '⚠ Git for Windows : 2.55.0.5 (固定した版は 2.56.0.4)|※ Git for Windows を固定した版に揃えるのは bootstrap ではしない。上げるなら winget upgrade --id Git.Git --exact --version 2.56.0.4 --include-pinned、下げるなら winget uninstall --id Git.Git の後に流し直す' {
     $l = Get-Lines (New-State -Git @{ Installed = '2.55.0.5' }); "$(@($l | Where-Object { $_ -like '*Git for Windows :*' })[0])|$(@($l | Where-Object { $_ -like '※*' })[0])"
 }
@@ -375,11 +435,11 @@ Test-Case 'rustup の上げ方には MSVC の host と toolchain を入れない
     @(Get-Lines (New-State -Rustup @{ Installed = '1.28.2' }) | Where-Object { $_ -like '※*' })[0]
 }
 # 版を名指しした winget upgrade は、--include-pinned が無いと bootstrap が足した pin (Pinning) に止められる (0x8A150068。
-# 2026-11-16 に example-host の OpenSSH で起きた形)。5 つの道具のどれの上げ方にも付ける
-Test-Case '5 つの道具の上げ方は、どれも bootstrap が足した pin を越える (--include-pinned)' 'Git.Git=True GitHub.cli=True Microsoft.PowerShell=True Microsoft.VisualStudio.2022.BuildTools=True Rustlang.Rustup=True' {
-    $s = New-State -Git @{ Installed = '2.55.0.5' } -Gh @{ Installed = '2.100.0' } -Pwsh @{ Installed = '7.6.9.0' } -Vs @{ Installed = '17.14.40' } -Rustup @{ Installed = '1.28.2' }
+# 2026-11-16 に example-host の OpenSSH で起きた形)。版を揃える 4 つの道具のどれの上げ方にも付ける (PowerShell 7 は版を揃えない)
+Test-Case '版を揃える 4 つの道具の上げ方は、どれも bootstrap が足した pin を越える (--include-pinned)' 'Git.Git=True GitHub.cli=True Microsoft.VisualStudio.2022.BuildTools=True Rustlang.Rustup=True' {
+    $s = New-State -Git @{ Installed = '2.55.0.5' } -Gh @{ Installed = '2.100.0' } -Pwsh @{ Installed = '7.6.9' } -Vs @{ Installed = '17.14.40' } -Rustup @{ Installed = '1.28.2' }
     $notes = @(Get-Lines $s | Where-Object { $_ -like '※*' })
-    @('Git.Git', 'GitHub.cli', 'Microsoft.PowerShell', 'Microsoft.VisualStudio.2022.BuildTools', 'Rustlang.Rustup') | ForEach-Object {
+    @('Git.Git', 'GitHub.cli', 'Microsoft.VisualStudio.2022.BuildTools', 'Rustlang.Rustup') | ForEach-Object {
         $id = $_
         $note = @($notes | Where-Object { $_.Contains("winget upgrade --id $id ") })[0]
         "$id=$("$note".Contains("winget upgrade --id $id --exact --version") -and "$note".Contains('--include-pinned'))"
@@ -398,7 +458,10 @@ Test-Case 'SAC がオンなら、オフにする場所と戻せないことが�
     $l = Get-Lines (New-State @{ Sac = 'on' }); "$(@($l | Where-Object { $_ -like '*Smart App Control :*' })[0])|$(@($l | Where-Object { $_ -like '※*' })[0])"
 }
 Test-Case 'clone が無ければ置き場を出す' "⚠ dotfiles : 無い → $Ghq\dotfiles に clone する" { @(Get-Lines (New-State -Dotfiles $freshRepo) | Where-Object { $_ -like '*dotfiles :*' })[0] }
-Test-Case 'PowerShell 7 の行は winget の版を出す' '  PowerShell 7 : 7.6.10.0' { @(Get-Lines (New-State) | Where-Object { $_ -like '*PowerShell 7 :*' })[0] }
+Test-Case 'PowerShell 7 の行は版と入れ方を出す (MSIX・MSI。ほかの形はパス)' '  PowerShell 7 : 7.6.10 (MSIX)|  PowerShell 7 : 7.7.0 (MSI)|  PowerShell 7 : 7.6.10 (C:\tools\pwsh\pwsh.exe)' {
+    $states = @((New-State), (New-State -Pwsh @{ Installed = '7.7.0'; Kind = 'msi'; Path = $msiPwsh }), (New-State -Pwsh @{ Kind = 'other'; Path = 'C:\tools\pwsh\pwsh.exe' }))
+    (@($states | ForEach-Object { @(Get-Lines $_ | Where-Object { $_ -like '*PowerShell 7 :*' })[0] })) -join '|'
+}
 Test-Case '既定の形は gh の行を出さない' '0' { @(Get-Lines (New-PublicState) | Where-Object { $_ -like '*gh のログイン*' }).Count }
 Test-Case '-Private は手元のホストの値の行を出さない' '0' { @(Get-Lines (New-State) | Where-Object { $_ -like '*ホストの値 (手元)*' }).Count }
 Test-Case '既定の形で手元のホストの値があれば、置き場を出す' "  ホストの値 (手元) : $HostFilePath" { @(Get-Lines (New-PublicState) | Where-Object { $_ -like '*ホストの値 (手元)*' })[0] }
@@ -462,13 +525,22 @@ Test-Case 'Ctrl+C を受け止める handler の C# を読め、足す・外す�
 $stateRoot = Join-Path ([IO.Path]::GetTempPath()) ('install-bootstrap-tests-' + [guid]::NewGuid())
 New-Item -ItemType Directory -Path $stateRoot | Out-Null
 foreach ($f in @('git.exe', 'gh.exe', 'pwsh.exe', 'rustup.exe')) { Set-Content -LiteralPath (Join-Path $stateRoot $f) -Value '' }
+# PATH のディレクトリと、MSIX の実行エイリアスの置き場にも pwsh.exe を置く (MSI の置き場所は上の $stateRoot の pwsh.exe)
+foreach ($d in @('path-dir', 'WindowsApps')) {
+    New-Item -ItemType Directory -Path (Join-Path $stateRoot $d) | Out-Null
+    Set-Content -LiteralPath (Join-Path (Join-Path $stateRoot $d) 'pwsh.exe') -Value ''
+}
 # settings.toml の既定の host は GNU のまま。rustup show が MSVC を出せば、host は rustup show から読んでいる
 Set-Content -LiteralPath (Join-Path $stateRoot 'settings.toml') -Value "version = `"12`"`ndefault_host_tuple = `"x86_64-pc-windows-gnu`"`nauto_self_update = `"disable`"`n"
 $statePaths = [pscustomobject]@{
     Git = (Join-Path $stateRoot 'git.exe'); Gh = (Join-Path $stateRoot 'gh.exe'); Pwsh = (Join-Path $stateRoot 'pwsh.exe'); Rustup = (Join-Path $stateRoot 'rustup.exe')
+    PwshAlias = (Join-Path (Join-Path $stateRoot 'WindowsApps') 'pwsh.exe')
     RustupSettings = (Join-Path $stateRoot 'settings.toml'); VsWhere = (Join-Path $stateRoot 'vswhere.exe'); VsSetup = (Join-Path $stateRoot 'setup.exe')
     GhqRoot = (Join-Path $stateRoot 'ghq'); HostFile = (Join-Path $stateRoot 'host.toml')
 }
+# 新しい窓の PATH (レジストリのマシン → ユーザーの Path) の偽物。Windows の字 (\ でつなぐ) のまま渡す (Linux の pwsh も \ を区切りとして読む)
+$script:RegistryPath = "$stateRoot\path-dir"
+function Get-RegistryPathValue { $script:RegistryPath }
 # 手元のホストの値はある。dotfiles-private の clone は無い
 Set-Content -LiteralPath $statePaths.HostFile -Value 'group = "minimum"'
 $script:NativeLog = [System.Collections.Generic.List[string]]::new()
@@ -477,7 +549,9 @@ $script:VsJson = '[{"productId":"Microsoft.VisualStudio.Product.BuildTools","ins
 function Test-Elevated { $false }
 function Get-BootstrapSac { 'off' }
 function Read-VsWhere { param([string]$VsWhere) $script:VsJson }
-function Invoke-Winget { param([string[]]$Arguments) [pscustomobject]@{ ExitCode = 0; Lines = @("x $($Arguments[3])") } }
+# winget は打った引数を書き留め、pin list には Id の列を持つ行を返す (pin がある)
+$script:WingetLog = [System.Collections.Generic.List[string]]::new()
+function Invoke-Winget { param([string[]]$Arguments) $script:WingetLog.Add($Arguments -join ' '); [pscustomobject]@{ ExitCode = 0; Lines = @("x $($Arguments[3])") } }
 # 打ったものを「exe 引数 [打ったときの RUSTUP_AUTO_INSTALL]」で書き留め、道具ごとの出力を返す
 function Invoke-Native {
     param([string]$FilePath, [string[]]$Arguments, [switch]$Utf8)
@@ -499,6 +573,14 @@ try {
     $readState = Get-BootstrapState -Packages $statePackages -Paths $statePaths -Arch 'AMD64'
     $afterEnv = $env:RUSTUP_AUTO_INSTALL
     $readNative = @($script:NativeLog)
+    $readWinget = @($script:WingetLog)
+    # PATH に pwsh が無ければ MSI の置き場所、それも無ければ MSIX の実行エイリアスを読む (どちらも PATH の外)。どれも無ければ入っていない
+    $script:RegistryPath = ''
+    $msiRead = @((Get-BootstrapState -Packages $statePackages -Paths $statePaths -Arch 'AMD64').Packages | Where-Object { $_.Name -eq 'pwsh' })[0]
+    Remove-Item -LiteralPath $statePaths.Pwsh
+    $aliasRead = @((Get-BootstrapState -Packages $statePackages -Paths $statePaths -Arch 'AMD64').Packages | Where-Object { $_.Name -eq 'pwsh' })[0]
+    Remove-Item -LiteralPath $statePaths.PwshAlias
+    $noneRead = @((Get-BootstrapState -Packages $statePackages -Paths $statePaths -Arch 'AMD64').Packages | Where-Object { $_.Name -eq 'pwsh' })[0]
 } finally {
     $env:RUSTUP_AUTO_INSTALL = $null
     Remove-Item -LiteralPath $stateRoot -Recurse -Force
@@ -509,11 +591,19 @@ $readPwsh = @($readState.Packages | Where-Object { $_.Name -eq 'pwsh' })[0]
 
 # rustup 1.29.3 は --version・show でも、cwd の rust-toolchain.toml の入っていない toolchain を入れにいく。-Check は何も変えない
 Test-Case 'rustup は --version も show も RUSTUP_AUTO_INSTALL=0 で打つ (toolchain を入れさせない)' 'rustup.exe --version [RUSTUP_AUTO_INSTALL=0]|rustup.exe show [RUSTUP_AUTO_INSTALL=0]' {
-    @($script:NativeLog | Where-Object { $_ -like 'rustup.exe *' }) -join '|'
+    @($readNative | Where-Object { $_ -like 'rustup.exe *' }) -join '|'
 }
 Test-Case '打った後は RUSTUP_AUTO_INSTALL を元の値に戻す' 'keep' { $afterEnv }
 Test-Case '既定の host は rustup show から読む (settings.toml の default_host_tuple は読まない)' 'x86_64-pc-windows-msvc|1.29.3|True' { "$($readRustup.DefaultHost)|$($readRustup.Installed)|$($readRustup.SelfUpdateDisabled)" }
-Test-Case 'PowerShell 7 は pwsh --version を winget の版にして読む' 'True|7.6.10.0' { "$($readPwsh.Exists)|$($readPwsh.Installed)" }
+Test-Case 'PowerShell 7 は新しい窓の PATH で先に当たる pwsh を読む (版は pwsh --version)' "True|7.6.10|$stateRoot\path-dir\pwsh.exe|True" {
+    "$($readPwsh.Exists)|$($readPwsh.Installed)|$($readPwsh.Path)|$($readPwsh.OnPath)"
+}
+Test-Case 'pin を読むのは PowerShell 7 のほかの道具だけ (PowerShell 7 の pin は見ない)' 'Git.Git Microsoft.VisualStudio.2022.BuildTools Rustlang.Rustup' {
+    (@($readWinget | Where-Object { $_ -like 'pin list *' }) | ForEach-Object { ($_ -split ' ')[3] }) -join ' '
+}
+Test-Case 'PATH に無ければ MSI の置き場所、それも無ければ MSIX の実行エイリアスを読み (どちらも PATH の外)、どれも無ければ入っていない' "$($statePaths.Pwsh)=False|$($statePaths.PwshAlias)=False|False" {
+    "$($msiRead.Path)=$($msiRead.OnPath)|$($aliasRead.Path)=$($aliasRead.OnPath)|$($noneRead.Exists)"
+}
 Test-Case '既定の形は gh を読まず (auth status も打たない)、手元のホストの値と dotfiles-private の clone の有無を読む' 'False|False|True|False' {
     "$($readState.Private)|$(@($readNative | Where-Object { $_ -like 'gh.exe *' }).Count -gt 0)|$($readState.HostFile.Exists)|$($readState.HostFile.PrivateClone)"
 }
@@ -532,6 +622,7 @@ function Get-BootstrapSac { $script:Sac }
 function Get-BootstrapPaths {
     [pscustomobject]@{
         Git = 'C:\Program Files\Git\cmd\git.exe'; Gh = 'C:\Program Files\GitHub CLI\gh.exe'; Pwsh = 'C:\Program Files\PowerShell\7\pwsh.exe'
+        PwshAlias = $aliasPwsh
         Rustup = 'C:\Users\u\.cargo\bin\rustup.exe'; RustupSettings = 'C:\Users\u\.rustup\settings.toml'; VsWhere = 'C:\vswhere.exe'
         VsSetup = 'C:\setup.exe'; GhqRoot = 'C:\Users\u\ghq'; HostFile = $HostFilePath
     }
@@ -540,9 +631,12 @@ function Invoke-Winget {
     param([string[]]$Arguments)
     $id = $Arguments[[array]::IndexOf($Arguments, '--id') + 1]
     $verb = $Arguments[0]
+    # 版の範囲に留める pin (gating) は「pin-add <Id> <範囲>」
+    $range = ''
+    if (($verb -eq 'pin') -and ($Arguments -contains '--version')) { $range = " $($Arguments[[array]::IndexOf($Arguments, '--version') + 1])" }
     if ($verb -eq 'pin') { $verb = "pin-$($Arguments[1])" }
     if (($verb -eq 'install') -and ($Arguments -notcontains '--silent')) { $verb = 'install-with-progress' }
-    $script:Calls.Add("$verb $id")
+    $script:Calls.Add("$verb $id$range")
     $code = 0
     if ($script:Fail.ContainsKey("$verb $id")) { $code = $script:Fail["$verb $id"] }
     $lines = @()
@@ -618,12 +712,13 @@ function New-LoggedInState {
     $s.Repos[2] = New-Repo 'claude-skills' $freshRepo
     $s
 }
-$freshCalls = 'install Git.Git | install-with-progress GitHub.cli | install-with-progress Microsoft.PowerShell | install-with-progress Microsoft.VisualStudio.2022.BuildTools | install Rustlang.Rustup | pin-add Git.Git | pin-add GitHub.cli | pin-add Microsoft.PowerShell | pin-add Microsoft.VisualStudio.2022.BuildTools | pin-add Rustlang.Rustup | native set auto-self-update disable | gh-login | clone dotfiles | clone dotfiles-private | clone claude-skills'
+# PowerShell 7 は MSIX を --silent で入れ、入れた直後に 7.6 の線に留める pin を足す (後の pin の段では足さない)
+$freshCalls = 'install Git.Git | install-with-progress GitHub.cli | install Microsoft.PowerShell | pin-add Microsoft.PowerShell 7.6.* | install-with-progress Microsoft.VisualStudio.2022.BuildTools | install Rustlang.Rustup | pin-add Git.Git | pin-add GitHub.cli | pin-add Microsoft.VisualStudio.2022.BuildTools | pin-add Rustlang.Rustup | native set auto-self-update disable | gh-login | clone dotfiles | clone dotfiles-private | clone claude-skills'
 # 既定の形の、道具が入ったが pin が無く、rustup の自己更新が止まっておらず、clone も手元のホストの値も無い状態 (入れた直後)
 function New-PublicInstalledState {
     New-PublicState -Git @{ Pinned = $false } -Pwsh @{ Pinned = $false } -Vs @{ Pinned = $false } -Rustup @{ Pinned = $false; SelfUpdateDisabled = $false } -Dotfiles $freshRepo -HostFile @{ Exists = $false }
 }
-$freshPublicCalls = 'install Git.Git | install-with-progress Microsoft.PowerShell | install-with-progress Microsoft.VisualStudio.2022.BuildTools | install Rustlang.Rustup | pin-add Git.Git | pin-add Microsoft.PowerShell | pin-add Microsoft.VisualStudio.2022.BuildTools | pin-add Rustlang.Rustup | native set auto-self-update disable | clone-anon dotfiles | copy-template dotfiles\win\templates\host.minimum.toml -> C:\Users\u\.config\dotfiles\host.toml'
+$freshPublicCalls = 'install Git.Git | install Microsoft.PowerShell | pin-add Microsoft.PowerShell 7.6.* | install-with-progress Microsoft.VisualStudio.2022.BuildTools | install Rustlang.Rustup | pin-add Git.Git | pin-add Microsoft.VisualStudio.2022.BuildTools | pin-add Rustlang.Rustup | native set auto-self-update disable | clone-anon dotfiles | copy-template dotfiles\win\templates\host.minimum.toml -> C:\Users\u\.config\dotfiles\host.toml'
 
 Test-Case '-Check は何も打たない (まっさらな PC は 3)' '3 []' { $r = Invoke-Flow -States @((New-FreshState)) -Check; "$($r.Code) [$($r.Calls)]" }
 Test-Case '-Check で揃っていれば 0' '0 []' { $r = Invoke-Flow -States @((New-State)) -Check; "$($r.Code) [$($r.Calls)]" }
@@ -648,6 +743,19 @@ Test-Case 'SAC の評価モードは止めずに進み、締めは 1' '1 [instal
     $r = Invoke-Flow -States @($before, (New-State @{ Sac = 'eval' } -Gh @{ Pinned = $false }), $after); "$($r.Code) [$($r.Calls)]"
 }
 Test-Case '版のずれは入れ替えず、ほかに直すことが無ければ何も打たずに 1' '1 []' { $r = Invoke-Flow -States @((New-State -Git @{ Installed = '2.55.0.5' })); "$($r.Code) [$($r.Calls)]" }
+# PowerShell 7 は入れ方を問わず認めるので、ほかの形で入っていた PowerShell 7 (Microsoft Store の MSIX など) に pin を足さない
+Test-Case '入っている道具の pin が無ければ足すが、入っている PowerShell 7 には足さない' '0 [pin-add Git.Git]' {
+    $s = New-State -Git @{ Pinned = $false } -Pwsh @{ Installed = '7.7.0' }
+    $r = Invoke-Flow -States @($s, $s, (New-State)); "$($r.Code) [$($r.Calls)]"
+}
+Test-Case 'PowerShell 7 の install が落ちたら pin を足さずに 1' '1 [install Microsoft.PowerShell]' {
+    $s = New-State -Pwsh $fresh
+    $r = Invoke-Flow -States @($s, $s) -Fail @{ 'install Microsoft.PowerShell' = 1 }; "$($r.Code) [$($r.Calls)]"
+}
+Test-Case 'PowerShell 7 の pin を足せなくても進み、足せなかったと出す' '0 [install Microsoft.PowerShell | pin-add Microsoft.PowerShell 7.6.*] True' {
+    $r = Invoke-Flow -States @((New-State -Pwsh $fresh), (New-State), (New-State)) -Fail @{ 'pin-add Microsoft.PowerShell' = 1 }
+    "$($r.Code) [$($r.Calls)] $($r.Text -like '*PowerShell 7: winget pin add が失敗した (終了コード 0x00000001)*')"
+}
 Test-Case 'rustup の既定の host が GNU なら、rustup set default-host で MSVC に直す' '0 [native set default-host x86_64-pc-windows-msvc]' {
     $gnu = New-State -Rustup @{ DefaultHost = $Gnu }
     $r = Invoke-Flow -States @($gnu, $gnu, (New-State)); "$($r.Code) [$($r.Calls)]"
@@ -711,7 +819,7 @@ Test-Case '既定の形で手元のホストの値があれば、上書きしな
 Test-Case '既定の形で Git が入らなければ、clone も雛形もせずに 1 (gh のことは言わない)' '1 [install Git.Git] True False' {
     $s = New-FreshPublicState
     $r = Invoke-Flow -Public $true -States @($s, $s) -Fail @{ 'install Git.Git' = 1 } -FailLines @{}
-    "$($r.Code) [$(@($r.Calls -split ' \| ' | Where-Object { $_ -notlike 'install-with-progress*' -and $_ -notlike 'install Rustlang*' -and $_ -notlike 'pin-add*' -and $_ -notlike 'native*' }) -join ' | ')] $($r.Text -like '*Git for Windows が入っていないので、clone しない*') $($r.Text -like '*gh*ログイン*')"
+    "$($r.Code) [$(@($r.Calls -split ' \| ' | Where-Object { $_ -notlike 'install-with-progress*' -and $_ -notlike 'install Rustlang*' -and $_ -notlike 'install Microsoft.PowerShell' -and $_ -notlike 'pin-add*' -and $_ -notlike 'native*' }) -join ' | ')] $($r.Text -like '*Git for Windows が入っていないので、clone しない*') $($r.Text -like '*gh*ログイン*')"
 }
 
 # 締めの案内: 揃え終えたとき (初めから揃っていたときも) に、次に打つコマンドとホストの値の行を出す。-Check と 1 で終えたときは出さない

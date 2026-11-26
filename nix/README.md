@@ -1037,7 +1037,8 @@ Windows の新しい PC の WSL には、初めは SSH 鍵 (1Password) も gh �
 `initial` は dotfiles-private に登録するまでの踏み台で、登録したら外す (登録しない PC は [`tmp`](#登録簿に載せずにマシンを足す) を使う。
 [ADR 045](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/045_wsl_initial_host_20261108T121659JST/README.md))。
 
-前提: Windows に PowerShell 7 (`winget install --id Microsoft.PowerShell --exact --source winget`) と WSL を入れてある。
+前提: Windows に PowerShell 7 (入れ方は問わない。7.6 より古くないもの。例: `winget install --id Microsoft.PowerShell --exact --source winget`
+で MSIX が入る) と WSL を入れてある。
 
 ```sh
 # 1. SSH 鍵も gh のログインも無いうちに

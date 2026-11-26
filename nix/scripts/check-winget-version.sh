@@ -32,8 +32,9 @@
 # 違い (-GitVersion と $gitPackageId など。下の version_param・id_var)、見送りの一覧は win/bootstrap/skipped-versions/<名前>.txt。
 #
 # 候補の線 (series_re) を決めた名前は、winget-pkgs の版のうち、その線の版だけを読む (線の外の版は、新しい版にも版の形の誤りにも
-# 数えない)。pwsh は 7.6 の線 (^7\.6\.): PowerShell 7.7 から MSI が無く、winget の 7.7 は MSIX だけなので、bootstrap は 7.6 (LTS) の MSI に
-# 留める (dotfiles-private の docs/adr/111_win_runner_without_gh_*)。次の線に移すときは、series_re と固定した版を一緒に上げる。
+# 数えない)。pwsh は 7.6 の線 (^7\.6\.): bootstrap が入れる 7.6 (LTS) の MSIX は package Microsoft.PowerShell-LTS で、7.7 からの MSIX は
+# 別の package (Microsoft.PowerShell) なので、7.6 の上げ先にならない (dotfiles-private の docs/adr/111_win_runner_without_gh_*)。次の線に
+# 移すときは、series_re と固定した版を一緒に上げる。
 #
 # GitHub Actions の winget-versions (.github/workflows/winget-versions.yml) が週 1 回と PR で、名前ごとの
 # job で流し、落ちることで知らせる (TKT-110・TKT-156)。win/ は flake からは見えない (ADR 010) ので、
@@ -425,9 +426,10 @@ case ${name} in
     upgrade_after=''
     # manifests/m/Microsoft/PowerShell には、版と並んで Microsoft.PowerShell.Preview のディレクトリ (Preview) がある
     nested_dirs=(Preview)
-    # 7.7 から MSI が無い (winget の 7.7 は MSIX だけ)。bootstrap は 7.6 (LTS) の MSI に留めるので、7.6 の線の版だけを読む
+    # bootstrap が入れる 7.6 (LTS) の MSIX (Microsoft.PowerShell-LTS) は、7.7 からの MSIX (別の package の Microsoft.PowerShell) へ
+    # 上がらないので、7.6 の線の版だけを読む
     series_re='^7\.6\.'
-    series_desc='7.6 の線だけを読む (7.7 から MSI が無い)'
+    series_desc='7.6 の線だけを読む (7.7 は別の package の MSIX)'
     # GitHub の release には読まない線の版も並ぶので比べず、winget-pkgs に載った日から数える
     dates_from=winget
     ;;

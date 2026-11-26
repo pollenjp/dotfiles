@@ -202,7 +202,7 @@ pub const SPECS: &[WingetSpec] = &[
         pinned_parts: None,
         version_example: "7.6.10.0",
         nested_dirs: &["Preview"],
-        // 7.7 から MSI が無い (winget の 7.7 は MSIX だけ)。bootstrap は 7.6 (LTS) の MSI に留めるので、7.6 の線の版だけを読む
+        // bootstrap が入れる 7.6 (LTS) の MSIX (Microsoft.PowerShell-LTS) は 7.7 からの MSIX (別の package) へ上がらないので、7.6 の線の版だけを読む
         series: Some("7.6."),
     },
     WingetSpec {

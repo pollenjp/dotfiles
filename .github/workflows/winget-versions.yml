@@ -119,7 +119,7 @@ jobs:
             title: Windows の GitHub CLI
             section: bootstrap の固定した版の新しい版が出たとき
             anchor: bootstrap-の固定した版の新しい版が出たとき
-          # 7.6 の線の版だけを読む (7.7 から MSI が無い。check-winget-version.sh の series_re)
+          # 7.6 の線の版だけを読む (7.7 は別の package の MSIX で、7.6 の MSIX の上げ先にならない。check-winget-version.sh の series_re)
           - package: pwsh
             title: Windows の PowerShell 7
             section: bootstrap の固定した版の新しい版が出たとき

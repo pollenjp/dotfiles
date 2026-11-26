@@ -219,6 +219,41 @@ Test-Case '-IfMissing の締め: 入れられなければ -IfMissing で打ち�
 Test-Case '-Check の締め: 揃っていれば「揃っている」' '揃っている' { Get-OpenSshCheckMessage -State $inSync }
 Test-Case '-Check の締め: ずれていれば「揃っていない」' 'True' { (Get-OpenSshCheckMessage -State $drift).Contains('固定した版と揃っていない') }
 
+# Format-MsixElevationNote: 自分を起動し直す pwsh が MSIX (WindowsApps の下) なら、別の管理者のアカウントでは起こせないことを ※ で出す
+$msixPwsh = 'C:\Program Files\WindowsApps\Microsoft.PowerShell-LTS_7.6.10.0_x64__8wekyb3d8bbwe\pwsh.exe'
+$msiPwsh = 'C:\Program Files\PowerShell\7\pwsh.exe'
+Test-Case 'MSIX の pwsh なら、別の管理者のアカウントのことと MSI を足す手を ※ で出し、MSI の pwsh なら何も出さない' 'True True 0' {
+    $note = @(Format-MsixElevationNote -HostExe $msixPwsh)
+    "$($note[0].StartsWith('※ この pwsh は MSIX')) $($note[0].Contains('MSI の PowerShell 7 を足して')) $(@(Format-MsixElevationNote -HostExe $msiPwsh).Count)"
+}
+
+# Invoke-Elevated: 昇格を起こせなかった・子がログを書かずに落ちたときに、pwsh が MSIX なら ※ を足す。Get-Process・Start-Process・
+# Write-Host を偽物に替え、LOCALAPPDATA は一時ディレクトリにする
+function Invoke-ElevatedScenario {
+    param([string]$HostExe, [bool]$Throw, [int]$ExitCode = 0)
+    $said = [System.Collections.Generic.List[string]]::new()
+    function Get-Process { param($Id) [pscustomobject]@{ Path = $HostExe } }
+    function Start-Process {
+        param([string]$FilePath, [string[]]$ArgumentList, [string]$Verb, [switch]$Wait, [switch]$PassThru)
+        if ($Throw) { throw 'アクセスが拒否されました。' }
+        [pscustomobject]@{ ExitCode = $ExitCode }
+    }
+    function Write-Host { param($Object, $ForegroundColor) $said.Add("$Object") }
+    $saved = $env:LOCALAPPDATA
+    $env:LOCALAPPDATA = Join-Path ([IO.Path]::GetTempPath()) "install-openssh-elevated-$PID"
+    try {
+        $result = Invoke-Elevated -Version '10.4.0.0'
+    } finally {
+        Remove-Item -LiteralPath $env:LOCALAPPDATA -Recurse -Force -ErrorAction SilentlyContinue
+        $env:LOCALAPPDATA = $saved
+    }
+    "$result $(@($said | Where-Object { $_.StartsWith('※ この pwsh は MSIX') }).Count)"
+}
+Test-Case 'MSIX の pwsh で昇格を起こせなければ、別の管理者のアカウントのことを ※ で出す' 'False 1' { Invoke-ElevatedScenario -HostExe $msixPwsh -Throw $true }
+Test-Case 'MSIX の pwsh の子がログを書かずに落ちたときも、同じ ※ を出す' 'False 1' { Invoke-ElevatedScenario -HostExe $msixPwsh -Throw $false -ExitCode -1073741515 }
+Test-Case 'MSI の pwsh で昇格を起こせなくても、MSIX の ※ は出さない' 'False 0' { Invoke-ElevatedScenario -HostExe $msiPwsh -Throw $true }
+Test-Case '子が 0 で終われば成功で、※ は出さない' 'True 0' { Invoke-ElevatedScenario -HostExe $msixPwsh -Throw $false -ExitCode 0 }
+
 # 本体の入口: 思わぬ例外でも、終了コード 2 で止まる (成功に見せない)。
 # Linux の pwsh には $env:ProgramFiles が無く、本体の最初で例外になるのを使う
 # (2026-10-06 の本番で、例外のあと外側の exit $LASTEXITCODE が中の winget の 0 を返し「揃いました」と出た)

@@ -93,7 +93,7 @@ PowerShell 7・Visual Studio Build Tools・rustup と dotfiles の clone) を揃
 - 既定の形で流した PC で後から private な repo を使うなら、`-Private` で流し直す (gh を入れてログインし、無い clone を足す)。手元の `host.toml` が
   残っていて dotfiles-private にもホストの値を書くと、runner の apply は止まる (どちらを使うか決まらない。手元の方を退ける)
 - 普通の (管理者でない) PowerShell で流す。管理者の PowerShell だと何も変えずに止まる (clone と rustup が管理者の持ち物になり、普通の
-  権限の git が `dubious ownership` で止まるため)。UAC は道具ごとに出る
+  権限の git が `dubious ownership` で止まるため)。UAC は道具ごとに出る (PowerShell 7 の MSIX と rustup はユーザー単位に入るので出ない)
 - 対象の CPU は x64 だけ (ARM64 の Windows は今は対象外)
 
 ### bootstrap を流す
@@ -147,13 +147,13 @@ dotfiles apply
    オンだと cargo が作った exe (Rust の runner・build script) が止められて動かないので、runner を流す前にオフにする (Windows セキュリティ →
    アプリとブラウザーの制御 → スマート アプリ コントロールの設定。Windows によっては戻すのに再インストールが要る)。script は SAC を変えない
 2. 道具を固定した版で入れ、winget の pin を足す (この順。rustup-init が MSVC を見るので、Build Tools を rustup より先に入れる。GitHub CLI は
-   `-Private` のときだけ):
+   `-Private` のときだけ。PowerShell 7 は入れ方を問わず認め、入っていないときだけ入れる。[PowerShell 7 (入れ方を問わず認める)](#powershell-7-入れ方を問わず認める)):
 
    | 道具 | winget の ID | 固定した版 (param) | 入れ方 |
    | --- | --- | --- | --- |
    | Git for Windows | `Git.Git` | `2.56.0.4` (`-GitVersion`) | machine の scope (`C:\Program Files\Git`)。インストーラーの選択肢は既定のまま |
    | GitHub CLI (`-Private` だけ) | `GitHub.cli` | `2.103.3` (`-GhVersion`) | MSI (`C:\Program Files\GitHub CLI`)。`--silent` を付けないので、UAC と進み具合の小さな窓が出る (per-machine の MSI は、quiet だと管理者でない PowerShell から UAC を出せずに落ちる) |
-   | PowerShell 7 | `Microsoft.PowerShell` | `7.6.10.0` (`-PwshVersion`) | MSI (`--installer-type wix`。`C:\Program Files\PowerShell\7`)。gh と同じく `--silent` を付けない (UAC)。`--custom "USE_MU=0 ENABLE_MU=0"` で Microsoft Update の自動更新に入れない (固定した版から動かさない。Windows Update の「ほかの Microsoft 製品」の設定にも触らない)。7.7 から MSI が無く (winget の 7.7 は MSIX だけ)、MSIX は利用者ごとの登録で SYSTEM のタスクや remoting から見えないので、MSI のある 7.6 (LTS) の線にしている |
+   | PowerShell 7 | `Microsoft.PowerShell` | `7.6.10.0` (`-PwshVersion`) | 入っていないときだけ、MSIX (`--installer-type msix`) で入れる。ユーザー単位に入るので UAC は出ない (`--silent`)。入れた直後に、7.6 の線に留める pin (`--version 7.6.*`) を足す。7.6 (LTS) の MSIX は package `Microsoft.PowerShell-LTS` で、7.7 からの MSIX (別の package `Microsoft.PowerShell`) へは上がらない |
    | Visual Studio Build Tools 2022 | `Microsoft.VisualStudio.2022.BuildTools` | `17.14.44` (`-VsBuildToolsVersion`) | C++ のワークロード (`Workload.VCTools`。必須の部品だけ)・x64 の MSVC (`VC.Tools.x86.x64`)・Windows SDK (`Windows11SDK.26100`)・英語の言語パック。MSVC と SDK は rustup が自分で入れるときと同じ部品。`--silent` を付けないので、UAC と進み具合の窓が出る。数 GB を落とすので 10 分以上かかることがある |
    | rustup | `Rustlang.Rustup` | `1.29.3` (`-RustupVersion`) | 既定の host を MSVC (`--default-host x86_64-pc-windows-msvc`) にし、toolchain は入れない (`--default-toolchain none`。版は runner の `rust-toolchain.toml` が決める)。自己更新を止める (`rustup set auto-self-update disable`) |
 
@@ -187,8 +187,49 @@ dotfiles apply
 
 - 入っている道具の版が固定した版と違っても揃えない (⚠ と、手で揃える手順の ※ を出す。下の「版のずれを手で揃える」)
 - 見るのは固定した版の置き場所だけ。別の形で入っているもの (user の scope の Git・zip の gh・Visual Studio の Community や 2026) があっても、
-  固定した版を並べて入れる。どちらが使われるかは PATH の順や rustc の探し方で決まるので、気になれば別の形のものを外す
+  固定した版を並べて入れる。どちらが使われるかは PATH の順や rustc の探し方で決まるので、気になれば別の形のものを外す。PowerShell 7 だけは
+  入れ方を問わず認め、版も比べない (下の「PowerShell 7 (入れ方を問わず認める)」)
 - Git for Windows を入れると、Windows の Claude Code が Git Bash を見つけて使えるようになる
+
+### PowerShell 7 (入れ方を問わず認める)
+
+bootstrap は PowerShell 7 を、入れ方を問わず (MSI・MSIX (Microsoft Store・winget)・PATH のほかの pwsh)、`7.6.0` より古くなければ入っている
+とみなす。版を固定した版と比べず、pin も見ない (Microsoft Store の MSIX は Store が上げるので、版も pin も揃えられない)。
+
+- 見る順: 新しい窓の PATH (レジストリのマシン → ユーザーの `Path`) のディレクトリごとの `pwsh.exe` → MSI の既定の置き場所
+  (`C:\Program Files\PowerShell\7\pwsh.exe`) → MSIX の実行エイリアス (`%LOCALAPPDATA%\Microsoft\WindowsApps\pwsh.exe`)。最初に見つかった
+  ものの `pwsh --version` を読み、表に版と入れ方 (MSIX・MSI。ほかの形はパス) を出す。runner と herdr は PATH の `pwsh` を起こすので、
+  PATH の外 (後ろの 2 つ) でだけ見つかったときは ⚠ で、そのディレクトリをユーザーの `Path` に足すよう ※ で出す
+- `7.6.0` より古い (7.4 (LTS) と 7.5 は 2026-11-10 でサポートが終わった。dotfiles の PowerShell のテストも 7.6 で流す)・版が読めない
+  ときは ⚠ (※ の手順で、入れた形のまま上げるか、外してから流し直す)
+- 入っていなければ、固定した版 (`-PwshVersion`) を winget の MSIX で入れる。ユーザー単位に入るので UAC は出ない (普段のアカウントが
+  管理者でない PC でも入る)。入れた直後に `winget pin add --id Microsoft.PowerShell --exact --version 7.6.*` を足す (7.6 の線に留める
+  gating の pin。`winget upgrade --all` は 7.6 の中でだけ上げる)。ほかの形で入っていた PowerShell 7 には pin を足さない
+- 7.6 の MSIX は package `Microsoft.PowerShell-LTS` で、Microsoft Store の「PowerShell-LTS」と同じ。Store の自動更新が 7.6 の新しい版へ
+  上げうる (winget の pin は Store の更新を止めない)。7.7 からの MSIX は別の package `Microsoft.PowerShell` (Store の「PowerShell」と同じ)
+  なので、7.6 の MSIX がそちらへ上がることは無い。2 つが並んで入ると実行エイリアス `pwsh.exe` を取り合う (設定 → アプリ → アプリの
+  詳細設定 → アプリ実行エイリアス で、どちらを使うかを選ぶ)
+
+#### PowerShell 7 の MSIX の限り
+
+MSIX は使う人ごとに登録され、実体は `C:\Program Files\WindowsApps\<package>\` の下にある (版が変わると置き場所も変わり、決まった入口は
+実行エイリアスだけ)。
+
+- 登録の無いアカウント (SYSTEM・サービス・別のユーザー) からは見えない。実行エイリアスはその人の `%LOCALAPPDATA%` にあり、WindowsApps の
+  下の実体も、package の登録の無いアカウントでは起こせない見込み (package の置き場所は、その package として動くプロセスにだけ実行を許す)
+- `Install-OpenSSH`・`Install-Sshd` は、今の pwsh (`(Get-Process -Id $PID).Path`。MSIX なら WindowsApps の下の実体) で自分を UAC で
+  昇格し直す。同じアカウントのまま昇格すれば動くが、UAC の確認で別の管理者のアカウントの資格情報を入れる PC (普段のアカウントが管理者で
+  ない。IT が資格を入れる形) では、昇格した側で pwsh を起こせない見込み (起こせなければ、ps1 がそう ※ で出す)。そういう PC では MSI の
+  PowerShell 7 を足し、新しい窓で流し直す。MSI の置き場所はマシンの PATH に入り、新しい窓ではユーザーの PATH の実行エイリアスより先に当たる:
+
+  ```powershell
+  winget install --id Microsoft.PowerShell --exact --source winget --version 7.6.10.0 --installer-type wix   # UAC が出る
+  ```
+
+- MSIX の pwsh からは DISM の cmdlet (`Add-WindowsCapability`・`Remove-WindowsCapability`・`Enable-WindowsOptionalFeature` など) が
+  `Class not registered` で落ちる。dotfiles の script はこれらを打たない。※ で「管理者の PowerShell で打つ」と案内するものは、管理者の
+  Windows PowerShell (5.1) で打つ
+- `$PSHOME` (WindowsApps の下) には書けない。dotfiles が使う `$PROFILE` (CurrentUserCurrentHost) はドキュメントの下なので影響しない
 
 ### 版のずれを手で揃える
 
@@ -200,16 +241,15 @@ dotfiles apply
 ```powershell
 winget upgrade --id Git.Git --exact --version <版> --include-pinned
 winget upgrade --id GitHub.cli --exact --version <版> --include-pinned                       # -Private で入れた PC だけ
-winget upgrade --id Microsoft.PowerShell --exact --version <版> --include-pinned --installer-type wix   # UAC が出る
 winget upgrade --id Microsoft.VisualStudio.2022.BuildTools --exact --version <版> --include-pinned   # UAC が出る
 winget upgrade --id Rustlang.Rustup --exact --version <版> --include-pinned --custom "--default-host x86_64-pc-windows-msvc --default-toolchain none"
 ```
 
 - pin は付いたまま残る (上げた後に足し直さなくてよい)。bootstrap の `-Check` の ※ の行も、同じコマンドを出す
 - 下げるときは `winget uninstall --id <ID>` の後に bootstrap を流し直す (固定した版で入れ直す)
-- Git・gh は、使っているプロセス (Git Bash・Windows の Claude Code の会話など) を閉じてから。PowerShell 7 は、PowerShell 7 の窓を全部閉じてから
-  (Windows PowerShell 5.1 で打つ)
-- PowerShell 7 を MSIX (Microsoft Store など) で入れていた PC でも、bootstrap は MSI を並べて入れる (見るのは MSI の置き場所だけ)
+- Git・gh は、使っているプロセス (Git Bash・Windows の Claude Code の会話など) を閉じてから
+- PowerShell 7 は版を揃えない (`7.6.0` より古くなければよい。[PowerShell 7 (入れ方を問わず認める)](#powershell-7-入れ方を問わず認める))。
+  `7.6.0` より古いときは、bootstrap の ※ の行のとおり、入れた形のまま上げるか、外してから流し直す
 
 ### bootstrap の固定した版の新しい版が出たとき
 
@@ -219,10 +259,13 @@ winget upgrade --id Rustlang.Rustup --exact --version <版> --include-pinned --c
 
 - 出た日は、`git` が GitHub (`git-for-windows/git`) の release (tag `v<X.Y.Z>.windows.<N>` を winget の版 `X.Y.Z` (N が 1) か `X.Y.Z.N` に
   突き合わせる)、`gh` が GitHub (`cli/cli`) の release、`pwsh`・`vs-buildtools`・`rustup` が winget-pkgs に載った日
-- `pwsh` (PowerShell 7) は 7.6 の線 (`7.6.` で始まる版) だけを読む (`nix/scripts/check-winget-version.sh` の `series_re`)。7.7 からの版は MSI が無いので、
-  見送りの一覧に書かなくても知らせない。次の LTS などに移すときは、MSI があるかを確かめ、`series_re`・runner の `WingetSpec` の `series`・固定した版を
-  一緒に上げる
-- 上げるとき: release notes を読み、`bootstrap/Install-Bootstrap.ps1` の名前ごとの param の既定値と、上の道具の表の版を新しい版にし、
+- `pwsh` (PowerShell 7) は 7.6 の線 (`7.6.` で始まる版) だけを読む (`nix/scripts/check-winget-version.sh` の `series_re`)。7.7 からの版は別の
+  package (`Microsoft.PowerShell`) の MSIX で、bootstrap が入れる 7.6 の MSIX (`Microsoft.PowerShell-LTS`) の上げ先にならないので、見送りの一覧に
+  書かなくても知らせない。上げた版は、PowerShell 7 の入っていない Windows に bootstrap が入れる版になる (入っている Windows の PowerShell 7 は
+  揃えない)。次の LTS などに移すときは、その版の MSIX の package の名前 (winget-pkgs の manifest の `PackageFamilyName`) を確かめ、`series_re`・
+  runner の `WingetSpec` の `series`・固定した版を一緒に上げる (入れた直後に足す pin の線は、固定した版から決まる)
+- 上げるとき: release notes を読み、`bootstrap/Install-Bootstrap.ps1` の名前ごとの param の既定値と、上の道具の表の版 (PowerShell 7 は
+  「PowerShell 7 の MSIX の限り」の MSI のコマンドの版も) を新しい版にし、
   `Install-Bootstrap.Tests.ps1` を流して PR を出す (`winget-versions` が、書いた版が winget にあるかを確かめる)。Build Tools はワークロードと
   部品の ID (`Workload.VCTools`・`VC.Tools.x86.x64`・`Windows11SDK.26100`) が残っているか、rustup は `--default-host`・
   `--default-toolchain none` と自己更新の止めが効くかも見る
@@ -1678,7 +1721,7 @@ winget で版を固定しているもの (OpenSSH・herdr・Google 日本語入�
 | `starship` | `starship/Install-Starship.ps1`・`starship/skipped-versions.txt` | winget-pkgs に載った日 (GitHub の release には winget に載らない版があるので比べない) | [starship の新しい版が出たとき](#starship-の新しい版が出たとき) |
 | `git` | `bootstrap/Install-Bootstrap.ps1` の `-GitVersion`・`bootstrap/skipped-versions/git.txt` | GitHub の release (`git-for-windows/git` の `v<X.Y.Z>.windows.<N>`。winget の版は N が 1 なら `X.Y.Z`、ほかは `X.Y.Z.N`) が出た日 | [bootstrap の固定した版の新しい版が出たとき](#bootstrap-の固定した版の新しい版が出たとき) |
 | `gh` | `bootstrap/Install-Bootstrap.ps1` の `-GhVersion`・`bootstrap/skipped-versions/gh.txt` | GitHub の release (`cli/cli` の `vX.Y.Z`) が出た日 | 同じ |
-| `pwsh` | `bootstrap/Install-Bootstrap.ps1` の `-PwshVersion`・`bootstrap/skipped-versions/pwsh.txt` | winget-pkgs に載った日 (7.6 の線の版だけを読む。7.7 から MSI が無い。GitHub の release には読まない線の版も並ぶので比べない) | 同じ |
+| `pwsh` | `bootstrap/Install-Bootstrap.ps1` の `-PwshVersion`・`bootstrap/skipped-versions/pwsh.txt` | winget-pkgs に載った日 (7.6 の線の版だけを読む。7.7 は別の package の MSIX。GitHub の release には読まない線の版も並ぶので比べない) | 同じ |
 | `vs-buildtools` | `bootstrap/Install-Bootstrap.ps1` の `-VsBuildToolsVersion`・`bootstrap/skipped-versions/vs-buildtools.txt` | winget-pkgs に載った日 (GitHub の release が無い) | 同じ |
 | `rustup` | `bootstrap/Install-Bootstrap.ps1` の `-RustupVersion`・`bootstrap/skipped-versions/rustup.txt` | winget-pkgs に載った日 (tag だけで GitHub の release を出さない) | 同じ |
 
@@ -2709,6 +2752,9 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
 | `nix/scripts/bootstrap-windows-openssh.sh` (WSL) | `setup --update` でも毎回走る (order 96)。`-Check` を流し、入っていなければ `-IfMissing` で入れ (UAC が出る。待つのは 600 秒まで)、差があれば ⚠ で囲んで知らせる (揃えはしない) |
 | `nix/scripts/bootstrap-windows-openssh.sh --apply` (WSL) | WSL から揃える。UAC は Windows のデスクトップに出る |
 | `nix/scripts/check-winget-version.sh openssh` (WSL・CI) | 固定した版を winget の版の一覧と比べる。GitHub Actions の `winget-versions` が週 1 回流し、新しい版が GitHub に出て 30 日たつと落ちて知らせる ([後述](#openssh-の新しい版が出たとき)) |
+
+- UAC で管理者に昇格し直すのは、今の pwsh (`Install-Sshd` も同じ)。PowerShell 7 が MSIX の PC で、UAC の確認に別の管理者のアカウントの
+  資格情報を入れると、昇格した側で pwsh を起こせない見込み ([PowerShell 7 の MSIX の限り](#powershell-7-の-msix-の限り))
 
 揃えるときにすること:
 

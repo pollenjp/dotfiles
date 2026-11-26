@@ -22,8 +22,9 @@ docs/adr/058_win_runner_bootstrap_*・docs/adr/111_win_runner_without_gh_*)。ma
      作った exe (Rust の runner・build script) が止められて動かないので、runner を流す前にオフにする (オフにするのはユーザー)
   1. 前提を見る: winget があるか・管理者の PowerShell でないか・CPU (x64 だけ)
   2. Git for Windows → (-Private なら GitHub CLI →) PowerShell 7 → Visual Studio Build Tools 2022 → rustup を、下の param の固定した版で
-     winget から入れ、pin を足す (winget upgrade --all から外す)。PowerShell 7 は MSI (machine の scope) で入れ、Microsoft Update の自動更新には
-     入れない (USE_MU=0 ENABLE_MU=0)。7.7 から MSI が無いので 7.6 (LTS) の版にする。Build Tools には C++ のワークロード・MSVC (x64)・
+     winget から入れ、pin を足す (winget upgrade --all から外す)。PowerShell 7 は入れ方を問わず (MSI・MSIX (Microsoft Store・winget)・PATH の
+     ほかの pwsh)、7.6.0 より古くなければ入っているとみなし、版も pin も揃えない。入っていなければ 7.6 (LTS) の版を winget の MSIX (ユーザー
+     単位で入り、UAC は出ない) で入れ、7.6 の線に留める pin (7.6.*) を足す。Build Tools には C++ のワークロード・MSVC (x64)・
      Windows SDK を入れ、入っている Build Tools に足りないものは Visual Studio Installer で足す。rustup は MSVC の host
      (x86_64-pc-windows-msvc) にし、toolchain は入れず、自己更新を止める (rustup-init が MSVC の有無を見るので、Build Tools を rustup より
      先に入れる)。GNU の host にしないのは、windows-sys 0.61 (windows-link の raw-dylib) の build に MinGW の dlltool と as が要り、GNU の
@@ -37,13 +38,14 @@ docs/adr/058_win_runner_bootstrap_*・docs/adr/111_win_runner_without_gh_*)。ma
   6. 揃え終えたら (終了コード 0)、次に打つコマンド (clone の dotfiles.ps1 を読み込んで dotfiles apply) を出す。-Check では出さない (runner の
      手順 bootstrap が毎回 -Check を流すので)
 
-入っている道具の版が固定した版と違っても揃えない (⚠ と ※ の手順を出すだけ。揃えるのは Rust の runner の受け持ち)。※ の上げ方の
+入っている道具の版が固定した版と違っても揃えない (⚠ と ※ の手順を出すだけ。揃えるのは Rust の runner の受け持ち。PowerShell 7 は版を
+固定した版と比べず、7.6.0 より古いときだけ ⚠ を出す)。※ の上げ方の
 winget upgrade には --include-pinned を付ける (付けないと、bootstrap が足した pin に止められる)。あるディレクトリと clone には触らない
 (確かめるだけ。取得もしない)。
 
 何も変えずに止めるとき: 管理者の PowerShell (clone と rustup が管理者の持ち物になり、普通の権限の git が dubious ownership で止まる)・
 x64 でない CPU。SAC がオフでないときは止めず、最初の警告と表の ⚠ の行で知らせる (終了コードは 1)。
-UAC は winget と Visual Studio Installer が道具ごとに出す。
+UAC は winget と Visual Studio Installer が道具ごとに出す (PowerShell 7 の MSIX と rustup はユーザー単位に入るので出ない)。
 
 BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無い UTF-8 を CP932 として読む)。新しい Windows には 5.1 しか
 無いので、PowerShell 7 にしか無い書き方を使わない (Install-Bootstrap.Tests.ps1 が見る)。
@@ -55,7 +57,9 @@ Git for Windows (winget の Git.Git) の固定する版。版を変えるとき�
 GitHub CLI (winget の GitHub.cli) の固定する版 (check-winget-version.sh gh が読む)。入れるのは -Private のときだけ。
 
 .PARAMETER PwshVersion
-PowerShell 7 (winget の Microsoft.PowerShell) の固定する版 (check-winget-version.sh pwsh が読む)。MSI のある 7.6 (LTS) の線の版にする。
+PowerShell 7 (winget の Microsoft.PowerShell) の、入っていないときに入れる版 (check-winget-version.sh pwsh が読む)。7.6 (LTS) の線の版に
+する: winget の 7.6 の MSIX は package Microsoft.PowerShell-LTS (Microsoft Store の PowerShell-LTS と同じ) で、7.7 からの MSIX は別の package
+Microsoft.PowerShell (Store の PowerShell と同じ) なので、7.6 の MSIX の上げ先にならない。
 
 .PARAMETER VsBuildToolsVersion
 Visual Studio Build Tools 2022 (winget の Microsoft.VisualStudio.2022.BuildTools) の固定する版 (check-winget-version.sh vs-buildtools が読む)。
@@ -97,6 +101,10 @@ $script:VsWorkload = 'Microsoft.VisualStudio.Workload.VCTools'
 $script:VsToolsComponent = 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64'
 $script:VsSdkComponent = 'Microsoft.VisualStudio.Component.Windows11SDK.26100'
 
+# PowerShell 7 として認める一番古い版。入れ方 (MSI・MSIX・ほかの形) は問わない。7.4 (LTS) と 7.5 は 2026-11-10 でサポートが終わり、
+# dotfiles の PowerShell のテストも 7.6 の線で流す (dotfiles-private の ADR 111)
+$script:PwshMinimumVersion = '7.6.0'
+
 # git --version の出力 ("git version 2.56.0.windows.4") を winget の Git.Git の版にする。.windows.1 は 3 つの数 (2.56.0)、
 # ほかは 4 つ目に足す (2.56.0.4)。読めなければ $null
 function Get-GitVersionFromOutput {
@@ -121,13 +129,71 @@ function Get-GhVersionFromOutput {
     $null
 }
 
-# pwsh --version の出力 ("PowerShell 7.6.10") を winget の Microsoft.PowerShell の版 (4 つの数。7.6.10.0) にする。preview などは読まない。
-# 無ければ $null
+# pwsh --version の出力 ("PowerShell 7.6.10") から版 (3 つの数。7.6.10) を拾う。preview などは読まない。無ければ $null
 function Get-PwshVersionFromOutput {
     param([string[]]$Lines)
     foreach ($line in $Lines) {
-        if ("$line".Trim() -match '^PowerShell (\d+\.\d+\.\d+)$') { return "$($Matches[1]).0" }
+        if ("$line".Trim() -match '^PowerShell (\d+\.\d+\.\d+)$') { return $Matches[1] }
     }
+    $null
+}
+
+# PowerShell 7 として認める版か ($script:PwshMinimumVersion より古くない)。読めない版は認めない
+function Test-PwshVersionAccepted {
+    param([string]$Version, [string]$Minimum = $script:PwshMinimumVersion)
+    $v = $null
+    $m = $null
+    if (-not [version]::TryParse("$Version", [ref]$v)) { return $false }
+    if (-not [version]::TryParse("$Minimum", [ref]$m)) { return $false }
+    $v -ge $m
+}
+
+# pwsh を探す場所。新しい窓の PATH (レジストリのマシン → ユーザーの Path。runner と herdr はこの PATH の pwsh を起こす) のディレクトリごとの
+# pwsh.exe を順に並べ、その後ろに MSI の既定の置き場所と MSIX の実行エイリアス (PATH から外れていても見つけるため) を足す。同じパス
+# (大文字小文字は問わない) は 1 つにする。OnPath は PATH のディレクトリから組んだものか。Windows のパスは字でつなぐ (Join-Path は、
+# テストを流す Linux の pwsh で C: のドライブを探しに行く)
+function Get-PwshCandidates {
+    param([string]$PathValue, [string]$MsiPath, [string]$AliasPath)
+    # @{} の鍵は大文字小文字を区別しない
+    $seen = @{}
+    foreach ($entry in ("$PathValue" -split ';')) {
+        $dir = [Environment]::ExpandEnvironmentVariables($entry.Trim().Trim('"')).TrimEnd('\')
+        if (-not $dir) { continue }
+        $path = "$dir\pwsh.exe"
+        if ($seen.ContainsKey($path)) { continue }
+        $seen[$path] = $true
+        [pscustomobject]@{ Path = $path; OnPath = $true }
+    }
+    foreach ($path in @($MsiPath, $AliasPath)) {
+        if ((-not $path) -or $seen.ContainsKey($path)) { continue }
+        $seen[$path] = $true
+        [pscustomobject]@{ Path = $path; OnPath = $false }
+    }
+}
+
+# pwsh の入れ方。WindowsApps の下 (MSIX の実行エイリアス・実体) は msix、MSI の既定の置き場所は msi、ほかは other
+function Get-PwshInstallKind {
+    param([string]$Path, [string]$MsiPath)
+    if ("$Path" -match '\\WindowsApps\\') { return 'msix' }
+    if ($MsiPath -and ("$Path" -eq $MsiPath)) { return 'msi' }
+    'other'
+}
+
+# 表の行に出す PowerShell 7 の入れ方 (MSIX・MSI。ほかの形はパス)
+function Format-PwshInstallKind {
+    param([string]$Kind, [string]$Path)
+    switch ($Kind) {
+        'msix' { return 'MSIX' }
+        'msi' { return 'MSI' }
+    }
+    $Path
+}
+
+# bootstrap が入れた PowerShell 7 に足す pin の版 (固定した版の線。7.6.10.0 → 7.6.*)。winget upgrade --all は、この線の中でだけ上げ、
+# 7.7 (別の package の MSIX) へは上げない。読めなければ $null (pin を足さない)
+function Get-PwshPinVersion {
+    param([string]$Version)
+    if ("$Version" -match '^(\d+)\.(\d+)\.') { return "$($Matches[1]).$($Matches[2]).*" }
     $null
 }
 
@@ -272,15 +338,17 @@ function Get-WingetInstallArguments {
         '--disable-interactivity', '--version', $Version, '--accept-package-agreements') + @($Extra | Where-Object { $_ })
 }
 
+# winget pin add の引数。-Version を渡すと、その版の範囲 (7.6.* など) に留める pin (gating) にする。渡さなければ pin (pinning)
+function Get-WingetPinAddArguments {
+    param([string]$PackageId, [string]$Version)
+    $versionArgs = @()
+    if ($Version) { $versionArgs = @('--version', $Version) }
+    @('pin', 'add', '--id', $PackageId, '--exact') + $versionArgs + @('--accept-source-agreements', '--disable-interactivity')
+}
+
 # rustup-init に渡す引数 (winget の --custom。rustup-init の -y -q の後ろに足される)。MSVC の host にし、toolchain は入れない
 function Get-RustupInitArgument {
     "--default-host $script:RustHost --default-toolchain none"
-}
-
-# PowerShell 7 の MSI に渡す property (winget の --custom。msiexec の引数の後ろに足される)。Microsoft Update の自動更新に入れない
-# (固定した版から動かさない。Windows Update の「ほかの Microsoft 製品」の設定にも触らない)
-function Get-PwshInstallCustomArgument {
-    'USE_MU=0 ENABLE_MU=0'
 }
 
 # 入れる道具。並びは入れる順 (rustup-init が MSVC の有無を見るので、Build Tools を rustup より先に)。gh は -Private のときだけ
@@ -294,16 +362,16 @@ function Get-BootstrapPackages {
     $rustupPackageId = 'Rustlang.Rustup'
     $vsCustom = Get-VsInstallCustomArgument -Components @(Get-VsRequiredComponents)
     # Git は machine の scope (C:\Program Files\Git。インストーラーの選択肢は既定のまま)、gh は MSI (C:\Program Files\GitHub CLI。
-    # zip の portable もある)、PowerShell 7 は MSI (C:\Program Files\PowerShell\7。7.6 の winget の版は MSIX もあるので、wix を名指しする)、
+    # zip の portable もある)、PowerShell 7 は MSIX (ユーザー単位。7.6 の winget の版は MSI もあるので、msix を名指しする)、
     # rustup は MSVC の host で toolchain を入れない (版は Rust の runner の rust-toolchain.toml が決める)。
-    # Silent: gh と PowerShell 7 の MSI は per-machine なので、管理者でない PowerShell から quiet (--silent → /quiet) で流すと UAC が出ずに
-    # 落ちる (Error 1925)。--silent を付けず、winget の既定 (/passive) で UAC を出させる。Build Tools も --silent を付けず (--passive)、
-    # 数 GB を落とす 10 分以上の間、進み具合の窓を出す (UAC は installer が自分で出す)。Git の installer は自分で昇格し、rustup は
-    # user に入るので --silent でよい
+    # Silent: gh の MSI は per-machine なので、管理者でない PowerShell から quiet (--silent → /quiet) で流すと UAC が出ずに落ちる
+    # (Error 1925)。--silent を付けず、winget の既定 (/passive) で UAC を出させる。Build Tools も --silent を付けず (--passive)、
+    # 数 GB を落とす 10 分以上の間、進み具合の窓を出す (UAC は installer が自分で出す)。Git の installer は自分で昇格し、PowerShell 7 の
+    # MSIX と rustup は user に入るので --silent でよい
     $all = @(
         [pscustomobject]@{ Name = 'git'; Title = 'Git for Windows'; PackageId = $gitPackageId; Version = $GitVersion; Silent = $true; Args = @('--scope', 'machine') }
         [pscustomobject]@{ Name = 'gh'; Title = 'GitHub CLI'; PackageId = $ghPackageId; Version = $GhVersion; Silent = $false; Args = @('--installer-type', 'wix') }
-        [pscustomobject]@{ Name = 'pwsh'; Title = 'PowerShell 7'; PackageId = $pwshPackageId; Version = $PwshVersion; Silent = $false; Args = @('--installer-type', 'wix', '--custom', (Get-PwshInstallCustomArgument)) }
+        [pscustomobject]@{ Name = 'pwsh'; Title = 'PowerShell 7'; PackageId = $pwshPackageId; Version = $PwshVersion; Silent = $true; Args = @('--installer-type', 'msix') }
         [pscustomobject]@{ Name = 'vs-buildtools'; Title = 'Visual Studio Build Tools 2022'; PackageId = $vsBuildToolsPackageId; Version = $VsBuildToolsVersion; Silent = $false; Args = @('--custom', $vsCustom) }
         [pscustomobject]@{ Name = 'rustup'; Title = 'rustup'; PackageId = $rustupPackageId; Version = $RustupVersion; Silent = $true; Args = @('--custom', (Get-RustupInitArgument)) }
     )
@@ -389,6 +457,26 @@ function New-BootstrapRow {
     [pscustomobject]@{ Label = $Label; Text = $Text; Kind = $Kind; Note = $Note }
 }
 
+# PowerShell 7 の行。入れ方を問わず、$script:PwshMinimumVersion より古くなければ揃っている (固定した版と比べず、pin も見ない。Microsoft
+# Store が上げる MSIX もあるため)。PATH の外でだけ見つかったときは、runner と herdr が起こせないので直すことにする
+function Get-PwshRow {
+    param($Package)
+    if (-not $Package.Exists) {
+        return New-BootstrapRow $Package.Title "入っていない → $($Package.Target) を winget の MSIX で入れる (ユーザー単位。UAC は出ない)" 'missing' ''
+    }
+    $how = Format-PwshInstallKind -Kind $Package.Kind -Path $Package.Path
+    if (-not $Package.Installed) {
+        return New-BootstrapRow $Package.Title "入っているが版が読めない ($how)" 'manual' "※ PowerShell 7 ($($Package.Path)) の版が読めない。--version で確かめる ($script:PwshMinimumVersion より古くなければ、入れ方は問わない)"
+    }
+    if (-not (Test-PwshVersionAccepted -Version $Package.Installed)) {
+        return New-BootstrapRow $Package.Title "$($Package.Installed) ($how) → $script:PwshMinimumVersion より古い" 'manual' "※ PowerShell 7 ($($Package.Path)) が古い。入れた形のまま上げる (MSI は winget upgrade --id $($Package.PackageId) --exact --version $($Package.Target) --include-pinned --installer-type wix で、UAC が出る。Microsoft Store の MSIX は Store のライブラリで更新する) か、外してから流し直す (winget の MSIX で $($Package.Target) を入れる)"
+    }
+    if (-not $Package.OnPath) {
+        return New-BootstrapRow $Package.Title "$($Package.Installed) ($how) → PATH に無い" 'manual' "※ PowerShell 7 ($($Package.Path)) のディレクトリが PATH に無い (runner と herdr は PATH の pwsh を起こす)。ユーザーの環境変数 Path に足す"
+    }
+    New-BootstrapRow $Package.Title "$($Package.Installed) ($how)" '' ''
+}
+
 # 状態から表の行を作る。状態の形は Get-BootstrapState (テストでは New-State) が返すもの
 function Get-BootstrapRows {
     param($State)
@@ -411,6 +499,10 @@ function Get-BootstrapRows {
         New-BootstrapRow 'CPU' "$($State.Arch) → 対象外 (x64 だけ。Rust は MSVC の host $script:RustHost を使う)" 'blocker' ''
     }
     foreach ($p in @($State.Packages)) {
+        if ($p.Name -eq 'pwsh') {
+            Get-PwshRow -Package $p
+            continue
+        }
         if (-not $p.Exists) {
             New-BootstrapRow $p.Title "入っていない → $($p.Target) を入れる" 'missing' ''
             continue
@@ -542,14 +634,17 @@ function Get-OsArchitecture {
     "$a".ToUpperInvariant()
 }
 
-# 道具の置き場所。Git・gh・PowerShell 7 は machine の scope の既定の置き場所、rustup は CARGO_HOME (無ければ %USERPROFILE%\.cargo) の下、
-# vswhere と Visual Studio Installer は Program Files (x86) の下。手元のホストの値は %USERPROFILE%\.config\dotfiles\host.toml。
+# 道具の置き場所。Git・gh は machine の scope の既定の置き場所、PowerShell 7 は MSI の既定の置き場所と MSIX の実行エイリアス (どちらも
+# PATH の pwsh の後ろに見る。Get-PwshCandidates)、rustup は CARGO_HOME (無ければ %USERPROFILE%\.cargo) の下、vswhere と Visual Studio
+# Installer は Program Files (x86) の下。手元のホストの値は %USERPROFILE%\.config\dotfiles\host.toml。
 # 32 ビットの PowerShell では ProgramFiles が (x86) を指すので、64 ビットの方 (ProgramW6432) を先に見る
 function Get-BootstrapPaths {
     $cargoHome = $env:CARGO_HOME
     if (-not $cargoHome) { $cargoHome = Join-Path $env:USERPROFILE '.cargo' }
     $rustupHome = $env:RUSTUP_HOME
     if (-not $rustupHome) { $rustupHome = Join-Path $env:USERPROFILE '.rustup' }
+    $localAppData = $env:LOCALAPPDATA
+    if (-not $localAppData) { $localAppData = Join-Path $env:USERPROFILE 'AppData\Local' }
     $programFiles = $env:ProgramW6432
     if (-not $programFiles) { $programFiles = $env:ProgramFiles }
     $programFilesX86 = ${env:ProgramFiles(x86)}
@@ -559,6 +654,7 @@ function Get-BootstrapPaths {
         Git            = Join-Path $programFiles 'Git\cmd\git.exe'
         Gh             = Join-Path $programFiles 'GitHub CLI\gh.exe'
         Pwsh           = Join-Path $programFiles 'PowerShell\7\pwsh.exe'
+        PwshAlias      = Join-Path $localAppData 'Microsoft\WindowsApps\pwsh.exe'
         Rustup         = Join-Path $cargoHome 'bin\rustup.exe'
         RustupSettings = Join-Path $rustupHome 'settings.toml'
         VsWhere        = Join-Path $installer 'vswhere.exe'
@@ -629,10 +725,14 @@ function Invoke-GitClone {
     }
 }
 
+# 新しい窓の PATH (レジストリのマシン → ユーザーの Path を ; でつないだもの)
+function Get-RegistryPathValue {
+    (@([Environment]::GetEnvironmentVariable('Path', 'Machine'), [Environment]::GetEnvironmentVariable('Path', 'User')) | Where-Object { $_ }) -join ';'
+}
+
 # PATH をレジストリ (マシン → ユーザー) から読み直す。winget で入れた道具を、このプロセスと、ここから起こす git などから引けるように
 function Update-ProcessPath {
-    $parts = @([Environment]::GetEnvironmentVariable('Path', 'Machine'), [Environment]::GetEnvironmentVariable('Path', 'User')) | Where-Object { $_ }
-    $env:Path = $parts -join ';'
+    $env:Path = Get-RegistryPathValue
 }
 
 # 入っている Build Tools に部品を足す (Visual Studio Installer。UAC が出る)。終了コードを返す (3010 は再起動待ちで、足せている)。
@@ -827,6 +927,9 @@ function Get-BootstrapState {
         $lacking = @()
         $selfUpdateDisabled = $true
         $defaultHost = $null
+        $foundPath = $null
+        $onPath = $false
+        $kind = $null
         switch ($p.Name) {
             'git' {
                 $exists = Test-Path -LiteralPath $Paths.Git -PathType Leaf
@@ -837,8 +940,16 @@ function Get-BootstrapState {
                 if ($exists) { $installed = Get-GhVersionFromOutput -Lines (Invoke-Native -FilePath $Paths.Gh -Arguments @('--version')).Lines }
             }
             'pwsh' {
-                $exists = Test-Path -LiteralPath $Paths.Pwsh -PathType Leaf
-                if ($exists) { $installed = Get-PwshVersionFromOutput -Lines (Invoke-Native -FilePath $Paths.Pwsh -Arguments @('--version')).Lines }
+                # 入れ方を問わず、新しい窓の PATH で先に当たる pwsh を読む (PATH に無ければ、MSI の置き場所・MSIX の実行エイリアス)
+                foreach ($c in @(Get-PwshCandidates -PathValue (Get-RegistryPathValue) -MsiPath $Paths.Pwsh -AliasPath $Paths.PwshAlias)) {
+                    if (-not (Test-Path -LiteralPath $c.Path -PathType Leaf)) { continue }
+                    $exists = $true
+                    $foundPath = $c.Path
+                    $onPath = $c.OnPath
+                    $kind = Get-PwshInstallKind -Path $c.Path -MsiPath $Paths.Pwsh
+                    $installed = Get-PwshVersionFromOutput -Lines (Invoke-Native -FilePath $c.Path -Arguments @('--version')).Lines
+                    break
+                }
             }
             'vs-buildtools' {
                 $instance = Get-VsBuildToolsInstance -Json (Read-VsWhere -VsWhere $Paths.VsWhere) -Major 17
@@ -861,15 +972,16 @@ function Get-BootstrapState {
                 }
             }
         }
+        # PowerShell 7 の pin は見ない (入れ方を問わず認める。bootstrap が入れたときだけ、入れた直後に足す)
         $pinned = $false
-        if ($exists) {
+        if ($exists -and ($p.Name -ne 'pwsh')) {
             $pins = Invoke-Winget -Arguments @('pin', 'list', '--id', $p.PackageId, '--exact', '--accept-source-agreements', '--disable-interactivity')
             $pinned = Test-WingetPinned -Lines $pins.Lines -PackageId $p.PackageId
         }
         [pscustomobject]@{
             Name = $p.Name; Title = $p.Title; PackageId = $p.PackageId; Target = $p.Version; Exists = [bool]$exists; Installed = $installed
             Pinned = $pinned; InstallPath = $installPath; MissingComponents = $lacking; SelfUpdateDisabled = [bool]$selfUpdateDisabled
-            DefaultHost = $defaultHost
+            DefaultHost = $defaultHost; Path = $foundPath; OnPath = [bool]$onPath; Kind = $kind
         }
     }
     $states = @($states)
@@ -989,15 +1101,26 @@ function Invoke-InstallBootstrap {
                 Write-Host "$($p.Title) のインストーラーが取り消された (UAC で「はい」を押さなかった・窓を閉じた)。流し直すと、もう一度入れる" -ForegroundColor Yellow
             }
         }
+        # PowerShell 7 は、入れたときだけ固定した版の線に留める pin (gating) を足す (ほかの形で入っていた PowerShell 7 には足さない。
+        # 線の中の新しい版は winget upgrade --all でも Microsoft Store でも上がってよい)
+        if (($p.Name -eq 'pwsh') -and ($result.ExitCode -eq 0)) {
+            $pinVersion = Get-PwshPinVersion -Version $p.Version
+            if ($pinVersion) {
+                $pin = Invoke-Winget -Arguments (Get-WingetPinAddArguments -PackageId $p.PackageId -Version $pinVersion)
+                if ($pin.ExitCode -eq 0) { Write-Host "$($p.Title): winget pin を足した ($pinVersion に留める。winget upgrade --all は 7.7 (別の package) へ上げない)" }
+                else { Write-Host ('{0}: winget pin add が失敗した (終了コード 0x{1:X8})' -f $p.Title, $pin.ExitCode) }
+            }
+        }
         Update-ProcessPath
     }
 
-    # 2. 読み直して、入っている道具に pin・Build Tools の足りないもの・rustup の自己更新の止めと既定の host を足す
+    # 2. 読み直して、入っている道具に pin・Build Tools の足りないもの・rustup の自己更新の止めと既定の host を足す (PowerShell 7 の pin は
+    # 1 で入れたときだけ)
     $state = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch -Private:$Private
     foreach ($s in @($state.Packages)) {
         if (-not $s.Exists) { continue }
-        if (-not $s.Pinned) {
-            $pin = Invoke-Winget -Arguments @('pin', 'add', '--id', $s.PackageId, '--exact', '--accept-source-agreements', '--disable-interactivity')
+        if ((-not $s.Pinned) -and ($s.Name -ne 'pwsh')) {
+            $pin = Invoke-Winget -Arguments (Get-WingetPinAddArguments -PackageId $s.PackageId)
             if ($pin.ExitCode -eq 0) { Write-Host "$($s.Title): winget pin を足した (winget upgrade --all から外れる)" }
             else { Write-Host ('{0}: winget pin add が失敗した (終了コード 0x{1:X8})' -f $s.Title, $pin.ExitCode) }
         }

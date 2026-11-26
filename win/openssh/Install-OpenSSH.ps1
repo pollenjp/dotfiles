@@ -286,6 +286,15 @@ function Invoke-OpenSshFix {
     $ok
 }
 
+# 自分を起動し直す pwsh が MSIX (WindowsApps の下) のときに、昇格できなかったわけとして出す行。MSIX は使う人ごとに登録されるので、UAC で
+# 別の管理者のアカウントの資格情報を入れると、そのアカウントでは pwsh を起こせない見込み (win/README.md の「PowerShell 7 の MSIX の限り」)。
+# MSIX でなければ何も返さない
+function Format-MsixElevationNote {
+    param([string]$HostExe)
+    if ("$HostExe" -notmatch '\\WindowsApps\\') { return }
+    '※ この pwsh は MSIX (使う人ごとに登録される) なので、UAC で別の管理者のアカウントの資格情報を入れると、昇格した側で pwsh を起こせない。普段のアカウントが管理者でない PC では、MSI の PowerShell 7 を足してから新しい窓で流し直す (win/README.md の「PowerShell 7 の MSIX の限り」)'
+}
+
 # 自分を管理者で起動し直して終わるのを待ち、子が書いたログを出す。成功なら $true
 function Invoke-Elevated {
     param([string]$Version, [switch]$Force)
@@ -302,10 +311,14 @@ function Invoke-Elevated {
         $process = Start-Process -FilePath $hostExe -ArgumentList $argumentList -Verb RunAs -Wait -PassThru
     } catch {
         Write-Host "管理者で起動できなかった (UAC で断った?): $($_.Exception.Message)"
+        foreach ($line in @(Format-MsixElevationNote -HostExe $hostExe)) { Write-Host $line }
         return $false
     }
     if (Test-Path -LiteralPath $log) {
         Get-Content -LiteralPath $log -Encoding utf8 | ForEach-Object { Write-Host "  [管理者] $_" }
+    } elseif ($process.ExitCode -ne 0) {
+        # 子がログを書く前に落ちた (昇格した側で pwsh が動かなかったなど)
+        foreach ($line in @(Format-MsixElevationNote -HostExe $hostExe)) { Write-Host $line }
     }
     $process.ExitCode -eq 0
 }

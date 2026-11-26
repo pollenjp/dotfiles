@@ -1573,6 +1573,32 @@ Test-Case '管理者の子に、鍵の写し・ユーザーと送り元の写し
     $a[$a.IndexOf('-KeysCopy') + 1]; $a[$a.IndexOf('-AllowCopy') + 1]; $a[$a.IndexOf('-AllowUser') + 1]; $a[$a.IndexOf('-KeysFrom') + 1]
 }
 
+# Format-MsixElevationNote・Invoke-Elevated: 自分を起動し直す pwsh が MSIX (WindowsApps の下) なら、昇格を起こせなかったときに、別の管理者の
+# アカウントでは起こせないことを ※ で出す (MSI の pwsh なら出さない)。Get-Process・Start-Process・Write-Host を偽物に替える
+$msixPwsh = 'C:\Program Files\WindowsApps\Microsoft.PowerShell_7.7.0.0_x64__8wekyb3d8bbwe\pwsh.exe'
+$msiPwsh = 'C:\Program Files\PowerShell\7\pwsh.exe'
+function Invoke-ElevatedFailureScenario {
+    param([string]$HostExe)
+    $said = [System.Collections.Generic.List[string]]::new()
+    function Get-Process { param($Id) [pscustomobject]@{ Path = $HostExe } }
+    function Start-Process {
+        param([string]$FilePath, [string[]]$ArgumentList, [string]$Verb, [switch]$Wait, [switch]$PassThru)
+        throw 'アクセスが拒否されました。'
+    }
+    function Write-Host { param($Object, $ForegroundColor) $said.Add("$Object") }
+    $state = Join-Path ([IO.Path]::GetTempPath()) "install-sshd-elevated-fail-$PID"
+    try {
+        $result = Invoke-Elevated -User 'alice' -CopyPath 'C:\k\authorized_keys' -StateDir $state -KeysFrom 'runner' -AllowPath 'C:\k\allow.json'
+    } finally {
+        Remove-Item -LiteralPath $state -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    "$result $(@($said | Where-Object { $_.StartsWith('※ この pwsh は MSIX') }).Count)"
+}
+Test-Case 'MSIX の pwsh で昇格を起こせなければ、別の管理者のアカウントのことを ※ で出し、MSI の pwsh なら出さない' 'False 1|False 0' {
+    "$(Invoke-ElevatedFailureScenario -HostExe $msixPwsh)|$(Invoke-ElevatedFailureScenario -HostExe $msiPwsh)"
+}
+Test-Case 'MSIX の ※ は MSI の PowerShell 7 を足す手を添える' 'True' { @(Format-MsixElevationNote -HostExe $msixPwsh)[0].Contains('MSI の PowerShell 7 を足して') }
+
 # 本体の入口: 思わぬ例外でも、終了コード 2 で止まる (成功に見せない)。
 # Linux の pwsh には $env:ProgramFiles が無く、本体の最初で例外になるのを使う (Install-OpenSSH.Tests.ps1 と同じ)
 Test-Case '思わぬ例外では終了コード 2 で止まる' '2' {
