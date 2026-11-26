@@ -9,14 +9,12 @@
     username = "pollenjp";
     system = "x86_64-linux";
 
-    # 設定グループ (本体の nix/README.md「設定グループ」と nix/groups.md)。書かなければ "personal" (個人の PC。
-    # ① エンジニアの道具・② AI の道具・③ 個人の道具の段を全部入れる)。ほかは:
-    #   "company"  自社の PC。① と ② を入れ、③ (1Password・ntn・private な repo・git の名前とメール) は要るものを
-    #              下で 1 つずつ足す
-    #   "client"   客先の PC。① だけを入れ、許可の出た道具を下で 1 つずつ足す (claude.enable = true; など)。git の
-    #              名前とメールも入らないので、modules に programs.git.settings.user = { name = "…"; email = "…"; };
-    #              を書く (書かなければ git が commit の前に止まる)
-    #   group = "client";
+    # 設定グループ (本体の nix/README.md「設定グループ」と nix/groups.md)。グループは道具の集合で、"minimum"
+    # (どの PC にも初めからあってほしいもの。書かなければこれ) と "all" (道具を全部) の 2 つ。ほとんどの PC は
+    # "minimum" にして、使う道具を下で 1 つずつ足す (この例は Claude Code 一式・herdr などを足した個人の PC の形)。
+    # 道具を足さない PC (客先の PC など) は、下の道具の行を消す。git の名前とメールも入らないので、modules に
+    # programs.git.settings.user = { name = "…"; email = "…"; }; を書く (書かなければ git が commit の前に止まる)
+    group = "minimum";
 
     # WSL のマシンだけ書く (書かなければ WSL でないマシン)。
     wsl = {
@@ -27,6 +25,13 @@
       windowsUserName = "alice";
       # repo 直下の win/ を Windows 側へ配る (反映は ~/dotfiles/setup --update)。
       windowsFiles.enable = true;
+      # win/ を配るマシンで入れる Windows の道具 (minimum に入らないので足す。使わない行は消す):
+      # Claude Code・herdr と herdr-app・ntn・claude-personal と claude-work・Claude Desktop。
+      windowsFiles.claudeCode.enable = true;
+      windowsFiles.herdr.enable = true;
+      windowsFiles.ntn.enable = true;
+      windowsFiles.claudeAccounts.enable = true;
+      windowsFiles.claudeDesktop.enable = true;
       # WSL から起動された Windows の .exe を、起動元の祖先付きで journald に常時記録する (ADR 012)。
       # unit を /etc へ入れるのは ~/dotfiles/setup --update の最後の手順 exe-exec-trace (中で sudo を呼ぶ)。
       exeExecTrace.enable = true;
@@ -35,9 +40,14 @@
     onePassword.enable = true;
 
     claude = {
-      # Notion Dev Tracker (pjp-dev-tracker skill) をこのマシンで使うか。本体の既定は false で、
-      # 使うマシンだけ true にする。CLAUDE.md の「タスク管理」の節と settings.json の
-      # skillOverrides の両方がこの値から決まる。
+      # Claude Code 一式 (設定・hook・skill・status line・plugin・mise の claude) と、private な skill 置き場
+      # (claude-skills の clone。Dev Tracker の skill もここ)。どちらも minimum に入らないので、使うマシンで足す。
+      enable = true;
+      privateSkills.enable = true;
+
+      # Notion Dev Tracker (pjp-dev-tracker skill) をこのマシンで使うか。minimum に入らないので、
+      # 使うマシンだけ true にする (skill は claude-skills にあるので、上の 2 行が要る)。CLAUDE.md の
+      # 「タスク管理」の節と settings.json の skillOverrides の両方がこの値から決まる。
       # 反映は ~/dotfiles/setup --update (switch だけでは settings.json に届かない)。
       devTracker.enable = true;
 
@@ -74,6 +84,15 @@
     # mkHome の引数に無い option (本体の nix/home/options.nix) と home-manager の設定は、modules に書く。
     modules = [
       {
+        # minimum に足す道具 (使わない行は消す): herdr・集約ハブ ~/h・herdr-core (hc。Linux)・cc-pages・
+        # ntn (Notion の CLI)・git の名前とメール (個人のアカウント)。
+        dotfiles.herdr.enable = true;
+        dotfiles.herdr.hub.enable = true;
+        dotfiles.herdrCore.enable = true;
+        dotfiles.ccPages.enable = true;
+        dotfiles.ntn.enable = true;
+        dotfiles.git.identity.enable = true;
+
         # cc-pages (cc-page のページを見せるローカル web ビューア) が待ち受ける port。
         # 書かなければ cc-pages の既定の 7777。7777 がほかと衝突するマシンだけ書く。
         # 反映は ~/dotfiles/setup --update (switch だけでもよい。daemon は switch が再起動する)。
