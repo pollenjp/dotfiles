@@ -141,7 +141,7 @@ if [[ -r ${group_file} ]]; then
   windows_sshd=$(jq -r '.tools.windowsSshd // false' "${group_file}" 2>/dev/null) || windows_sshd=false
 fi
 if [[ ${windows_sshd} != true ]]; then
-  echo "このマシンには Windows の sshd を入れません (dotfiles.wsl.windowsFiles.sshd.enable が false。minimum では既定で off)。"
+  echo "このマシンには Windows の sshd を入れません (dotfiles.wsl.windowsFiles.sshd.enable = false。minimum では既定で off)。"
   exit 0
 fi
 windows_home=$(jq -r '.windowsHome // ""' "${state_file}")

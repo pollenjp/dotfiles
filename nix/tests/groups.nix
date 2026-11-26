@@ -49,9 +49,11 @@ let
   values = cfg: map (t: valueOf cfg t) groups.tools;
   toolNamed = key: builtins.head (builtins.filter (t: t.key == key) groups.tools);
 
-  # 環境の組 (グループのほかは書かない)。system が違う組 (macOS) も評価だけなら、どの system のランナーでも流せる
+  # 環境の組 (グループのほかは書かない)。system はどの組も書く (WSL と Linux の組は x86_64-linux。check の system が macOS でも、
+  # WSL の組を macOS で組まない)。system が違う組も評価だけなら、どの system のランナーでも流せる
   envs = {
     wsl-win = {
+      system = "x86_64-linux";
       wsl = {
         enable = true;
         windowsUserName = "user";
@@ -59,15 +61,19 @@ let
       };
     };
     wsl-runner = {
+      system = "x86_64-linux";
       wsl = {
         enable = true;
         windowsUserName = "user";
       };
     };
     wsl-nouser = {
+      system = "x86_64-linux";
       wsl.enable = true;
     };
-    linux = { };
+    linux = {
+      system = "x86_64-linux";
+    };
     darwin = {
       system = "aarch64-darwin";
     };

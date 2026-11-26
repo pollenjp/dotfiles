@@ -132,7 +132,7 @@ if [[ -r ${group_file} ]]; then
   windows_tailscale=$(jq -r '.tools.windowsTailscale // false' "${group_file}" 2>/dev/null) || windows_tailscale=false
 fi
 if [[ ${windows_tailscale} != true ]]; then
-  echo "このマシンには Windows の Tailscale を入れません (dotfiles.wsl.windowsFiles.tailscale.enable が false。minimum では既定で off)。"
+  echo "このマシンには Windows の Tailscale を入れません (dotfiles.wsl.windowsFiles.tailscale.enable = false。minimum では既定で off)。"
   exit 0
 fi
 windows_home=$(jq -r '.windowsHome // ""' "${state_file}")
