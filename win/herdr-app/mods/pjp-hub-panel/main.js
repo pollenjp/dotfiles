@@ -15,7 +15,8 @@
 //   欄の 1 行目はわけの字 | ボタンの組 (「入力欄に入れる」「送信」。右寄せで、欄の右上)、その下に答えの文。その下の一覧だけがスクロールし、
 //   答えの欄は隠れない。ペインの下端に置かないのは、herdr-app の通知 (toast) が窓の右下に出て、問いのペイン (端末の右に開く) の下端の
 //   「送信」と重なるため。
-//   わけの行: 送った・止まったわけや開かなかったリンクのわけ (status) は、問いがあれば答えの欄のわけの字に、無ければペインの一番下の行に出す。
+//   わけの行: 送った・止まったわけや開かなかったリンクのわけ・写せなかった ID のわけ (status) は、問いがあれば答えの欄のわけの字に、無ければ
+//   ペインの一番下の行に出す。
 //   どの role のペインも、開いたときに自分からキーボードを取らない (handle に focus するのは、pane.go で来た "focus" (nextCommand) と、
 //   ユーザーが選択肢をクリックしたときだけ。図を大きく見る小窓は別で、開いたときに focus する)。
 //   問いのペインは、「送信」(このペインで Enter も) で送れたら自分を閉じ、キーボードを terminal へ戻す。mod は自分のペインの ID を
@@ -60,7 +61,7 @@
 //   prs は { id: "dotfiles#251", title, url: "https://github.com/pollenjp/dotfiles/pull/251", state: "open", ci: "pass", note }。
 //   上の段に ID・状態の札・題を並べ (入らなければ札や題が次の段へ回り、長い ID と題は縮んで折り返す)、note (一言) はその下に小さく出す。
 //   ID (accent の色) と題は下線つきで、押すと url を開く (リンクと同じく http と https だけ。ダブルクリックの 2 回目は数えない。url が無い・
-//   ほかの scheme なら下線の無い押せない字で出す)。
+//   ほかの scheme なら下線の無い押せない字で出す)。tickets の行は、ID の右に ID を写すボタンを出す (下の「ID を写すボタン」)。
 //   status の札: Todo は muted・In Progress は working・In Review は accent・Done は ok (緑)・Canceled は dim・Blocked は blocked (赤)。
 //   state の札: open は ok (緑)・draft は muted・merged は ansi5 (紫)・closed は blocked (赤)。ci の札: pass は「CI ✓」(緑)・fail は
 //   「CI ✗」(赤)・pending は「CI …」(working)。どれも大文字小文字を問わず、知らない値は muted の札に字のまま (ci は「CI <値>」) 出し、
@@ -72,7 +73,8 @@
 //     { kind, id, title, url, status, state, ci, who, note, steps: [{ label, state, answer }], children: [<行>…], related }
 //   - kind: "ticket" | "pr" | "item"。無い・空なら "ticket"。大文字小文字を問わず、知らない値は "item" と同じに出す。id は ticket が
 //     "TKT-n"・"WRK-TKT-n"、pr が "<repo>#<番号>" で、item は無くてよい。ticket の id は開け閉めを覚える鍵にもなる。
-//   - 上の段に、開け閉めの印の欄 (▸・▾)・ID・状態の札・題・who の札 (誰が・どこで。例 "子 C · example-wsl/t6v"。ハブの行は "ハブ") を並べ、
+//   - 上の段に、開け閉めの印の欄 (▸・▾)・ID (ticket の行は、その右に ID を写すボタン。下の「ID を写すボタン」)・状態の札・題・who の札
+//     (誰が・どこで。例 "子 C · example-wsl/t6v"。ハブの行は "ハブ") を並べ、
 //     入らなければ札や題が次の段へ回る (長い ID・題・who は縮んで折り返す)。その下に steps の段 (flow の段と同じ札と ›。active は点滅。
 //     answer のある段は押せる札で、押すと answer をハブへ送れる。下の「段の answer」)、その下に note (一言。小さく)、その下に children を
 //     1 段下げて出す。ID と題は url を開く (一覧の行と同じく http と https だけ。
@@ -93,6 +95,24 @@
 //     チケットはその children) を上から順に出した下に点線を引き、その下に「関連」の字と並べて出す (ほかの根の行が無ければ点線は
 //     引かない)。根でない行の related は見ない (その場に出す)。
 //   - rows が空・配列でないなら「(行はありません)」と出す。行・段・子が形の違うもの (null など) でも落ちず、中身の無い行として出す。
+//
+// ID を写すボタン: チケットの行 (tickets の一覧の行と、木の kind が ticket の行) の ID の右に、小さなコピーのボタン (mod のフォルダの copy.svg を
+//   字の色で塗ったアイコン) を出す。押すと ID の字 (前後の空白を除いたもの) だけを、herdr-app のクリックの cx の write_to_clipboard で
+//   クリップボードに入れる (押した中ですぐ入れる。powershell は起こさない。端末には貼らず、Enter も押さない)。ID を押すと url を開くのは
+//   今までどおり。ID の無い・空白だけの行と、PR・item の行 (prs の一覧の行も) には出さない。ID とボタンは 1 つの組で、狭いときもボタンだけが
+//   次の段へ回らない (ID は縮んで折り返す)。
+//   - 入れたら 1.5 秒 (COPY_MARK_MS) ✓ (ok の色) にする。write_to_clipboard は入ったかを返さない (GPUI 本家は、Windows でクリップボードを
+//     開けなかったときもログに出すだけ) ので、✓ は入れるよう頼めたことを示す (ほかのアプリがクリップボードを開いていた瞬間などに入らなくても
+//     分からない)。写さなかったら (下の送っている間・write_to_clipboard が投げたとき) 1.5 秒 ✗ (blocked の色) にし、わけ (「<ID> を写せない:
+//     <わけ>」) をわけの行に出す (次に写せたら、そのわけは消す。ほかのわけは残す)。✓・✗ は最後に押したボタンにだけ出す。ダブルクリックの
+//     2 回目は数えない。ボタンの大きさは panel の文字の % に従う。
+//   - panel のペインが答えを送っている間 (下の「答えの送り方」の送っている印がある間) は写さない。送る途中 (答えをクリップボードに入れてから
+//     端末に貼るまで) にクリップボードを ID に替えると、答えの代わりに ID が貼られて Enter で送られるため。この panel が送っている間は、どの
+//     写すボタンも押せない (薄く出す)。ほかの写しのペインが送っている間に押すと、写さずに ✗ とわけを出す。写す側は印を置かない (写すのは
+//     押した中で済み、送信を待たせない)。送る途中で herdr-app がペインを閉じて印が残ると、印が切れるまで (30 秒) 写せない (送信と同じ)。
+//     逆に、送る仕事が 30 秒を超える (hc get や powershell が止まった) と、端末に貼る前に印が切れ、ほかのペインの写しが入り込みうる (ほかの
+//     ペインの送信と同じ、印の限界。同じペインの写しは busy で止まる)。
+//   - アイコンのパスは MOD から作る (MOD を書き換えた写しは、写しのフォルダの copy.svg を読む)。
 //
 // Q&A (type "qa"): ユーザーの問いと、ハブの答えを 1 つの項目にして、問いごとに開け閉めする (アコーディオン)。答えがほかの子の返答に
 //   紛れないように、ハブはユーザーに問われたら答えをこの節の項目に書く。節の形は { type: "qa", id, title, items: [<項目>…], collapsed }、
@@ -196,7 +216,7 @@
 //   地は theme の popover (herdr-app の dialog の mod と同じ)。閉じるのは Esc・「閉じる」・図の欄のクリック (ダブルクリックの 2 回目は
 //   数えない。図をダブルクリックしても、開いた小窓がすぐ閉じない。外のクリックと Esc では herdr-app も閉じる)。開いたときに小窓の
 //   handle に focus する (Esc を受けるため)。開く mod の名前は MOD から取るので、写しを試すときは MOD を写しの名前に書き換える (書き
-//   換えないと写しの図から本物の pjp-hub-panel の小窓が開く。shared の名前と ring.svg のパスも写しのものになる)。SVG の図を大きく
+//   換えないと写しの図から本物の pjp-hub-panel の小窓が開く。shared の名前と ring.svg・copy.svg のパスも写しのものになる)。SVG の図を大きく
 //   したときの細かさは herdr-app の画像の読み込み次第 (GPUI 本家の img() は、SVG を SVG の width・height の 2 倍で 1 回だけ絵にして、
 //   引き伸ばして描く。それより大きく描くとにじむ)。
 //
@@ -235,7 +255,8 @@
 //     「入力欄に入れる」も同じ)。貼った後の hc get で blocked になっていれば、Enter を押さない。hc get を読めなければ止めない (今までどおり)。
 //   - 写しのペイン (まとめと問いのペインなど) が同時に送ると、クリップボード・貼り付け・Enter が入り混じる。送っている間は shared の
 //     "pjp-hub-panel.sendingUntil" (名前は MOD から作る) にこの時刻 (Date.now() の ms) までは送らないという値を置き、ほかの写しはその時刻まで
-//     送らずにわけを出す。送り終えたら 0 に戻す (herdr-app が送る途中で落ちても、30 秒で送れるようになる)。
+//     送らずにわけを出す。送り終えたら 0 に戻す (herdr-app が送る途中で落ちても、30 秒で送れるようになる)。ID を写すボタン (上の「ID を写す
+//     ボタン」) は、印のある間は写さない (写す側は印を置かない)。
 // ファイルのフォルダを見張り、書き換わったら読み直す (version が変わったら、選んだものと段の確かめのわけの字を消す。押した印は段が同じなら残す)。
 
 import { View, div, image, svg } from "gpui-kit";
@@ -465,7 +486,8 @@ const PRESS = { what: "押した印", pathOf: stepsPathOf, parse: parsePresses, 
 
 // ---- 答えの送り方 (頭のコメントの「答えの送り方」) ----
 // 送っている印: shared に、この時刻 (Date.now() の ms) まで、ほかの写しのペインは送らない、という値を置く (送り終えたら 0)。写しのペイン (まとめと
-// 問いのペインなど) が同時に送ると、クリップボード・貼り付け・Enter が入り混じる。herdr-app が送る途中で落ちても、時刻を過ぎれば送れる
+// 問いのペインなど) が同時に送ると、クリップボード・貼り付け・Enter が入り混じる。herdr-app が送る途中で落ちても、時刻を過ぎれば送れる。
+// ID を写すボタン (copyId) は、この印のある間は写さない (写す側は印を置かない)
 const SEND_KEY = `${NAME}.sendingUntil`;
 const SEND_LOCK_MS = 30000;
 // hc get --json の出力から、端末のエージェントが人を待っている (status が blocked。許可・問いの画面) かを読む。status は平らな字でも
@@ -478,6 +500,12 @@ const blockedOf = (out) => {
     return false;
   }
 };
+
+// ---- ID を写すボタン (頭のコメントの「ID を写すボタン」) ----
+// 写せた ✓・写さなかった ✗ を出しておく長さ (ms)
+const COPY_MARK_MS = 1500;
+// ボタンのアイコン (この mod のフォルダの SVG。字の色で塗る)。MOD から作るので、MOD を書き換えた写しは写しのフォルダのものを読む
+const COPY_ICON = `${MOD}/copy.svg`;
 
 // ---- Q&A (頭のコメントの「Q&A」) ----
 // Q&A の節の項目。形の違う項目 (null・数など) は中身の無い項目とみる。i は items の中の位置 (id の無い項目の鍵と、初めの開け閉めに使う)
@@ -656,6 +684,11 @@ export default class HubPanel extends View {
     // 段の answer: 押した段の確かめに出すわけ (押した印の鍵 → 字。「送っています…」と送れなかったわけ) と、送っている段の印の鍵
     this.stepMsg = {};
     this.sending = null;
+    // ID を写すボタン: 最後に押したボタン ({ eid, text, state: "ok" | "fail", why }。✓・✗ を出し終えたら null) と、写さなかったわけ
+    // (わけの行に出したもの。次に写せたら消す)。closed は、herdr-app がこの写しを閉じたか (閉じた後は描き直さない)
+    this.copied = null;
+    this.copyMsg = null;
+    this.closed = false;
     this.handle = cx.focus_handle();
     // 図を大きく見る小窓 (panel の図のクリックで、この mod が自分を開いたもの)。panel.json は読まず見張らず、渡された図だけを出す
     this.big = bigOf(props());
@@ -1487,9 +1520,9 @@ export default class HubPanel extends View {
 
   // ---- チケットと PR の一覧 (頭のコメントの「チケットと PR の一覧」) ----
 
-  // チケットの一覧の節 (type "tickets")。行: { id, title, url, status, note }
+  // チケットの一覧の節 (type "tickets")。行: { id, title, url, status, note }。ID の右に ID を写すボタンを付ける
   ticketList(s, id, c) {
-    return this.rowList(s, id, c, (r) => this.ticketChips(r, c));
+    return this.rowList(s, id, c, (r) => this.ticketChips(r, c), true);
   }
 
   // PR の一覧の節 (type "prs")。行: { id, title, url, state, ci, note }
@@ -1516,8 +1549,9 @@ export default class HubPanel extends View {
     return chips;
   }
 
-  // 一覧の行を並べる。上の段に ID・状態の札 (chipsOf)・題 (入らなければ題が次の段へ回って折り返す)、下に note
-  rowList(s, id, c, chipsOf) {
+  // 一覧の行を並べる。上の段に ID・状態の札 (chipsOf)・題 (入らなければ題が次の段へ回って折り返す)、下に note。copy なら ID の右に
+  // ID を写すボタン (idCell)
+  rowList(s, id, c, chipsOf, copy = false) {
     const rows = Array.isArray(s.rows) ? s.rows : [];
     if (rows.length === 0) return div().text_color(c.muted).child("(行はありません)");
     return v_flex()
@@ -1539,7 +1573,7 @@ export default class HubPanel extends View {
                 .gap_x(6)
                 .gap_y(2)
                 .items_center()
-                .when(rid !== "", (el) => el.child(this.linkText(`hp-rid-${key}`, rid, url, c.accent, c).min_w(0).font_semibold()))
+                .when(rid !== "", (el) => el.child(this.idCell(`hp-rid-${key}`, `hp-rcp-${key}`, rid, url, c, copy)))
                 .children(chipsOf(row))
                 .when(title !== "", (el) => el.child(this.linkText(`hp-rt-${key}`, title, url, c.fg, c).min_w(0))),
             )
@@ -1564,6 +1598,93 @@ export default class HubPanel extends View {
         this.openLink(url, cx);
       })
       .child(text);
+  }
+
+  // ---- ID を写すボタン (頭のコメントの「ID を写すボタン」) ----
+
+  // 行の ID: 押すと url を開く字 (linkText)。copy (チケットの行) なら、その右に ID を写すボタンを付け、2 つを 1 つの組にする (狭いときも
+  // ボタンだけが次の段へ回らない。ID は縮んで折り返す)。写すのは ID の前後の空白を除いた字で、それが空ならボタンを付けない
+  idCell(linkEid, copyEid, rid, url, c, copy) {
+    const link = this.linkText(linkEid, rid, url, c.accent, c).min_w(0).font_semibold();
+    const text = rid.trim();
+    if (!copy || text === "") return link;
+    return h_flex().min_w(0).gap(4).items_center().child(link).child(this.copyButton(copyEid, text, c));
+  }
+
+  // ID を写すボタン。アイコン (COPY_ICON) を字の色で塗り、入れたら ✓ (ok の色)・写さなかったら ✗ (blocked の色) を COPY_MARK_MS の間出す
+  // (最後に押したボタンだけ)。この panel が送っている間 (busy) は押せず、印の無いボタンは薄く出す
+  copyButton(eid, text, c) {
+    const m = this.copied?.eid === eid && this.copied.text === text ? this.copied : null;
+    const state = m?.state ?? null;
+    const color = state === "ok" ? c.ok : state === "fail" ? c.blocked : c.dim;
+    let tip = `${text} をクリップボードに写す`;
+    if (state === "ok") tip = `${text} をクリップボードに写した`;
+    else if (state === "fail") tip = `${text} を写せない: ${m.why}`;
+    else if (this.busy) tip = "送っている間は押せない";
+    let body = svg(COPY_ICON).flex_none().size(this.fs(12)).text_color(color);
+    if (state === "ok") body = "✓";
+    else if (state === "fail") body = "✗";
+    return h_flex()
+      .id(eid)
+      .flex_none()
+      .h(this.fs(16))
+      .min_w(this.fs(16))
+      .px(this.fs(2))
+      .justify_center()
+      .items_center()
+      .rounded(this.fs(4))
+      .text_size(this.fs(11))
+      .text_color(color)
+      .tooltip(tip)
+      // 押せない間は薄く出す (button() の押せないボタンと同じく、押せないと分かるように)
+      .when(this.busy && !m, (el) => el.opacity(0.4))
+      .when(!this.busy, (el) =>
+        el
+          .cursor_pointer()
+          .hover((st) => st.bg(c.raised))
+          .on_click((e, cx) => {
+            cx.stop_propagation();
+            // ダブルクリックの 2 回目は数えない (2 度写さない)
+            if ((e?.click_count ?? 1) > 1) return;
+            this.copyId(eid, text, cx);
+          }),
+      )
+      .child(body);
+  }
+
+  // ID を写すボタンを押した: text (ID の字) だけを、クリックの cx の write_to_clipboard でクリップボードに入れる (押した中ですぐ入れる。端末には
+  // 貼らない)。panel のペインが送っている間 (この panel の busy か、shared の送っている印がある間) は入れない (送る途中でクリップボードを ID に
+  // 替えると、答えの代わりに ID が貼られて Enter で送られる)。印は置かない。入れたら ✓ (入ったかは write_to_clipboard が返さない)、写さなかったら
+  // ✗ を COPY_MARK_MS の間出し、写さなかったわけはわけの行に出す (次に写せたら消す。ほかのわけは残す)
+  copyId(eid, text, cx) {
+    const until = shared(SEND_KEY);
+    let why = null;
+    if (this.busy || (typeof until === "number" && until > Date.now())) {
+      why = "panel のペインが送っている。送り終えてから押す";
+    } else {
+      try {
+        cx.write_to_clipboard(text);
+      } catch (e) {
+        why = `止まった: ${e}`;
+      }
+    }
+    const done = { eid, text, state: why ? "fail" : "ok", why };
+    this.copied = done;
+    if (why) {
+      this.status = `${text} を写せない: ${why}`;
+      this.copyMsg = this.status;
+    } else if (this.status !== "" && this.status === this.copyMsg) {
+      this.status = "";
+    }
+    cx.notify();
+    // ✓・✗ を出し終えたらアイコンに戻す。待つのは cx.spawn の cx でする (クリックの cx は、await の後には使えない)
+    cx.spawn(async (cx) => {
+      await cx.sleep(COPY_MARK_MS);
+      // 待つ間に閉じた・ほかのボタンを押したなら、そのまま
+      if (this.closed || this.copied !== done) return;
+      this.copied = null;
+      cx.notify();
+    });
   }
 
   // 状態の札。枠と字を color で、地を同じ色の薄い色で塗る (地は color が #rrggbb のときだけ)
@@ -1702,7 +1823,8 @@ export default class HubPanel extends View {
       .gap_x(6)
       .gap_y(2)
       .items_center()
-      .when(rid !== "", (el) => el.child(this.linkText(`hp-wid-${id}-${path}`, rid, url, c.accent, c).min_w(0).font_semibold()))
+      // ticket の行は、ID の右に ID を写すボタン (idCell)
+      .when(rid !== "", (el) => el.child(this.idCell(`hp-wid-${id}-${path}`, `hp-wcp-${id}-${path}`, rid, url, c, kind === "ticket")))
       .children(chips)
       // ID の無い行 (item など) は、題を太字にして行の名前にする
       .when(title !== "", (el) => el.child(this.linkText(`hp-wtt-${id}-${path}`, title, url, c.fg, c).min_w(0).when(rid === "", (e) => e.font_semibold())))
@@ -2067,6 +2189,7 @@ export default class HubPanel extends View {
   // herdr-app がこの写しを閉じるとき (ペインや小窓が閉じた。Esc や外のクリックで閉じた小窓も) に 1 回呼ばれる
   async close() {
     this.bigClosed = true;
+    this.closed = true;
   }
 
   // 大きく見る小窓。上の行に図の題・閉じ方・「閉じる」、まん中の欄に図 (欄に縦横とも収める)、下に図の説明
