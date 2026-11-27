@@ -12,6 +12,9 @@
 //!   `%LOCALAPPDATA%\dotfiles\state\claude-selector.built.json` に控え、元・置いた exe・控えのどれかが違えば作り直す。check と dry-run は
 //!   作らずに比べるだけ (cargo を打たない)
 //! - 置く: 置き場の exe が動いていても上書きできるよう、退けてから置く (claude-files と同じ `replace_file`)
+//! - cargo が無いホスト (Build Tools と rustup を入れない minimum の PC。runner は Release の exe で動く) では、作り直しが要っても作らず
+//!   · で知らせ、`Install-Bootstrap.ps1 -Rust` を案内する (PATH にも触らない)。cs の exe も Release で配るのは後続の PR
+//!   (dotfiles-private の docs/adr/117_win_runner_exe_release_*)
 //!
 //! gate は windowsClaudeCode (Windows の Claude Code を入れるホスト)。claude-accounts (windowsClaudeAccounts も要る) の外に置くのは、
 //! company のグループ (windowsClaudeAccounts が off) でも素の claude を選んで起こせるようにするため (Linux の cs も dotfiles.claude.enable
@@ -224,6 +227,21 @@ fn sync(ctx: &mut Ctx, mode: Mode) -> Outcome {
     });
     let placed = std::fs::read(&dest).ok().map(|b| fsutil::sha256_bytes(&b));
     let need = decide(placed.as_deref(), record.as_ref(), &source);
+    // cargo の無いホスト (Build Tools と rustup を入れない minimum の PC。runner は Release の exe で動く) では作らず、知らせるだけにする
+    // (check・dry-run・apply とも。PATH にも触らない)。cs の exe も Release で配るのは後続の PR (dotfiles-private の
+    // docs/adr/117_win_runner_exe_release_*)
+    if need != Need::Same && locate_cargo(ctx).is_none() {
+        let why = format!(
+            "cargo が無いので作らない ({}) → cs を使うなら、Install-Bootstrap.ps1 -Rust で Build Tools と rustup を入れてから dotfiles apply",
+            reason(need)
+        );
+        ctx.say(format!("· {why}"));
+        let mut o = Outcome::new(Kind::Info, format!("{}: {why}", exe_name()));
+        for n in notes {
+            o = o.note(n);
+        }
+        return o;
+    }
     let cargo_line = format!(
         "cargo build --release --locked --manifest-path {} (RUSTUP_TOOLCHAIN={channel})",
         crate_dir.join("Cargo.toml").display()
@@ -684,21 +702,56 @@ mod tests {
         assert_eq!(w.record(), before);
     }
 
+    /// cargo の無いホストでは作らず · (Info) で知らせ、-Rust を案内する。PATH を書く PowerShell も打たない。置いた exe が今の元のものなら ✔
     #[test]
-    fn refuses_without_cargo_crate_or_channel() {
-        let w = World::new();
-        std::fs::remove_file(
-            w.home()
-                .join(".cargo")
-                .join("bin")
-                .join(format!("cargo{}", std::env::consts::EXE_SUFFIX)),
-        )
-        .unwrap();
-        let (o, _) = w.run(APPLY, &w.sys(0, "x"));
-        assert_eq!(o.kind, Kind::Failed, "{o:?}");
-        assert!(o.text.contains("cargo が見つからない"), "{o:?}");
-        assert!(!w.dest().exists());
+    fn without_cargo_only_tells() {
+        let remove_cargo = |w: &World| {
+            std::fs::remove_file(
+                w.home()
+                    .join(".cargo")
+                    .join("bin")
+                    .join(format!("cargo{}", std::env::consts::EXE_SUFFIX)),
+            )
+            .unwrap();
+        };
+        for mode in [Mode::Check, Mode::DryRun { force: false }, APPLY] {
+            let w = World::new();
+            remove_cargo(&w);
+            let sys = w.sys(0, "x");
+            let (o, _) = w.run(mode, &sys);
+            assert_eq!(o.kind, Kind::Info, "{mode:?} {o:?}");
+            assert!(
+                o.text.contains("cargo が無いので作らない") && o.text.contains("-Rust"),
+                "{o:?}"
+            );
+            assert!(
+                sys.calls.borrow().is_empty(),
+                "{mode:?}: {:?}",
+                sys.call_args()
+            );
+            assert!(!w.dest().exists());
+        }
 
+        // 前に作った exe が今の元のものなら、cargo が無くても ✔
+        let w = World::new();
+        w.run(APPLY, &w.sys(0, "selector-v1"));
+        remove_cargo(&w);
+        let (o, _) = w.run(Mode::Check, &w.sys(0, "selector-v1"));
+        assert_eq!(o.kind, Kind::Ok, "{o:?}");
+
+        // 元が変わって作り直しが要るのに cargo が無ければ ·
+        w.t.write(
+            &format!("g/dotfiles/{CRATE_REL}/src/main.rs"),
+            "fn main() { /* v2 */ }\n",
+        );
+        let (o, _) = w.run(APPLY, &w.sys(0, "selector-v2"));
+        assert_eq!(o.kind, Kind::Info, "{o:?}");
+        assert!(o.text.contains("元が変わった"), "{o:?}");
+        assert_eq!(std::fs::read(w.dest()).unwrap(), b"selector-v1");
+    }
+
+    #[test]
+    fn refuses_without_crate_or_channel() {
         let w = World::new();
         w.t.write("g/dotfiles/win/runner/rust-toolchain.toml", "[toolchain]\n");
         let (o, _) = w.run(Mode::Check, &w.sys(0, "x"));
