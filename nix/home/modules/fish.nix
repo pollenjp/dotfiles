@@ -277,10 +277,10 @@ in
       # (Windows の runner の試験 claude_argv_matches_c が 4 つを突き合わせる。dotfiles.ps1 の略語の表は
       # win/powershell/dotfiles.Tests.ps1 が function と突き合わせる)。
       c = "claude --dangerously-skip-permissions --effort max --model claude-opus-5-5 --remote-control=";
-      # claude のアカウント (素の claude と claude-<名前>)・権限・effort・モデル・Remote Control を矢印キーで段ごとに選び、
-      # 組み立てたコマンド行を見せてから起こす (claude-selector。nix/pkgs/claude-selector。この module ではなく
-      # modules/claude.nix が入れる)。Enter だけで進むと c から --remote-control= を外した中身になる。cs の後ろの引数
-      # (cs -c・cs "質問") は組み立てた引数の後ろにそのまま付く。
+      # 組み立てる claude のコマンド行をいつも見せ、その項目 (アカウント (素の claude と claude-<名前>)・effort・モデル・
+      # 権限・Remote Control) を矢印キーで選んで起こす (claude-selector。nix/pkgs/claude-selector。この module ではなく
+      # modules/claude.nix が入れる)。打ってすぐ Enter で c から --remote-control= を外した中身 (並びは effort → モデル →
+      # 権限で、c とは並びだけが違う) で起こす。cs の後ろの引数 (cs -c・cs "質問") は組み立てた引数の後ろにそのまま付く。
       # 同じ名前・同じ中身を bash (bash.nix の shellAliases) と Windows の PowerShell (win/powershell/dotfiles.ps1 の
       # function と略語の表) にも置いている。直すときは 3 つをそろえる (Windows の runner の試験 cs_is_the_same_everywhere が
       # 3 つを突き合わせる。dotfiles.ps1 の略語の表は win/powershell/dotfiles.Tests.ps1 が function と突き合わせる)。

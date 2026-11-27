@@ -32,8 +32,9 @@ pub fn main() -> i32 {
     let path = std::env::var_os("PATH");
     let found = accounts::find(&home, &Defaults::for_this_os(&home), path.as_deref());
     let note = claude_note(std::env::var_os("CLAUDE_CONFIG_DIR"));
-    let mut ui = Ui::new(&found, &note, extra);
+    // NO_COLOR なら色を付けない (選んでいる項目は ui が字の前後に印を付けて見せる)
     let color = std::env::var_os("NO_COLOR").is_none_or(|v| v.is_empty());
+    let mut ui = Ui::new(&found, &note, extra).with_color(color);
     term::install_panic_hook();
     let mut term = match Term::start(color) {
         Ok(t) => t,

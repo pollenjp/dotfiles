@@ -146,18 +146,26 @@ impl Term {
         Ok(())
     }
 
+    /// 見せ方を付ける。コマンド行の選んでいる項目 (`Style::Selected`) は、色を付けるときは反転した Cyan の塊にする (反転の効かない
+    /// 端末でも Cyan の字で残る)。NO_COLOR なら色も反転も付けない (`ui` が字の前後に `{` `}` を付けている)
     fn set_style(&mut self, s: Style) -> io::Result<()> {
-        let bold = matches!(s, Style::Title | Style::Current | Style::Command);
+        let bold = matches!(
+            s,
+            Style::Title | Style::Current | Style::Command | Style::Selected
+        );
         if bold {
             queue!(self.out, style::SetAttribute(Attribute::Bold))?;
         }
         if !self.color {
             return Ok(());
         }
+        if s == Style::Selected {
+            queue!(self.out, style::SetAttribute(Attribute::Reverse))?;
+        }
         let fg = match s {
             Style::Plain | Style::Title => None,
-            Style::Dim | Style::Disabled => Some(Color::DarkGrey),
-            Style::Current => Some(Color::Cyan),
+            Style::Dim | Style::Disabled | Style::Absent => Some(Color::DarkGrey),
+            Style::Current | Style::Selected => Some(Color::Cyan),
             Style::DefaultMark | Style::Warn => Some(Color::Yellow),
             Style::Command => Some(Color::Green),
         };
@@ -243,10 +251,11 @@ pub fn map_key(k: KeyEvent) -> Option<Key> {
         KeyCode::Char('h') if ctrl => Key::Backspace,
         KeyCode::Char(_) if ctrl => return None,
         KeyCode::Char(c) => Key::Char(c),
-        KeyCode::Up | KeyCode::BackTab => Key::Up,
-        KeyCode::Down | KeyCode::Tab => Key::Down,
-        KeyCode::Left => Key::Left,
-        KeyCode::Right => Key::Right,
+        KeyCode::Up => Key::Up,
+        KeyCode::Down => Key::Down,
+        // Tab・Shift+Tab は項目を移る (← → と同じ)
+        KeyCode::Left | KeyCode::BackTab => Key::Left,
+        KeyCode::Right | KeyCode::Tab => Key::Right,
         KeyCode::Home => Key::Home,
         KeyCode::End => Key::End,
         KeyCode::Enter => Key::Enter,

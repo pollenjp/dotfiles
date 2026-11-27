@@ -7,8 +7,8 @@
 //!
 //! - 行を端末の幅に収める: 収まる行はそのまま。はみ出す行は収まる所まで残して「…」を付け、幅を超えない (日本語の字は 2 桁で数え、
 //!   字の途中で切らない)。見せ方は塊ごとに残す。制御文字は `\n`・`\u{1b}` の形にしてから数える
-//! - キーの写し方: Ctrl+C → やめる、Ctrl+U → 字を消す、Ctrl+P・Ctrl+N・Tab・Shift+Tab → 上下、Ctrl+H → Backspace、Ctrl+Alt+字
-//!   (Windows の AltGr) → 字。ほかの Ctrl+字・F キーは使わない
+//! - キーの写し方: Ctrl+C → やめる、Ctrl+U → 字を消す、Ctrl+P・Ctrl+N → 上下 (値)、Tab・Shift+Tab → 左右 (項目)、Ctrl+H → Backspace、
+//!   Ctrl+Alt+字 (Windows の AltGr) → 字。ほかの Ctrl+字・F キーは使わない
 
 use claude_selector::term::{clip, map_key};
 use claude_selector::ui::{Key, Line, Span, Style};
@@ -77,8 +77,12 @@ fn keys() {
     assert_eq!(key(KeyCode::Char('x'), ctrl), None);
     assert_eq!(key(KeyCode::Char('c'), none), Some(Key::Char('c')));
     assert_eq!(key(KeyCode::Char('作'), none), Some(Key::Char('作')));
-    assert_eq!(key(KeyCode::Tab, none), Some(Key::Down));
-    assert_eq!(key(KeyCode::BackTab, KeyModifiers::SHIFT), Some(Key::Up));
+    // Tab・Shift+Tab は項目を移る (← → と同じ)
+    assert_eq!(key(KeyCode::Tab, none), Some(Key::Right));
+    assert_eq!(key(KeyCode::BackTab, KeyModifiers::SHIFT), Some(Key::Left));
+    assert_eq!(key(KeyCode::Right, none), Some(Key::Right));
+    assert_eq!(key(KeyCode::Up, none), Some(Key::Up));
+    assert_eq!(key(KeyCode::Down, none), Some(Key::Down));
     assert_eq!(key(KeyCode::Esc, none), Some(Key::Esc));
     assert_eq!(key(KeyCode::Enter, none), Some(Key::Enter));
     assert_eq!(key(KeyCode::Backspace, none), Some(Key::Backspace));

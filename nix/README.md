@@ -5007,31 +5007,50 @@ cp -Rpn ~/.claude-work/projects/. ~/.claude/projects/ && rm -rf ~/.claude-work/p
 
 ### アカウントと option を矢印キーで選んで起こす (claude-selector)
 
-`cs`（fish の abbr・bash の alias。中身は `claude-selector`）は、claude のアカウントと option を矢印キーで段ごとに選び、組み立てた
-コマンド行を見せてから Claude Code を起こす（実体は `nix/pkgs/claude-selector/`。Rust。`claude.enable` のホストの PATH に入る）。
+`cs`（fish の abbr・bash の alias。中身は `claude-selector`）は、組み立てる claude のコマンド行をいつも見せ、その項目（アカウントと option）を
+矢印キーで選んで Claude Code を起こす（実体は `nix/pkgs/claude-selector/`。Rust。`claude.enable` のホストの PATH に入る）。
 Windows の PowerShell にも同じ `cs` があり、同じ crate を runner が作って置く（`win/README.md` の「[claude-selector (cs)](../win/README.md#claude-selector-cs)」）。
-設計は dotfiles-private の ADR 087（`docs/adr/087_claude_selector_*`）。
+設計は dotfiles-private の ADR 087（`docs/adr/087_claude_selector_*`）と、画面と引数の並びを作り替えた ADR 116
+（`docs/adr/116_claude_selector_command_line_ui_*`）。
 
 ```sh
 cs              # 選んで起こす
 cs -c           # cs の後ろの引数は、組み立てた引数の後ろにそのまま付く (cs "質問" も)
 ```
 
-| 段 | 選択肢 (太字が既定) |
-| --- | --- |
-| 1. アカウント | **`claude`**・`claude-<名前>`（既定の personal・work と `claude-account add` の登録。launcher が PATH に無いものは選べない） |
-| 2. 権限 | **`--dangerously-skip-permissions`**・`--permission-mode auto`・付けない（ふつうの確認）・`--permission-mode acceptEdits`・`--permission-mode plan` |
-| 3. effort | low・medium・high・xhigh・**max** |
-| 4. モデル | **claude-opus-5-5**・claude-sonnet-5-5・claude-haiku-5-5・claude-fable-5-2・claude-fable-5-1・手で打つ（別名の `opus` なども） |
-| 5. Remote Control | **付けない**・名前なしで付ける（`--remote-control=`）・名前を付ける（`--remote-control=<名前>`） |
+```text
+claude-selector   ←→ / h l 項目   ↑↓ / j k 値   Enter 起こす   Esc やめる
+$ claude --effort max --model claude-opus-5-5 --dangerously-skip-permissions [--remote-control]
 
-- どの段も既定に「(既定)」の印が付き、Enter だけで既定のまま進む（全部 Enter なら `c` から `--remote-control=` を外した中身）。どの段でも
-  一番下に、今のカーソルのまま進んだときのコマンド行が出る（端末の幅で折り返して全部。引数の改行などの制御文字は `\n` の形で見せる）。
-  最後の画面（これで起こす）は段ごとの値と cs の後ろの引数を並べ、Enter で起こして、起こしたコマンド行を端末に残す（Linux は exec で
-  置き換わる。終了コードは Claude Code のもの）。端末の行が足りなければ、一覧はカーソルの行が見える所だけを出す
-- キー: ↑↓（k・j・Ctrl+P・Ctrl+N・Tab）で選ぶ、Enter（→）で決める、←（Backspace）で前の段へ戻る（決めたものは残る）、Esc・Ctrl+C で
-  やめる（起こさない。終了コード 130）。字を打つ間（モデルを手で打つ・Remote Control の名前）は Backspace で 1 字・Ctrl+U で全部消し、
-  空で Backspace なら一覧へ戻る。Remote Control の名前を空のまま決めると名前なし
+  アカウント
+> claude           (既定)  ~/.claude
+  claude-personal          ~/.claude-personal
+  claude-work              ~/.claude-work
+```
+
+| 項目（コマンド行の左から） | 選択肢 (太字が既定) |
+| --- | --- |
+| アカウント | **`claude`**・`claude-<名前>`（既定の personal・work と `claude-account add` の登録。launcher が PATH に無いものは選べない） |
+| effort | low・medium・high・xhigh・**max** |
+| モデル | **claude-opus-5-5**・claude-sonnet-5-5・claude-haiku-5-5・claude-fable-5-2・claude-fable-5-1・手で打つ（別名の `opus` なども） |
+| 権限 | **`--dangerously-skip-permissions`**・`--permission-mode auto`・付けない（ふつうの確認）・`--permission-mode acceptEdits`・`--permission-mode plan` |
+| Remote Control | **付けない**・名前なしで付ける（`--remote-control=`）・名前を付ける（`--remote-control=<名前>`） |
+
+- 一番上に見出しとキーの案内、その下にコマンド行、その下に選んでいる項目の名前と選択肢の一覧が出る。打った直後はアカウントの項目を選んでいて、
+  選んでいる項目はコマンド行の中で色が変わる（反転。`NO_COLOR` なら色を付けず、字の前後に `{ }` を付ける）。どの項目も既定に「(既定)」の印が
+  付き、打ってすぐ Enter で既定のまま起こす（`c` から `--remote-control=` を外した中身。起こす引数はコマンド行と同じ effort → モデル → 権限 →
+  Remote Control の並びで、`c` とは並びだけが違う）
+- キー: ←→（h・l・Tab・Shift+Tab）で項目を移る（端で止まる）、↑↓（k・j・Ctrl+P・Ctrl+N・Home・End）で値を選ぶ（すぐコマンド行に出る。決める
+  操作は無い）、Enter でどの項目からでも今のコマンド行のまま起こし、起こしたコマンド行を端末に残す（Linux は exec で置き換わる。終了コードは
+  Claude Code のもの）。Esc・Ctrl+C でやめる（起こさない。終了コード 130）
+- 付けない値（権限の「付けない」・Remote Control を付けない）は、コマンド行に灰色の括弧（`[--permission-mode]`・`[--remote-control]`）で出る
+  （選べる場所を見せるため。claude には渡さない）。cs の後ろの引数はコマンド行の最後に出る（項目ではない）
+- 字を打つ値（モデルの「手で打つ」・Remote Control の「名前を付ける」）は、その行で Enter を押すと打ち始め、打った字はすぐコマンド行に出る。
+  Enter で決めて一覧へ戻り、もう一度 Enter で起こす（動いてから戻ったときの Enter は、決めた字から打ち直す）。打つ間は Backspace で 1 字・Ctrl+U で
+  全部消し、空で Backspace（か ←）なら一覧へ戻る。Remote Control の名前を空のまま決めると名前なし。名前をまだ打っていない（`<モデル名>`・
+  `<名前>` を見せている）まま Enter を押すと、起こさずにその項目で打ち始める
+- コマンド行は端末の幅で折り返して全部出す（引数の改行などの制御文字は `\n` の形で見せる）。端末の行が足りなければ、一覧はカーソルの行が
+  見える所だけを出す
 - `--remote-control` は `=` で値を閉じる（後ろの引数を名前として取らせない。理由は `c` と同じ。`nix/home/modules/fish.nix` の注記）
 - アカウントの並びは、既定（`~/.local/state/dotfiles/claude-accounts.json`）のあとに登録（`~/.config/claude-accounts/accounts.json`）を
   名前の順。`~/.claude*` の dir は見ない（`~/.claude_credits` のようにアカウントでないものがある）。一覧が読めなければ上に知らせ、読めた方
