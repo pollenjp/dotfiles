@@ -28,6 +28,10 @@ codex は rg を PATH から探す。そこで PATH で引かれる codex が置
 ある) をユーザーの PATH に足す。sandbox の helper (codex-command-runner.exe など) と codex-code-mode-host.exe は exe の隣で探すので、どちらの形でも
 見つかる。名前を替えた写しや .cmd の shim は作らない。
 
+winget uninstall は、置き場所を PATH の文字列から部分一致で抜く。Install-Codex が足した codex-path の行 (置き場所\codex-path) は、置き場所の
+部分だけが抜かれて \codex-path (C:\ の直下。普通のユーザーもフォルダを作れる) に化けて残る。そこで外す・入れ直す前に自分の codex-path の行を
+ユーザーの PATH から抜き (入れた後に足し直す)、化けた行 (\codex-path) が残っていれば -Check で知らせて取り除く。
+
 winget の manifest の依存 (BurntSushi.ripgrep.MSVC と Microsoft.VCRedist.2015+) は入れない (--skip-dependencies)。codex の exe は
 VC++ のランタイムを使わず (CRT を静的に持つ)、rg.exe は zip の中 (codex-path\rg.exe) にある。VCRedist は machine に入るので、入れると UAC の確認が出る。
 
@@ -254,6 +258,34 @@ function Get-CodexPathValueWithEntry {
     $Dir
 }
 
+# PATH の 1 つの要素が、winget uninstall が置き場所の部分だけを抜いて化けた codex-path の行 (\codex-path) か。置き場所\codex-path の
+# 行から winget が置き場所を部分一致で抜くと残る。ドライブの直下を指すので、PATH に残さない
+function Test-CodexMangledPathEntry {
+    param([string]$Entry)
+    $value = $Entry.Trim().Trim('"').TrimEnd('\')
+    $value -ieq '\codex-path'
+}
+
+# PATH の値 (; 区切り) にある、化けた codex-path の行の数
+function Get-CodexMangledPathCount {
+    param([string]$Raw)
+    @(($Raw -split ';') | Where-Object { Test-CodexMangledPathEntry -Entry $_ }).Count
+}
+
+# $Dirs を指す要素と、化けた codex-path の行を外した PATH の生の値。ほかの要素 (%VAR% の書き方・空の要素・末尾の ;) はそのまま残す
+# (Install-HerdrApp.ps1 の Get-PathValueWithoutEntry に、化けた行も足したもの)
+function Get-CodexPathValueWithoutEntries {
+    param([string]$Raw, [string[]]$Dirs)
+    $kept = foreach ($entry in ($Raw -split ';')) {
+        $drop = Test-CodexMangledPathEntry -Entry $entry
+        foreach ($dir in @($Dirs | Where-Object { $_ })) {
+            if (Test-CodexPathEntry -Entry $entry -Dir $dir) { $drop = $true }
+        }
+        if (-not $drop) { $entry }
+    }
+    @($kept) -join ';'
+}
+
 # 同梱の rg を codex が引けるか。PATH で引かれる codex が置き場所の codex.exe (hardlink の形) のときだけ見る (codex は同梱の rg を自分では
 # 見つけないので、置き場所の codex-path を PATH に置いて引かせる)。na (hardlink の形でない) / absent (置き場所に codex-path\rg.exe が無い) /
 # ok (codex-path が PATH にある) / missing (無い。Install-Codex がユーザーの PATH に足す)
@@ -265,10 +297,10 @@ function Get-CodexRgState {
     'missing'
 }
 
-# 揃える手順 (Install-Codex) で直す差 (版・pin・codex と打てる形・同梱の rg の PATH) があるか
+# 揃える手順 (Install-Codex) で直す差 (版・pin・codex と打てる形・同梱の rg の PATH・化けた codex-path の行) があるか
 function Test-CodexDrift {
     param($State)
-    ($State.Plan -ne 'none') -or (-not $State.Pinned) -or ($State.RgState -eq 'missing')
+    ($State.Plan -ne 'none') -or (-not $State.Pinned) -or ($State.RgState -eq 'missing') -or ($State.MangledPath -gt 0)
 }
 
 # PATH のずれ (ほかの codex が先に引かれる・codex と打てる形はあるのに PATH で見つからない) があるか。揃える手順では直らないので、※ の行で
@@ -360,6 +392,9 @@ function Format-CodexState {
         }
         $rows += @{ Text = "同梱の rg       : $rgText"; Warn = ($State.RgState -eq 'missing'); Indent = $true }
     }
+    if ($State.MangledPath -gt 0) {
+        $rows += @{ Text = "化けた PATH の行: \codex-path が $($State.MangledPath) 行 → 取り除く (winget uninstall が codex-path の行から置き場所の部分だけを抜いた残り。ドライブの直下を指す)"; Warn = $true; Indent = $true }
+    }
     foreach ($row in $rows) {
         $prefix = if (-not $row.Indent) { '' } elseif ($row.Warn) { '⚠ ' } else { '  ' }
         [pscustomobject]@{ Text = "$prefix$($row.Text)"; Warn = [bool]$row.Warn }
@@ -418,6 +453,7 @@ function Format-CodexVerdict {
     if (($State.Plan -eq 'change') -or (-not $State.Pinned)) { '⚠️ 固定した版と揃っていない → Install-Codex で揃える ⚠️' }
     if ($State.AliasState -notin @('symlink', 'hardlink')) { '⚠️ codex と打てない (WinGet\Links の symlink も、置き場所の codex.exe の hardlink も無い・違う) → Install-Codex で揃える ⚠️' }
     if ($State.RgState -eq 'missing') { '⚠️ codex が同梱の rg を引けない (置き場所の codex-path が PATH に無い) → Install-Codex で揃える ⚠️' }
+    if ($State.MangledPath -gt 0) { '⚠️ ユーザーの PATH に化けた codex-path の行 (\codex-path) が残っている → Install-Codex で揃える ⚠️' }
     if (Test-CodexPathDrift -State $State) { '⚠️ PATH の codex が winget のものではない → ※ の手順で直す ⚠️' }
 }
 
@@ -558,32 +594,65 @@ function Get-CodexPathState {
     $rgDir = Join-Path $PackageDir 'codex-path'
     $bundled = Test-Path -LiteralPath (Join-Path $rgDir 'rg.exe') -PathType Leaf
     [pscustomobject]@{
-        Resolved = $resolved
-        Kind     = $kind
-        RgDir    = $rgDir
-        RgState  = Get-CodexRgState -PathKind $kind -BundledRg $bundled -PathValue $pathValue -RgDir $rgDir
+        Resolved    = $resolved
+        Kind        = $kind
+        RgDir       = $rgDir
+        RgState     = Get-CodexRgState -PathKind $kind -BundledRg $bundled -PathValue $pathValue -RgDir $rgDir
+        MangledPath = Get-CodexMangledPathCount -Raw (Get-CodexUserPathRaw).Raw
     }
 }
 
-# $Dir をユーザーの PATH の末尾に足す (無いときだけ)。値の型 (REG_EXPAND_SZ など) を保ち、user 変数を書いて消して、動いているプログラムに
-# 環境変数が変わったことを知らせる (Install-HerdrApp.ps1 と同じ)。今のプロセスの PATH にも足す
-function Add-CodexUserPath {
-    param([string]$Dir)
+# ユーザーの PATH の生の値 (%VAR% を展開しない) と値の型。無ければ '' と ExpandString (Install-HerdrApp.ps1 と同じ)
+function Get-CodexUserPathRaw {
+    $key = [Microsoft.Win32.Registry]::CurrentUser.OpenSubKey('Environment', $false)
+    if ($null -eq $key) { return [pscustomobject]@{ Raw = ''; Kind = [Microsoft.Win32.RegistryValueKind]::ExpandString } }
+    try {
+        if ($key.GetValueNames() -contains 'Path') {
+            return [pscustomobject]@{ Raw = [string]$key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames); Kind = $key.GetValueKind('Path') }
+        }
+        [pscustomobject]@{ Raw = ''; Kind = [Microsoft.Win32.RegistryValueKind]::ExpandString }
+    } finally {
+        $key.Close()
+    }
+}
+
+# ユーザーの PATH を書き直す。値の型 (REG_EXPAND_SZ など) を保ち、user 変数を書いて消して、動いているプログラムに環境変数が変わったことを
+# 知らせる (Install-HerdrApp.ps1 と同じ)
+function Set-CodexUserPathRaw {
+    param([string]$Value, $Kind)
     $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
     try {
-        $has = $key.GetValueNames() -contains 'Path'
-        $raw = if ($has) { [string]$key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) } else { '' }
-        if (-not (Test-CodexPathListed -Raw $raw -Dir $Dir)) {
-            $kind = if ($has) { $key.GetValueKind('Path') } else { [Microsoft.Win32.RegistryValueKind]::ExpandString }
-            $key.SetValue('Path', (Get-CodexPathValueWithEntry -Raw $raw -Dir $Dir), $kind)
-            Write-Host "ユーザーの PATH に $Dir を足した (codex が同梱の rg を引く。新しく開くシェルから効く)"
-        }
+        $key.SetValue('Path', $Value, $Kind)
     } finally {
         $key.Close()
     }
     [Environment]::SetEnvironmentVariable('DOTFILES_CODEX_PATH_REFRESH', '1', 'User')
     [Environment]::SetEnvironmentVariable('DOTFILES_CODEX_PATH_REFRESH', $null, 'User')
+}
+
+# $Dir をユーザーの PATH の末尾に足す (無いときだけ)。今のプロセスの PATH にも足す
+function Add-CodexUserPath {
+    param([string]$Dir)
+    $user = Get-CodexUserPathRaw
+    if (-not (Test-CodexPathListed -Raw $user.Raw -Dir $Dir)) {
+        Set-CodexUserPathRaw -Value (Get-CodexPathValueWithEntry -Raw $user.Raw -Dir $Dir) -Kind $user.Kind
+        Write-Host "ユーザーの PATH に $Dir を足した (codex が同梱の rg を引く。新しく開くシェルから効く)"
+    }
     if (-not (Test-CodexPathListed -Raw $env:Path -Dir $Dir)) { $env:Path = Get-CodexPathValueWithEntry -Raw $env:Path -Dir $Dir }
+}
+
+# $Dirs を指す行と、化けた codex-path の行 (\codex-path) をユーザーの PATH から外す。今のプロセスの PATH からも外す。外した数を返す
+function Remove-CodexUserPath {
+    param([string[]]$Dirs)
+    $user = Get-CodexUserPathRaw
+    $new = Get-CodexPathValueWithoutEntries -Raw $user.Raw -Dirs $Dirs
+    $removed = @($user.Raw -split ';').Count - @($new -split ';').Count
+    if ($new -cne $user.Raw) {
+        Set-CodexUserPathRaw -Value $new -Kind $user.Kind
+        Write-Host "ユーザーの PATH から codex-path の行を $removed 行外した (winget uninstall が置き場所の部分だけを抜いて \codex-path に化かさないよう、外す・入れ直す前に外す。化けた行も外す)"
+    }
+    $env:Path = Get-CodexPathValueWithoutEntries -Raw $env:Path -Dirs $Dirs
+    $removed
 }
 
 # 置き場所の下の exe (codex・同梱の helper) か、WinGet\Links\codex.exe から起動して動いているプロセス
@@ -633,6 +702,7 @@ function Get-CodexState {
         PathResolved  = $path.Resolved
         PathKind      = $path.Kind
         RgState       = $path.RgState
+        MangledPath   = $path.MangledPath
         WingetVersion = $wingetVersion
         Route         = Get-CodexInstallRoute -Elevated (Test-Elevated) -DeveloperMode (Test-DeveloperMode) -WingetVersion $wingetVersion
         BusyCount     = @(Get-CodexBusyProcess -PackageDir $PackageDir -LinksDir $LinksDir).Count
@@ -681,7 +751,7 @@ function Invoke-InstallCodex {
         Write-Host '揃っている。何もしない'
         return 0
     }
-    # 揃える手順で直す差 (版・pin・codex と打てる形・同梱の rg の PATH) が無く、残っているのは PATH のずれだけ
+    # 揃える手順で直す差 (版・pin・codex と打てる形・同梱の rg の PATH・化けた codex-path の行) が無く、残っているのは PATH のずれだけ
     if (-not (Test-CodexDrift -State $state)) {
         Write-Host '版と pin と codex と打てる形は揃っている。PATH のずれは Install-Codex では直らない (上の ※ の行の手順で直す)'
         Write-CodexVerdict -State $state
@@ -731,6 +801,12 @@ function Invoke-InstallCodex {
     if (($state.Plan -in @('change', 'relink')) -and $state.Pinned) {
         $unpin = Invoke-Winget -Arguments @('pin', 'remove', '--id', $packageId, '--exact', '--accept-source-agreements', '--disable-interactivity')
         if ($unpin.ExitCode -ne 0) { Write-Host ('winget pin remove が失敗した (終了コード 0x{0:X8})' -f $unpin.ExitCode) }
+    }
+    # 外す・入れ直す前に、自分が足した codex-path の行をユーザーの PATH から外す (winget uninstall が置き場所の部分だけを抜いて \codex-path に
+    # 化かすため。入れた後に下で足し直す)。化けた行 (前に手で winget uninstall を打ったなど) もここで外す
+    $rgDir = Join-Path $packageDir 'codex-path'
+    if (($state.Plan -in @('change', 'relink')) -or ($state.MangledPath -gt 0)) {
+        $null = Remove-CodexUserPath -Dirs $(if ($state.Plan -in @('change', 'relink')) { @($rgDir) } else { @() })
     }
     foreach ($arguments in @(Get-WingetCommands -Plan $state.Plan -PackageId $packageId -Version $Version)) {
         Write-Host "winget $($arguments -join ' ')"

@@ -4910,8 +4910,10 @@ Windows の版とは揃えない)。
 - ログイン (codex を起こして手でする) と設定 (`%USERPROFILE%\.codex`) は dotfiles では扱わない
 - 入れた後は、新しい PowerShell を開くと `codex` と打てる (winget がユーザーの PATH に足すのは、これから開く PowerShell の分。herdr-app の中の端末なら
   herdr-app を上げ直してから)
-- 消すなら PowerShell で `winget pin remove --id OpenAI.Codex --exact` の後に `winget uninstall --id OpenAI.Codex --exact` を打つ (昇格は要らない)。
-  switch を off にしても runner は消さない
+- 消すなら PowerShell で、先にユーザーの環境変数 `Path` から `...\OpenAI.Codex_Microsoft.Winget.Source_8wekyb3d8bbwe\codex-path` の行
+  (hardlink の形で `Install-Codex` が足したもの。[次の節](#codex-と打てる形-winget-の-symlink-か-hardlink)) を外し、`winget pin remove --id OpenAI.Codex --exact` の後に
+  `winget uninstall --id OpenAI.Codex --exact` を打つ (昇格は要らない)。`codex-path` の行を残したまま uninstall すると、winget が置き場所の部分だけを
+  抜いて `\codex-path` の行が残る (ドライブの直下を指すので、それも外す)。switch を off にしても runner は消さない
 
 | 打つもの | すること |
 | --- | --- |
@@ -4949,6 +4951,10 @@ winget の portable は、`codex` という名前 (manifest の `PortableCommand
   名前が違うので外れ、codex は rg を PATH から探す (`codex doctor` の search provider が bundled でなく system になる)。そこで PATH の `codex` が
   置き場所の `codex.exe` なら、`Install-Codex` が置き場所の `codex-path` をユーザーの PATH の末尾に足す (`-Check` の「同梱の rg」の行)。codex が
   子のシェルに渡す PATH にも入るので、codex の中の `rg` もそれを引く。`codex-resources` の中の voice は hardlink の形では使えない見込み
+- `winget uninstall` は置き場所を PATH の文字列から部分一致で抜くので、`codex-path` の行を残したまま外すと、置き場所の部分だけが抜けて
+  `\codex-path` (ドライブの直下。普通のユーザーもフォルダを作れるので、別のユーザーが置いた exe を引きうる) に化けて残る (テスト用の VM で見た)。
+  `Install-Codex` は外す・入れ直す (入れ替え・relink) 前に自分の `codex-path` の行を外し、入れた後に足し直す。化けた行が残っていれば、`-Check` の
+  「化けた PATH の行」が ⚠ になり、`Install-Codex` (runner の手順 `codex`) が取り除く
 - sandbox の helper (`codex-command-runner.exe`・`codex-windows-sandbox-setup.exe`) と `codex-code-mode-host.exe` は、codex が exe の隣で探す。
   置き場所の直下にあるので、どちらの形でも見つかる
 - 名前を替えた写しや `.cmd` の shim は自分では作らない (`.cmd` の shim は Ctrl+C で「バッチ ジョブを終了しますか」が出て、引数の引用符も崩れる)

@@ -16,6 +16,8 @@
 #     打たず、--include-pinned も付けない)。取得だけを確かめる winget download も portable を名指しする
 #   - PATH で引かれる codex (WinGet\Links\codex.exe は links、置き場所の codex.exe は package。npm の codex.cmd などは other)
 #   - 同梱の rg: PATH の codex が置き場所の codex.exe (hardlink の形) なら、置き場所の codex-path が PATH にあるか
+#   - 化けた codex-path の行 (winget uninstall が置き場所の部分だけを抜いた \codex-path) を見つけ、外す・入れ直す前に自分の codex-path の行と
+#     一緒に PATH から外す
 #   - 終了コード (揃っていれば 0・差があれば 1・入っていなければ 3。elevated・old-winget で入れる・入れ直すなら 1)・状態の表の行・締めの行 (runner が読む文言)
 #   - 流れ: -Check と -IfMissing は入れ替えない。揃える流れは取得を確かめてから外して入れ、pin を足し、hardlink の形なら codex-path を PATH に
 #     足す。動いている codex があれば・取得が落ちたら・固定した版が winget に無ければ・elevated・old-winget なら、何も変えずに止まる。PATH のずれ
@@ -195,6 +197,15 @@ Test-Case '末尾の ; を落として足す' "C:\x;$Pkg;$RgDir" { Get-CodexPath
 Test-Case 'あれば変えない (%VAR% の書き方も残す)' "C:\x;$RgDir;%USERPROFILE%\bin" { Get-CodexPathValueWithEntry -Raw "C:\x;$RgDir;%USERPROFILE%\bin" -Dir $RgDir }
 Test-Case '空なら足すものだけ' $RgDir { Get-CodexPathValueWithEntry -Raw '' -Dir $RgDir }
 
+# Test-CodexMangledPathEntry / Get-CodexMangledPathCount / Get-CodexPathValueWithoutEntries: 化けた codex-path の行と、外した PATH の値
+Test-Case '\codex-path は化けた行 (末尾の \・引用符・大文字小文字も)' 'True True True' { "$(Test-CodexMangledPathEntry -Entry '\codex-path') $(Test-CodexMangledPathEntry -Entry ' "\Codex-Path\" ') $(Test-CodexMangledPathEntry -Entry '\CODEX-PATH')" }
+Test-Case '置き場所の codex-path・ほかの codex-path は化けた行ではない' 'False False False' { "$(Test-CodexMangledPathEntry -Entry $RgDir) $(Test-CodexMangledPathEntry -Entry 'C:\tools\codex-path') $(Test-CodexMangledPathEntry -Entry '')" }
+Test-Case '化けた行を数える' 2 { Get-CodexMangledPathCount -Raw "C:\x;\codex-path;$Pkg;\codex-path\" }
+Test-Case '化けた行が無ければ 0' 0 { Get-CodexMangledPathCount -Raw "C:\x;$RgDir" }
+Test-Case '自分の codex-path の行と化けた行を外し、ほかの行 (%VAR%・空の要素・末尾の ;) は残す' "C:\x;;%USERPROFILE%\bin;$Pkg;" { Get-CodexPathValueWithoutEntries -Raw "C:\x;\codex-path;;%USERPROFILE%\bin;$Pkg;$RgDir;" -Dirs @($RgDir) }
+Test-Case '外す行を渡さなければ、化けた行だけを外す' "C:\x;$RgDir" { Get-CodexPathValueWithoutEntries -Raw "C:\x;\codex-path;$RgDir" -Dirs @() }
+Test-Case '外すものが無ければ変えない' "C:\x;$Pkg" { Get-CodexPathValueWithoutEntries -Raw "C:\x;$Pkg" -Dirs @($RgDir) }
+
 # Get-CodexRgState: 同梱の rg を codex が引けるか (hardlink の形のときだけ見る)
 Test-Case 'symlink の形 (PATH の codex が Links) なら na' 'na' { Get-CodexRgState -PathKind links -BundledRg $true -PathValue $Links -RgDir $RgDir }
 Test-Case 'hardlink の形で codex-path が PATH に無ければ missing' 'missing' { Get-CodexRgState -PathKind package -BundledRg $true -PathValue "C:\x;$Pkg" -RgDir $RgDir }
@@ -211,7 +222,7 @@ function New-State {
     $s = [ordered]@{
         Exists = $true; Installed = $V; ExeName = $ExeName; Plan = 'none'; Direction = 'same'; Pinned = $true
         Versions = $versions; Latest = $versions[0]; LinkState = 'ok'; LinkTarget = $Exe; HardlinkState = 'ok'; AliasState = 'symlink'
-        PathResolved = $Link; PathKind = 'links'; RgState = 'na'; WingetVersion = $w130; Route = 'direct'; BusyCount = 0
+        PathResolved = $Link; PathKind = 'links'; RgState = 'na'; MangledPath = 0; WingetVersion = $w130; Route = 'direct'; BusyCount = 0
     }
     foreach ($k in $Change.Keys) { $s[$k] = $Change[$k] }
     [pscustomobject]$s
@@ -233,6 +244,7 @@ Test-Case '揃っていれば差は無い' 'False False False' { $s = New-State;
 Test-Case 'hardlink の形で揃っていても差は無い' 'False False False' { $s = New-State $hardlinkForm; "$(Test-CodexDrift -State $s) $(Test-CodexPathDrift -State $s) $(Test-CodexBlocked -State $s)" }
 Test-Case 'pin が無ければ揃える手順で直る差' 'True False' { $s = New-State @{ Pinned = $false }; "$(Test-CodexDrift -State $s) $(Test-CodexPathDrift -State $s)" }
 Test-Case 'hardlink の形で codex-path が PATH に無ければ揃える手順で直る差' 'True False' { $s = New-State $hardRgMissing; "$(Test-CodexDrift -State $s) $(Test-CodexPathDrift -State $s)" }
+Test-Case 'ユーザーの PATH に化けた codex-path の行があれば揃える手順で直る差 (終了コード 1)' 'True False 1' { $s = New-State @{ MangledPath = 1 }; "$(Test-CodexDrift -State $s) $(Test-CodexPathDrift -State $s) $(Get-CodexExitCode -State $s)" }
 Test-Case 'codex と打てる形が無いのは揃える手順で直る差 (PATH で見つからないのは、ずれに数えない)' 'True False' { $s = New-State $fallback; "$(Test-CodexDrift -State $s) $(Test-CodexPathDrift -State $s)" }
 Test-Case 'PATH でほかの codex が先なら PATH のずれ (揃える手順では直らない)' 'False True' { $s = New-State @{ PathKind = 'other'; PathResolved = $Npm }; "$(Test-CodexDrift -State $s) $(Test-CodexPathDrift -State $s)" }
 Test-Case 'codex と打てる形はあるのに PATH で見つからなければ PATH のずれ' 'True' { Test-CodexPathDrift -State (New-State @{ PathKind = 'none'; PathResolved = $null }) }
@@ -270,6 +282,7 @@ Test-Case '揃っているときの版の行' "  固定した版      : $V → �
 Test-Case 'symlink の形の別名・PATH・同梱の rg の行' "  codex の別名    : WinGet\Links\codex.exe (置き場所の $ExeName への symlink)|  PATH の codex   : winget の symlink (WinGet\Links\codex.exe)|  同梱の rg       : codex が置き場所の codex-path\rg.exe を自分で使う (symlink の形)" { $r = Get-Rows (New-State); "$($r[5].Text)|$($r[6].Text)|$($r[7].Text)" }
 Test-Case 'hardlink の形の別名・PATH・同梱の rg の行 (⚠ にしない)' "  codex の別名    : 置き場所の codex.exe ($ExeName の hardlink。winget が symlink を作れずに、置き場所を PATH に足した形)|  PATH の codex   : winget の hardlink (置き場所の codex.exe)|  同梱の rg       : 置き場所の codex-path が PATH にある (hardlink の形の codex は同梱の rg を自分では見つけないので、PATH で引かせる)|0" { $r = Get-Rows (New-State $hardlinkForm); "$($r[5].Text)|$($r[6].Text)|$($r[7].Text)|$(@($r | Where-Object { $_.Warn }).Count)" }
 Test-Case 'hardlink の形で codex-path が PATH に無ければ、同梱の rg の行を ⚠ にする' '⚠ 同梱の rg       : 置き場所の codex-path が PATH に無い → ユーザーの PATH に足す (hardlink の形の codex は同梱の rg を自分では見つけない)' { (Get-Rows (New-State $hardRgMissing))[7].Text }
+Test-Case '化けた codex-path の行があれば、⚠ の行で知らせる' '⚠ 化けた PATH の行: \codex-path が 2 行 → 取り除く (winget uninstall が codex-path の行から置き場所の部分だけを抜いた残り。ドライブの直下を指す)' { (Get-Rows (New-State @{ MangledPath = 2 }))[8].Text }
 Test-Case '置き場所に codex-path\rg.exe が無ければ、⚠ にせずそう出す' '  同梱の rg       : 置き場所に codex-path\rg.exe が無い (codex は PATH の rg を使う)' { (Get-Rows (New-State $hardRgAbsent))[7].Text }
 Test-Case '手で入れた新しい版から下げるとき' "⚠ 固定した版      : $V → 入れ替える (下げる)" { (Get-Rows (New-State $handNewer))[2].Text }
 Test-Case 'pin が無ければ ⚠' '⚠ winget pin      : 無し → 足す' { (Get-Rows (New-State @{ Pinned = $false }))[4].Text }
@@ -302,6 +315,7 @@ $fallbackPinned = $fallback.Clone()
 $fallbackPinned.Pinned = $true
 Test-Case 'codex と打てる形だけが無ければ、その 1 行だけ' '⚠️ codex と打てない (WinGet\Links の symlink も、置き場所の codex.exe の hardlink も無い・違う) → Install-Codex で揃える ⚠️' { Get-Verdict (New-State $fallbackPinned) }
 Test-Case 'hardlink の形で codex-path が PATH に無ければ、Install-Codex で揃えると出す' '⚠️ codex が同梱の rg を引けない (置き場所の codex-path が PATH に無い) → Install-Codex で揃える ⚠️' { Get-Verdict (New-State $hardRgMissing) }
+Test-Case '化けた codex-path の行があれば、Install-Codex で揃えると出す' '⚠️ ユーザーの PATH に化けた codex-path の行 (\codex-path) が残っている → Install-Codex で揃える ⚠️' { Get-Verdict (New-State @{ MangledPath = 1 }) }
 Test-Case 'PATH のずれだけなら、※ の手順で直すと出す (揃えるとは言わない)' '⚠️ PATH の codex が winget のものではない → ※ の手順で直す ⚠️' { Get-Verdict (New-State @{ PathKind = 'other'; PathResolved = $Npm }) }
 Test-Case 'elevated なら、その 1 行だけ (入れる・揃えるとは言わない)' '⚠️ 昇格した PowerShell では winget が codex を入れない (winget 1.30 から) → ※ の手順で直す ⚠️' { "$(Get-Verdict (New-State ($missing + @{ Route = 'elevated' })))" }
 Test-Case 'old-winget なら、その 1 行だけ' '⚠️ winget が古く、codex と打てる形を作れない (winget 1.29 以前で、開発者モードも off) → ※ の手順で直す ⚠️' { "$(Get-Verdict (New-State ($fallback + @{ Route = 'old-winget' })))" }
@@ -378,6 +392,8 @@ function Get-CimInstance { [pscustomobject]@{ CommandLine = 'codex.exe exec hell
 # 入れた後の PATH の codex と同梱の rg (揃える流れが codex-path を足すかを決める)。足したら 'path add' を記録する
 function Get-CodexPathState { param($PackageDir, $LinksDir) [pscustomobject]@{ Resolved = $null; Kind = 'package'; RgDir = "$PackageDir\codex-path"; RgState = $script:RgAfter } }
 function Add-CodexUserPath { param($Dir) $script:Calls.Add("path add $(Split-Path -Leaf $Dir)") }
+# 外す行 (自分の codex-path) を記録する。化けた行は渡さなくても外す
+function Remove-CodexUserPath { param([string[]]$Dirs) $script:Calls.Add("path remove [$(@($Dirs | Where-Object { $_ } | ForEach-Object { Split-Path -Leaf $_ }) -join ' ')]"); 0 }
 
 # 1 回ぶんの流れを走らせ、打った winget・画面の行・終了コードを返す。
 # $States は Get-CodexState が返す順 (揃える前と、揃えた後に読み直したもの)
@@ -412,16 +428,20 @@ Test-Case '入れた後が hardlink の形で codex-path が PATH に無けれ�
 Test-Case '揃っていれば何も打たない' '0 []' { $r = Invoke-Flow -States @($synced) -ExeExists; "$($r.Code) [$($r.Calls)]" }
 Test-Case 'pin だけ無ければ pin を足すだけ' '0 [pin list pin add]' { $r = Invoke-Flow -States @((New-State @{ Pinned = $false }), $synced) -ExeExists; "$($r.Code) [$($r.Calls)]" }
 Test-Case 'hardlink の形で codex-path だけが PATH に無ければ、winget を打たずに PATH に足す' '0 [pin list path add codex-path]' { $r = Invoke-Flow -States @((New-State $hardRgMissing), $syncedHard) -ExeExists -PinListed -RgAfter missing; "$($r.Code) [$($r.Calls)]" }
-Test-Case '下げる入れ替えは、取得を確かめてから uninstall → install して pin を足す' '0 [download uninstall install pin list pin add]' { $r = Invoke-Flow -States @($changeState, $synced) -ExeExists; "$($r.Code) [$($r.Calls)]" }
-Test-Case 'codex と打てる形が無い形は、取得を確かめてから入れ直す' '0 [download uninstall install pin list pin add]' { $r = Invoke-Flow -States @($fallbackState, $syncedHard) -ExeExists; "$($r.Code) [$($r.Calls)]" }
+Test-Case '下げる入れ替えは、取得を確かめてから、自分の codex-path の行を外して uninstall → install して pin を足す' '0 [download path remove [codex-path] uninstall install pin list pin add]' { $r = Invoke-Flow -States @($changeState, $synced) -ExeExists; "$($r.Code) [$($r.Calls)]" }
+Test-Case 'codex と打てる形が無い形は、取得を確かめてから入れ直す' '0 [download path remove [codex-path] uninstall install pin list pin add]' { $r = Invoke-Flow -States @($fallbackState, $syncedHard) -ExeExists; "$($r.Code) [$($r.Calls)]" }
 $pinnedNewer = $handNewer.Clone()
 $pinnedNewer.Pinned = $true
-Test-Case 'pin があれば、入れ替えの前に外す' '0 [download pin remove uninstall install pin list pin add]' { $r = Invoke-Flow -States @((New-State $pinnedNewer), $synced) -ExeExists; "$($r.Code) [$($r.Calls)]" }
+Test-Case 'pin があれば、入れ替えの前に外す' '0 [download pin remove path remove [codex-path] uninstall install pin list pin add]' { $r = Invoke-Flow -States @((New-State $pinnedNewer), $synced) -ExeExists; "$($r.Code) [$($r.Calls)]" }
 Test-Case '動いている codex があれば、winget を 1 つも打たずに止まり、PID とコマンドラインを出す' '1 [] True' { $r = Invoke-Flow -States @((New-State ($handNewer + @{ BusyCount = 1 }))) -Busy 1 -ExeExists; "$($r.Code) [$($r.Calls)] $($r.Text -like '*1001*codex.exe exec hello*')" }
 Test-Case '取得が落ちたら、何も変えずに止まる' '1 [download] True' { $r = Invoke-Flow -States @($changeState) -Fail @{ download = 1 } -ExeExists; "$($r.Code) [$($r.Calls)] $($r.Text -like '*何も変えていない*')" }
-Test-Case 'uninstall が落ちたら install せず、pin を足す (入っている版は残る)' '1 [download uninstall pin list pin add]' { $r = Invoke-Flow -States @($changeState, $changeState) -Fail @{ uninstall = 1 } -ExeExists; "$($r.Code) [$($r.Calls)]" }
-Test-Case 'uninstall の後に install が落ちたら、入れ直し方を出す' $true { $r = Invoke-Flow -States @($changeState, (New-State $missing)) -Fail @{ install = 1 } -ExeExists; ($r.Code -eq 1) -and ($r.Calls -eq 'download uninstall install pin list') -and ($r.Text -like '*Install-Codex を打ち直す*') }
+Test-Case 'uninstall が落ちたら install せず、pin を足す (入っている版は残る)' '1 [download path remove [codex-path] uninstall pin list pin add]' { $r = Invoke-Flow -States @($changeState, $changeState) -Fail @{ uninstall = 1 } -ExeExists; "$($r.Code) [$($r.Calls)]" }
+Test-Case 'uninstall の後に install が落ちたら、入れ直し方を出す' $true { $r = Invoke-Flow -States @($changeState, (New-State $missing)) -Fail @{ install = 1 } -ExeExists; ($r.Code -eq 1) -and ($r.Calls -eq 'download path remove [codex-path] uninstall install pin list') -and ($r.Text -like '*Install-Codex を打ち直す*') }
 Test-Case 'winget が 0x8A15007D で断ったら、昇格していない PowerShell で打ち直すと出す' $true { $r = Invoke-Flow -States @((New-State $missing), (New-State $missing)) -Fail @{ install = -1978335107 } -IfMissing; ($r.Code -eq 1) -and ($r.Text -like '*0x8A15007D*昇格していない PowerShell で Install-Codex を打ち直す*') }
+Test-Case 'hardlink の形で入れ替えたら、外した codex-path の行を入れた後に足し直す' '0 [download path remove [codex-path] uninstall install pin list pin add path add codex-path]' { $r = Invoke-Flow -States @((New-State ($handNewer + $hardlinkForm)), $syncedHard) -ExeExists -RgAfter missing; "$($r.Code) [$($r.Calls)]" }
+Test-Case '化けた codex-path の行だけが残っていれば、winget を打たずに化けた行だけを外す' '0 [path remove [] pin list]' { $r = Invoke-Flow -States @((New-State @{ MangledPath = 1 }), $synced) -ExeExists -PinListed; "$($r.Code) [$($r.Calls)]" }
+Test-Case '入っていないときに化けた行があれば、入れる前に外す' '0 [path remove [] install pin list pin add]' { $r = Invoke-Flow -States @((New-State ($missing + @{ MangledPath = 1 })), $synced) -IfMissing; "$($r.Code) [$($r.Calls)]" }
+Test-Case '-Check は化けた行があっても PATH を変えない' '1 []' { $r = Invoke-Flow -States @((New-State @{ MangledPath = 1 })) -Check -ExeExists; "$($r.Code) [$($r.Calls)]" }
 Test-Case '固定した版が winget に無ければ、winget を打たずに止まる' '1 []' { $r = Invoke-Flow -States @((New-State ($missing + @{ Versions = @($Newer); Latest = $Newer }))); "$($r.Code) [$($r.Calls)]" }
 Test-Case 'elevated なら、引数なしでも winget を打たずに 1 で止まり、昇格していない PowerShell で打ち直すと出す' '1 [] True' { $r = Invoke-Flow -States @((New-State ($missing + @{ Route = 'elevated' }))); "$($r.Code) [$($r.Calls)] $($r.Text -like '*昇格していない PowerShell で Install-Codex を打ち直す*')" }
 Test-Case 'old-winget なら、引数なしでも winget を打たずに 1 で止まり、winget の更新の手を出す' '1 [] True' { $r = Invoke-Flow -States @((New-State ($fallback + @{ Route = 'old-winget' }))) -ExeExists; "$($r.Code) [$($r.Calls)] $($r.Text -like '*winget を更新するか開発者モードを on にしてから打ち直す*')" }
