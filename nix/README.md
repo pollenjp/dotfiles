@@ -885,7 +885,7 @@ DOTFILES_BACKUP_EXT=bak ~/dotfiles/setup --update
 | `bootstrap-windows-fancyzones.sh` | 92 | `bootstrap-windows-powertoys.sh` (91) が PowerToys を入れた後に、`win/powertoys/fancyzones/managed.json` のキーだけを FancyZones の `settings.json` へ書き、`custom-layouts.json` のレイアウトを uuid ごとに PC の `custom-layouts.json` へ足し、PC の `default-layouts.json` の横向きの既定を `layout-rules.json` の `default` にそろえ、PC の `applied-layouts.json` のうちテンプレートのままのディスプレイの組を `layout-rules.json` の決まり (解像度で決める。`powershell.exe` で聞く) のレイアウトで埋め、つながっている横向きのディスプレイの組を Windows にある全部の仮想デスクトップへ作る。91 は Keyboard Manager が使えないと早く抜けるので、別の script にしてある (exit 1 にしない。PC のエディターで直したレイアウトも、手であてたレイアウトも、知らせて先へ進む) |
 | `bootstrap-windows-google-ime-install.sh` | 95 | `bootstrap-windows-files.sh` が置いた `Install-GoogleJapaneseInput.ps1` で、Windows の Google 日本語入力が固定した版に揃っているかを確かめる (入っていなければ入れる。UAC の確認が出る。上げはしない)。設定を置く `bootstrap-windows-google-ime.sh` (98) より先に走る。`bootstrap-windows-powershell-profile.sh` と同じ 95 で、同じ値は辞書順なのでこちらが先 (どちらも相手を使わない) |
 | `bootstrap-windows-powershell-profile.sh` | 95 | `bootstrap-windows-files.sh` が置いた `dotfiles.ps1` を `$PROFILE` から読ませる |
-| `bootstrap-windows-openssh.sh` | 96 | `bootstrap-windows-files.sh` が置いた `Install-OpenSSH.ps1` で、Windows の OpenSSH が固定した版に揃っているかを確かめる (入っていなければ入れる。UAC の確認が出る。ずれは揃えない) |
+| `bootstrap-windows-openssh.sh` | 96 | `bootstrap-windows-files.sh` が置いた `Install-OpenSSH.ps1` で、Windows の OpenSSH が固定した版に揃っているかを確かめる (`dotfiles.wsl.windowsFiles.openssh.enable = true` のマシンだけ (`# tool: windowsOpenssh`。minimum では既定で false で、Windows に初めからある OpenSSH のまま)。入っていなければ入れる。UAC の確認が出る。ずれは揃えない) |
 | `bootstrap-windows-sshd.sh` | 96 | `bootstrap-windows-files.sh` が置いた `Install-Sshd.ps1` で、Windows に sshd (OpenSSH Server) を入れ、Tailscale と localhost からだけ鍵でだけ入れる形に揃っているかを確かめる (`dotfiles.wsl.windowsFiles.sshd.enable = true` のマシンだけ (`# tool: windowsSshd`。minimum では既定で false)。先に鍵の写しを置き、入っていなければ OpenSSH の MSI に Server を足して揃える。UAC の確認が出る。入っていてずれていれば ⚠ で知らせ、揃えはしない)。`bootstrap-windows-openssh.sh` と同じ 96 で、同じ値は辞書順なので openssh (sshd を足す MSI を入れる) の後・tailscale の前 |
 | `bootstrap-windows-tailscale.sh` | 96 | `bootstrap-windows-files.sh` が置いた `Install-Tailscale.ps1` で、Windows の Tailscale を固定した版で入れる (`dotfiles.wsl.windowsFiles.tailscale.enable = true` のマシンだけ (`# tool: windowsTailscale`。minimum では既定で false)。入っていなければ入れる。UAC の確認が出る。入っていれば上げず、古ければ ⚠ で知らせる。入っている版の方が新しいのは Tailscale の自動更新で、揃っている扱い)。`bootstrap-windows-openssh.sh` と同じ 96 で、同じ値は辞書順なのでこちらが後 (どちらも相手を使わない) |
 | `bootstrap-windows-herdr-app.sh` | 97 | `bootstrap-windows-files.sh` が置いた `Install-HerdrApp.ps1` で、Windows の herdr-app と herdr-core を固定した版と、固定した版にだけ上がる取得元 (手元のフィード) に揃える (入れる・上げる・フィードと環境変数を書く。下げはしない。揃いきらなければ ⚠ で知らせ、exit 1 にしない)。`bootstrap-windows-herdr.sh` と同じ 97 で、同じ値は辞書順なのでこちらが先 (どちらも相手を使わない) |
@@ -1011,7 +1011,7 @@ clone がまだ無かったので stub を指している。setup はこれを�
 | 6.8.2 | `./nix/scripts/bootstrap-windows-fancyzones.sh` | `bootstrap-windows-fancyzones` | FancyZones の `settings.json` に、dotfiles が持つキー (Windows スナップのオーバーライドなど) だけを書き、カスタムレイアウトを uuid ごとに足し、横向きの既定を決まりの `default` にそろえ、テンプレートのままのディスプレイの組に解像度の決まりのレイアウトをあて、組の無い仮想デスクトップに組を作る。設定画面で変えたキーは戻し、PC のエディターで直したレイアウトと手であてたレイアウトは書き換えずに知らせる（[`win/README.md`](../win/README.md#fancyzones)） |
 | 6.8.3 | `./nix/scripts/bootstrap-windows-google-ime-install.sh` | `bootstrap-windows-google-ime-install` | Windows の Google 日本語入力が固定した版に揃っているかを確かめる（無ければ入れる。UAC の確認が出る。上げはしない。[`win/README.md`](../win/README.md#google-日本語入力を入れる-winget)） |
 | 6.9 | `./nix/scripts/bootstrap-windows-powershell-profile.sh` | `bootstrap-windows-powershell-profile` | 配った PowerShell の共有設定を `$PROFILE` から読ませる（[後述](#windows-側のファイルを配る)） |
-| 6.10 | `./nix/scripts/bootstrap-windows-openssh.sh` | `bootstrap-windows-openssh` | Windows の OpenSSH が固定した版に揃っているかを確かめる（揃えはしない。[`win/README.md`](../win/README.md#openssh)） |
+| 6.10 | `./nix/scripts/bootstrap-windows-openssh.sh` | `bootstrap-windows-openssh` | Windows の OpenSSH が固定した版に揃っているかを確かめる（`wsl.windowsFiles.openssh.enable = true` のマシンだけ。揃えはしない。[`win/README.md`](../win/README.md#openssh)） |
 | 6.10.1 | `./nix/scripts/bootstrap-windows-sshd.sh` | `bootstrap-windows-sshd` | Windows に sshd を入れ、Tailscale と localhost からだけ鍵でだけ入れる形に揃っているかを確かめる（`wsl.windowsFiles.sshd.enable = true` のマシンだけ。minimum では既定で false。鍵の写しを置き、無ければ入れる (UAC の確認が出る)。ずれは揃えない。[`win/README.md`](../win/README.md#sshd)） |
 | 6.10.2 | `./nix/scripts/bootstrap-windows-tailscale.sh` | `bootstrap-windows-tailscale` | Windows の Tailscale を固定した版で入れる（`wsl.windowsFiles.tailscale.enable = true` のマシンだけ。minimum では既定で false。無ければ winget で入れる (UAC の確認が出る)。上げはしない。ログインは手でする。[`win/README.md`](../win/README.md#tailscale)） |
 | 6.10.3 | `./nix/scripts/bootstrap-windows-claude-code.sh` | `bootstrap-windows-claude-code` | Windows の Claude Code を固定した版に揃える（`wsl.windowsFiles.claudeCode.enable = true` のマシン。既定は `all` の `win/` を配るマシンで on。無ければ winget で入れ、ずれていれば揃える。[`win/README.md`](../win/README.md#claude-code)） |
@@ -1061,7 +1061,8 @@ git clone https://github.com/pollenjp/dotfiles.git ~/ghq/github.com/pollenjp/dot
 - `initial` に書くのは `username`・`system`・`group = "minimum"`・`wsl.enable`・`wsl.windowsUserName`・`wsl.windowsFiles.enable` と、
   minimum に足す道具 (Claude Code 一式・claude-skills・herdr・集約ハブ・herdr-core・cc-pages・ntn・git の名前とメールと、Windows の
   Claude Code・herdr・ntn・claude-personal と claude-work・Claude Desktop。設定グループの既定が personal だったときと同じ道具。
-  [前のグループから移す](#前のグループから移す)) だけ。1Password (鍵がまだ無い)・`exeExecTrace`・`mtuGuard`・Dev Tracker は、登録のときに足す
+  [前のグループから移す](#前のグループから移す)) と、Windows の OpenSSH を固定した版に入れ替える `wsl.windowsFiles.openssh.enable` (前はどのグループでも
+  入れていた。dotfiles-private に登録するホストは全部 on) だけ。1Password (鍵がまだ無い)・`exeExecTrace`・`mtuGuard`・Dev Tracker は、登録のときに足す
 - Windows のユーザー名は `private-host.sh windows-user` (`$env:USERNAME`) で引き、`/mnt/c/Users/<名前>` があるかを確かめる。
   ユーザーのフォルダの名前を変えた PC では、止まって候補を出すので、`--windows-user <フォルダの名前>` で渡す
 - 既に `~/dotfiles/flake.nix` があるとき: `initial` があれば触らない。今の雛形のまま (手を入れていない。`tmp` の例の
@@ -1069,7 +1070,7 @@ git clone https://github.com/pollenjp/dotfiles.git ~/ghq/github.com/pollenjp/dot
   (`--force --initial` で作り直すと、手で足した値は消える)
 - 雛形の本文は変えずに、描いたあとで `tmp` の例の後ろに `initial` の塊を差し込む。`tmp` の例 (コメント) の `windowsUserName`
   にも同じ名前を入れる。雛形の版の印は変わらない
-- `setup --new-machine` の途中で UAC の確認が出る (Google 日本語入力と OpenSSH で 1 回ずつ。herdr の依存の VCRedist が無い PC
+- `setup --new-machine` の途中で UAC の確認が出る (Google 日本語入力と OpenSSH (`initial` は `wsl.windowsFiles.openssh.enable = true`) で 1 回ずつ。herdr の依存の VCRedist が無い PC
   ではもう 1 回)。最後の「残りの手作業」に出た手順 (PowerToys の設定画面を開く・日本語入力を一度使う・Windows Terminal を
   一度起動する) のあと、`~/dotfiles/setup --update` を流し直す
 - 対象ホストが `initial` の間は、setup が残りの手作業に次の段 (上の 2・3) を出す。clone にこの PC のファイルが来たのに
@@ -1445,6 +1446,8 @@ tmp = dotfiles.lib.mkHome {
 - Windows のホストの値（dotfiles-private の `win/hosts/*.toml`）は `group = "minimum"` と、`[tools]` に同じ道具の行
   （[`win/README.md` の「ホストの値」](../win/README.md#ホストの値)）
 - 書き直す前と後で、ホストの要約（下の `private-host.sh summary`）の「入る道具」が同じかを見る
+- Windows の OpenSSH を固定した版に入れ替える `wsl.windowsFiles.openssh.enable`（Windows のホストの値は `windowsOpenssh`）は、前はどのグループでも
+  （switch を持たずに）入れていた。前と同じにするなら、`win/` を配るマシンではどの行にも足す（dotfiles-private に登録したホストは全部 on）
 
 #### ホストの要約
 
@@ -1931,6 +1934,7 @@ Windows 側のアプリの設定（Orca のキーバインドなど）は repo �
 | bootstrap (Windows Terminal) | `win/windows-terminal/managed.json` のキーを、キーごとに前回書いた値と比べて、Store 版の `settings.json` へ書き足す | `scripts/bootstrap-windows-terminal.sh` |
 | bootstrap (type-clipboard) | `windows-files.json` の `typeClipboard` が true のマシンだけ、配った `Install-TypeClipboard.ps1` で、固定した版の exe が入っているかを確かめる (無ければ GitHub の Release から落とし、SHA-256 が合えば置く) | `scripts/bootstrap-windows-type-clipboard.sh` |
 | bootstrap (ntn・Claude Code) | `windows-files.json` の `ntn`・`claudeCode` が true (欄が無ければ true) のマシンだけ、配った `Install-Ntn.ps1`・`Install-ClaudeCode.ps1` で確かめ、無ければ winget で入れ、版か pin がずれていれば固定した版に揃える | `scripts/bootstrap-windows-ntn.sh`・`scripts/bootstrap-windows-claude-code.sh` |
+| bootstrap (OpenSSH) | `group.json` の `tools.windowsOpenssh` が false でないマシン (欄・ファイルが無い前の世代は流す) だけ、配った `Install-OpenSSH.ps1` で確かめ、無ければ winget で固定した版を入れる (UAC の確認が出る)。ずれていれば ⚠ で知らせる (揃えない) | `scripts/bootstrap-windows-openssh.sh` |
 | bootstrap (Tailscale) | `group.json` の `tools.windowsTailscale` が true (欄・ファイルが無ければ false) のマシンだけ、配った `Install-Tailscale.ps1` で確かめ、無ければ winget で入れる (UAC の確認が出る)。入っていれば上げない (古ければ ⚠ で知らせ、新しいのは Tailscale の自動更新で揃っている扱い) | `scripts/bootstrap-windows-tailscale.sh` |
 | bootstrap (sshd) | `group.json` の `tools.windowsSshd` が true (欄・ファイルが無ければ false) のマシンだけ、`windows-sshd.json` の鍵の list を Windows の `%LOCALAPPDATA%\dotfiles\sshd\authorized_keys` に写し (null なら写しを消す)、受け持ちが runner だったときのユーザーと送り元の写し (`allow.json`) が残っていれば消し、配った `Install-Sshd.ps1` で確かめる。sshd が無ければ OpenSSH の MSI に Server を足して揃える (UAC の確認が出る)。入っていてずれていれば ⚠ で知らせる (揃えない) | `scripts/bootstrap-windows-sshd.sh` |
 
@@ -2046,13 +2050,18 @@ CI では通るのにマシン上の switch で落ちる。module から `../../
   `Install-ClaudeCode.ps1` を `pwsh.exe` で呼び、winget の `Notion.ntn`・`Anthropic.ClaudeCode` で入れ、版か pin がずれていれば固定した版に
   揃える (herdr と違い、常駐も UAC も無いので揃える。置き場所の exe が動いていれば揃えずに ⚠ で知らせる)。版は ps1 の `-Version` の既定値で
   固定する（[`win/README.md`](../win/README.md#ntn)・[`win/README.md`](../win/README.md#claude-code)、[ADR 055](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/055_win_ntn_claude_code_pin_updates_20261114T185136JST/README.md)）
+- Windows の OpenSSH は、`dotfiles.wsl.windowsFiles.openssh.enable = true` のマシン (minimum では既定で false。Windows には OpenSSH が初めから
+  入っているので、固定した版への入れ替えは使うホストだけ) で、`bootstrap-windows-openssh.sh` (order 96) が配った `Install-OpenSSH.ps1` を `pwsh.exe` で呼び、
+  入っていなければ winget の `Microsoft.OpenSSH.Preview` を固定した版で入れる (UAC の確認が出る)。ずれていれば ⚠ で知らせる (揃えるのは `--apply` か
+  PowerShell の `Install-OpenSSH`)。false のマシンでは、WSL の `ssh` の wrapper は Windows の機能の OpenSSH (`System32\OpenSSH`) の `ssh.exe` を使う
+  （[`win/README.md`](../win/README.md#openssh)）
 - Tailscale は、`dotfiles.wsl.windowsFiles.tailscale.enable = true` のマシン (minimum では既定で false。VPN の道具で、会社の PC などに
   勝手に入れない) だけ、`bootstrap-windows-tailscale.sh` (order 96) が配った `Install-Tailscale.ps1` を `pwsh.exe` で呼び、入っていなければ
   winget の `Tailscale.Tailscale` (MSI) を固定した版で入れる (UAC の確認が出る)。入っていれば上げない (Tailscale が自分で上がるので、
   入っている版の方が新しくても揃っている扱い。古ければ ⚠ で知らせる)。tailnet へのログインは入れた後に手でする
   （[`win/README.md`](../win/README.md#tailscale)、dotfiles-private の ADR 069 (`docs/adr/069_win_tailscale_*`)）
 - sshd (OpenSSH Server) は、`dotfiles.wsl.windowsFiles.sshd.enable = true` のマシン (minimum では既定で false。PC に外から入る口を開け
-  るので、会社の PC などに勝手に入れない) だけ、`bootstrap-windows-sshd.sh` (order 96) が鍵の写しを置いてから、配った `Install-Sshd.ps1` を
+  るので、会社の PC などに勝手に入れない。固定した OpenSSH の MSI に足すので `windowsFiles.openssh.enable` も true にする) だけ、`bootstrap-windows-sshd.sh` (order 96) が鍵の写しを置いてから、配った `Install-Sshd.ps1` を
   `pwsh.exe` で呼ぶ。入っていなければ、dotfiles が winget で固定した OpenSSH の MSI に Server を足し、鍵だけ・AllowUsers と Match Address で tailnet と localhost に
   限る `sshd_config`、Windows Firewall の拒否の規則 (tailnet からは 22 番だけ、22 番には tailnet と localhost からだけ)、鍵
   (`administrators_authorized_keys`)、自動の起動を揃える (UAC の確認が出る)。入っていてずれていれば ⚠ で知らせ、揃えるのは `--apply` か

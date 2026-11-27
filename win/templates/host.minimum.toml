@@ -12,6 +12,7 @@ group = "minimum"
 # 「ホストの値」)。
 # privateRepos (pollenjp の private な repo と gh のログイン) は、gh にログインできる PC でだけ true にする (bootstrap は -Private で流す)。
 # claudePrivateSkills・herdrHub・opReasonSshRelay は privateRepos が要る (privateRepos が off なのに足すと、runner が止める)。
+# windowsOpenssh を書かなければ、Windows に初めからある OpenSSH のまま使う (固定した版に入れ替えない。入れ替えると UAC の確認が出る)。
 
 [runner]
 # 受け持ちは runner (WSL の setup が Windows に配らない PC。dotfiles apply が全部の手順を揃える)。WSL の setup が Windows に配る PC
