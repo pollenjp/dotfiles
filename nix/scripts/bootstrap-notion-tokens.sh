@@ -39,6 +39,12 @@
 #   - ~/.config/pjp/env の権限が 600 より広い (rwx の 9 桁のうち、600 の外の桁がある。600 より狭い 400 などは知らせない)
 #   - 状態ファイルが無い (この宣言を持つ世代へまだ switch していない)・形が違う、jq が無い、~/.config/pjp/env が普通の
 #     ファイルでない・読めない (確かめずに飛ばす)
+#
+# ## Windows
+#
+# Windows のホストは、runner の手順 notion-tokens (win/runner/src/steps/notion_tokens.rs) が同じ判定と文で知らせる (権限は ACL で見る。
+# 行の数え方は pjp に合わせ、頭の BOM を外し、空白だけの値を数えない)。ここを直したら runner も直す (Linux の CI が、この script と
+# runner を同じ notion-tokens.json と env から流して突き合わせる)。
 
 set -eu -o pipefail
 

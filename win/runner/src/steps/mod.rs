@@ -29,6 +29,7 @@ pub mod herdr_app_pjp_spaces;
 pub mod international;
 pub mod linker;
 pub mod local_env;
+pub mod notion_tokens;
 #[cfg(test)]
 mod op_reason_parity;
 pub mod pending;
@@ -202,6 +203,9 @@ pub fn all_with(options: Options) -> Vec<Box<dyn Step>> {
         // マシンローカルの環境変数のファイル (~/.config/pjp/env) の頭の欄を、Linux の bootstrap-local-env と同じ印と規則で書き直す (Windows に
         // しか無い手順。dotfiles-private の docs/adr/105_win_local_env_*)
         Box::new(local_env::LocalEnv),
+        // Notion の API キーの宣言 ([claude.notion.tokens]) を notion-tokens.json に書き、~/.config/pjp/env の行と ACL を値を出さずに確かめる (Linux の
+        // home/modules/claude.nix と bootstrap-notion-tokens.sh を写した、Windows にしか無い手順。dotfiles-private の docs/adr/114_win_notion_api_token_*)
+        Box::new(notion_tokens::NotionTokens),
         // dotfiles の herdr-app の mod を herdr-app の home の mods\ へ置く (Windows にしか無い手順。dotfiles-private の
         // docs/adr/068_win_herdr_app_mods_*)
         Box::new(herdr_app_mods::HerdrAppMods),
@@ -287,6 +291,7 @@ mod tests {
                 (50, "claude-t3"),
                 (50, "git-config"),
                 (50, "local-env"),
+                (55, "notion-tokens"),
                 (55, "pjp"),
                 (60, "claude-skill-overrides"),
                 (60, "hc-hub"),
@@ -365,7 +370,7 @@ mod tests {
     }
 
     /// Windows にしか無い手順は bootstrap と W0-2 の手順と Claude Code の設定の手順 (T3 Code の会話だけの設定も) と git の設定とマシンローカルの
-    /// 環境変数のファイル (local-env) と herdr-app の mod
+    /// 環境変数のファイル (local-env) と Notion の API キーの宣言と知らせ (notion-tokens) と herdr-app の mod
     /// (pjp-spaces と layout も) とキーと claude-personal・claude-work と claude-selector と T3 Code (入れる ps1 の手順と設定) と ghq・fzf (cdrepo が
     /// 使う。入れる ps1 の手順) と Claude Desktop (入れる ps1 の手順) と starship (入れる ps1 の手順と、$PROFILE の init の 1 行の starship-init) だけ
     /// (WSL から写した手順・まだ無い手順は受け持ちに従う)
@@ -390,6 +395,7 @@ mod tests {
                 "claude-t3",
                 "git-config",
                 "local-env",
+                "notion-tokens",
                 "pjp",
                 "claude-skill-overrides",
                 "hc-hub",

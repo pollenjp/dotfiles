@@ -17,7 +17,8 @@ name: win-runner
 # sandbox のホストの nix/hosts/default.nix。Linux の CI で突き合わせる)・Windows の Claude Code に配る設定の元 (nix/files/claude/ の CLAUDE.md・
 # skill・footer-links.json と、Rust に写した hook・status line の bash の版。Linux の CI で bash の版と突き合わせる。hook の登録と skillOverrides
 # は nix/scripts/bootstrap-claude-hook.sh・bootstrap-claude-skill-overrides.sh と突き合わせる)・マシンローカルの環境変数のファイルの欄
-# (runner の local-env。Linux の CI で nix/scripts/bootstrap-local-env.sh と突き合わせる)・git の設定の正本 (nix/home/modules/git.toml。Linux の CI で
+# (runner の local-env。Linux の CI で nix/scripts/bootstrap-local-env.sh と突き合わせる)・Notion の API キーの宣言と知らせ (runner の notion-tokens。
+# Linux の CI で nix/lib/notion-tokens.nix の stateText・assertions と nix/scripts/bootstrap-notion-tokens.sh と突き合わせる)・git の設定の正本 (nix/home/modules/git.toml。Linux の CI で
 # git.nix と direnv.nix が作る home-manager の programs.git と突き合わせる)・c の中身 (nix/home/modules/fish.nix・bash.nix。herdr-app の
 # prefix の mod が Claude Code を起こす argv と突き合わせる)・Google 日本語入力の pjp-google-ime (nix/pkgs/pjp-google-ime/ の .proto の写しと
 # Python の版。Linux の CI で repo の flake から nix で作って突き合わせる。nixpkgs の protobuf の版で振る舞いが変わりうるので nix/flake.lock も) と
@@ -47,6 +48,8 @@ on:
       - "nix/scripts/bootstrap-claude-hook.sh"
       - "nix/scripts/bootstrap-claude-skill-overrides.sh"
       - "nix/scripts/bootstrap-local-env.sh"
+      - "nix/lib/notion-tokens.nix"
+      - "nix/scripts/bootstrap-notion-tokens.sh"
       - "nix/pkgs/pjp-google-ime/**"
       - "nix/tests/bootstrap-windows-google-ime.test.sh"
       - "nix/scripts/check-winget-version.sh"
@@ -75,6 +78,8 @@ on:
       - "nix/scripts/bootstrap-claude-hook.sh"
       - "nix/scripts/bootstrap-claude-skill-overrides.sh"
       - "nix/scripts/bootstrap-local-env.sh"
+      - "nix/lib/notion-tokens.nix"
+      - "nix/scripts/bootstrap-notion-tokens.sh"
       - "nix/pkgs/pjp-google-ime/**"
       - "nix/tests/bootstrap-windows-google-ime.test.sh"
       - "nix/scripts/check-winget-version.sh"

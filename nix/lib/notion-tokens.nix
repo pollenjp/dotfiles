@@ -9,6 +9,10 @@
 #                       personal → PJP_NOTION_TOKEN_PERSONAL、my-ws → PJP_NOTION_TOKEN_MY_WS)
 #   stateText <tokens>  notion-tokens.json の中身 (改行で終わる)。宣言が無くても {"tokens":{}}
 #   assertions <tokens> 名前の形・同じ変数になる名前・item の形を確かめる assertions の list
+#
+# Windows の runner (win/runner/src/host.rs の parse_tokens・tokens_json) が、ホストの値の [claude.notion.tokens] から同じ中身の JSON を
+# 書き、同じ見方で宣言を止める。ここを直したら runner も直す (Linux の CI が win/runner/tests/claude_parity.rs で、stateText と assertions を
+# runner と突き合わせる)。
 { lib }:
 
 let
