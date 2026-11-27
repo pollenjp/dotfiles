@@ -7,6 +7,10 @@
 //!   `builtins.toJSON { inherit profile routes override; } + "\n"`) と同じバイト列
 //! - settings.json の env に足す git の組 (並びも) と、plugin を https で取る印が、Linux の claude.nix が sandbox のホストに書く claude-env.json の
 //!   gitConfig と vars と同じ
+//! - notion-tokens.json の中身 (ホストの値の [claude.notion.tokens]) が、同じ宣言の Linux の nix/lib/notion-tokens.nix の stateText と同じバイト列
+//!   (宣言なし・item の null・セクションのある参照・空白と ASCII でない字の参照・- のある名前)。宣言を止めるか通すかが、同じ宣言の
+//!   notion-tokens.nix の assertions と同じ (名前の形・item の形・同じ変数になる 2 つの名前。kind は Nix の型 (enum) が見るので、ここでは
+//!   比べず単体の試験で見る)
 //!
 //! - 既定のアカウントの名前 (steps::claude_accounts::DEFAULT_ACCOUNTS) が、Linux の claude.nix が sandbox のホストに書く claude-accounts.json と
 //!   同じ並び (claude-account の既定の personal・work)
@@ -202,6 +206,178 @@ fn runner_json(toml_text: &str) -> String {
         .unwrap()
         .notion
         .json()
+}
+
+/// Linux の nix/lib/notion-tokens.nix (`nt`。lib は flake の nixpkgs のもの) を使う Nix の式 `expr` を評価した JSON。flake は `path:` で読む
+/// (素のパスだと repo 全体を /nix/store へ写す)
+fn notion_tokens_nix(expr: &str) -> serde_json::Value {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("nix")
+        .canonicalize()
+        .unwrap();
+    let dir = dir.to_str().unwrap();
+    let full = format!(
+        "let flake = builtins.getFlake \"path:{dir}\"; lib = flake.inputs.nixpkgs.lib; nt = import (/. + \"{dir}/lib/notion-tokens.nix\") {{ inherit lib; }}; in {expr}"
+    );
+    let out = Command::new("nix")
+        .args(["eval", "--impure", "--json", "--expr"])
+        .arg(&full)
+        .output()
+        .expect("nix を起こせない");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    serde_json::from_slice(&out.stdout).expect("nix eval の出力が JSON でない")
+}
+
+/// Nix の文字列の literal (`"…"`。\ と " と $ と改行・タブ・CR を逃がす)
+fn nix_str(s: &str) -> String {
+    let mut out = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '$' => out.push_str("\\$"),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// TOML の basic string の literal (`"…"`。\ と " と改行・タブ・CR を逃がす)
+fn toml_str(s: &str) -> String {
+    let mut out = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
+/// 宣言 (名前・種類・item) を、ホストの値の TOML と Nix の attrset にする
+fn token_decls(decls: &[(&str, &str, Option<&str>)]) -> (String, String) {
+    let mut toml_text = String::new();
+    let mut nix = String::from("{ ");
+    for (name, kind, item) in decls {
+        toml_text.push_str(&format!(
+            "[claude.notion.tokens.{}]\nkind = \"{kind}\"\n",
+            toml_str(name)
+        ));
+        if let Some(i) = item {
+            toml_text.push_str(&format!("item = {}\n", toml_str(i)));
+        }
+        nix.push_str(&format!(
+            "{} = {{ kind = \"{kind}\"; item = {}; }}; ",
+            nix_str(name),
+            item.map_or("null".to_string(), nix_str)
+        ));
+    }
+    nix.push('}');
+    (toml_text, nix)
+}
+
+/// notion-tokens.json の中身が、同じ宣言の Linux の notion-tokens.nix の stateText と同じバイト列
+#[test]
+fn notion_tokens_json_matches_nix() {
+    if !nix_available() {
+        return;
+    }
+    let cases: Vec<Vec<(&str, &str, Option<&str>)>> = vec![
+        vec![],
+        vec![("personal", "personal", None)],
+        vec![
+            ("personal", "personal", Some("op://vvvv/iiii/ffff")),
+            ("my-ws", "integration", None),
+            (
+                "sec_1",
+                "integration",
+                Some("op://Private Vault/My Item/s1/credential"),
+            ),
+            ("0w", "personal", Some("op://金庫/項目/欄 ")),
+        ],
+    ];
+    let mut ours = Vec::new();
+    let mut nix_list = String::from("map nt.stateText [ ");
+    for decls in &cases {
+        let (toml_text, nix) = token_decls(decls);
+        ours.push(
+            parse(&toml_text, Path::new("h.toml"), Groups::embedded().unwrap())
+                .unwrap()
+                .notion
+                .tokens_json(),
+        );
+        nix_list.push_str(&format!("({nix}) "));
+    }
+    nix_list.push(']');
+    let linux: Vec<String> = serde_json::from_value(notion_tokens_nix(&nix_list)).unwrap();
+    assert_eq!(ours, linux);
+    assert_eq!(linux[0], "{\"tokens\":{}}\n");
+}
+
+/// 宣言を止めるか通すかが、同じ宣言の Linux の notion-tokens.nix の assertions (どれも true なら通す) と同じ
+#[test]
+fn notion_tokens_rejects_like_nix() {
+    if !nix_available() {
+        return;
+    }
+    let p = |name: &'static str| vec![(name, "personal", None)];
+    let item = |i: &'static str| vec![("personal", "personal", Some(i))];
+    let cases: Vec<Vec<(&str, &str, Option<&str>)>> = vec![
+        p("personal"),
+        p("0a"),
+        p("a-b_c"),
+        p("Personal"),
+        p("-x"),
+        p("_x"),
+        p("a b"),
+        p("a.b"),
+        item("op://a/b/c"),
+        item("op://a/b/s/c"),
+        item("op://Private Vault/My Item/credential"),
+        item("op://金庫/項目/欄"),
+        item("op://a/b/c "),
+        item("ntn_not_a_reference"),
+        item("op://a/b"),
+        item("op://a/b/c/d/e"),
+        item(" op://a/b/c"),
+        item("op://a/b/c\n"),
+        item("op://a/b/c\tx"),
+        item("op://a//c"),
+        item("op://a/b/c/"),
+        item(""),
+        item("OP://a/b/c"),
+        vec![("my-ws", "personal", None), ("my_ws", "integration", None)],
+        vec![("a-b", "personal", None), ("a_c", "integration", None)],
+    ];
+    let mut ours = Vec::new();
+    let mut nix_list = String::from("map (t: builtins.all (a: a.assertion) (nt.assertions t)) [ ");
+    for decls in &cases {
+        let (toml_text, nix) = token_decls(decls);
+        ours.push(parse(&toml_text, Path::new("h.toml"), Groups::embedded().unwrap()).is_ok());
+        nix_list.push_str(&format!("({nix}) "));
+    }
+    nix_list.push(']');
+    let linux: Vec<bool> = serde_json::from_value(notion_tokens_nix(&nix_list)).unwrap();
+    for (i, decls) in cases.iter().enumerate() {
+        assert_eq!(ours[i], linux[i], "{decls:?}");
+    }
+    // 通すものと止めるものの両方がある (どちらかに寄った比べ方になっていない)
+    assert!(linux.contains(&true) && linux.contains(&false));
 }
 
 #[test]

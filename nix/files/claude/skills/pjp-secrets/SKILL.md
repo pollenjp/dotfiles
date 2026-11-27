@@ -29,13 +29,15 @@ program は `pjp-op-env` が起動のときに 1 回の op で値を解いて環
 参照も置ける)。値はユーザーが自分の端末で入れ (`claude-account set-token <名前>`)、Claude は読まない・書かない・出さない (確かめるのは
 `claude-account check <名前>` で、有る無しと権限だけ)。わけと守り・漏れたときは dotfiles-private の ADR 082 (`docs/adr/082_claude_token_accounts_*`)。
 
-**例外: Notion の API キー。** `~/.config/pjp/env` (`$XDG_CONFIG_HOME` があれば `$XDG_CONFIG_HOME/pjp/env`) の `PJP_NOTION_TOKEN_<名前>`
-(名前を大文字にし、`-` を `_` にする) は、ユーザーの決定 (2026-11-26) でローカルに値を置く (権限 600 の平文。元の値は 1Password)。どの
-ホストがどのプロファイルにどの種類 (integration の API キー・個人用アクセストークン) を使うかは、ホストの設定 (dotfiles の
-`dotfiles.claude.notion.tokens`) で宣言する。値はユーザーが自分の端末で入れ (`pjp notion-profile set-token <名前>`)、Claude は
+**例外: Notion の API キー。** `~/.config/pjp/env` (`$XDG_CONFIG_HOME` があれば `$XDG_CONFIG_HOME/pjp/env`。Windows は
+`%USERPROFILE%\.config\pjp\env`) の `PJP_NOTION_TOKEN_<名前>` (名前を大文字にし、`-` を `_` にする) は、ユーザーの決定 (2026-11-26。
+Windows は 2026-11-27) でローカルに値を置く (Linux は権限 600 の平文、Windows は継いだ ACL で本人と SYSTEM・Administrators だけが読める平文。
+元の値は 1Password)。どのホストがどのプロファイルにどの種類 (integration の API キー・個人用アクセストークン) を使うかは、ホストの設定
+(Linux は dotfiles の `dotfiles.claude.notion.tokens`、Windows は dotfiles-private の `win/hosts/<ユーザー>@<PC>.toml` の
+`[claude.notion.tokens.<名前>]`) で宣言する。値はユーザーが自分の端末で入れ (`pjp notion-profile set-token <名前>`)、Claude は
 `set-token` を打たず、そのファイルを開かず (Read・cat も。`grep` で行を出さない)、値を読まない・書かない・出さない (確かめるのは
-棚卸しの skill と setup の知らせで、有る無しと権限と日数だけ)。わけと守り・回し方は dotfiles-private の ADR 112
-(`docs/adr/112_notion_api_token_local_*`)。
+棚卸しの skill と setup の知らせ (Windows は runner の notion-tokens) で、有る無しと権限と日数だけ)。わけと守り・回し方は dotfiles-private の
+ADR 112 (`docs/adr/112_notion_api_token_local_*`。Windows は ADR 114)。
 
 ほかのシークレットは上の決まりのまま。
 
@@ -226,7 +228,8 @@ program は `pjp-op-env` が起動のときに 1 回の op で値を解いて環
 
 - 「ここに貼ってください」「.env に書いてください」と書きかけた
 - `cat .env`・Read で `.env` を開こうとした・伏せる sed を書き始めた
-- `~/.config/pjp/env` を Read・cat で開こうとした・`pjp notion-profile set-token` を打とうとした (Notion の API キーはユーザーが入れる)
+- `~/.config/pjp/env` (Windows は `%USERPROFILE%\.config\pjp\env`) を Read・cat で開こうとした・`pjp notion-profile set-token` を打とうとした
+  (Notion の API キーはユーザーが入れる)
 - WSL で `op run` を打とうとした・`op read` を値ごとに打とうとした
 - `echo $KEY`・`env`・`printenv`・`set -x`・`ps eww <pid>`・`/proc/<pid>/environ`・`op item get --reveal`
 - ID を探すのに `op item get … --format json` を素で打とうとした (pjp-op-ref を使う)

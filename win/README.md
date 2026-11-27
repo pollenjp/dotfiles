@@ -472,9 +472,13 @@ routes = { "pollenjp/some-repo" = "work" }   # このマシンだけの宛先の
 
 [claude.notion.override.personal]            # プロファイルの値を、このマシンだけ差し替える (書かなければ空)
 scanData = "https://app.notion.com/p/…"
+
+[claude.notion.tokens.personal]              # このマシンで Notion の API キーを使うプロファイルと種類 (Nix の dotfiles.claude.notion.tokens と同じ名前と形。書かなければ空)
+kind = "personal"                            # integration (integration の API キー)・personal (個人用アクセストークン)
+item = "op://<vault の ID>/<項目の ID>/<欄の ID>"   # 元の値の 1Password の参照 (欄まで。値ではない)。書かなければ null
 ```
 
-- 書けるのは `group`・`[tools]`・`[runner] enable`・`[opReason] sshRelayMode`・`[sshd]` (`authorizedKeys`・`allowUsers`・`allowFrom`)・`[t3Code] clearClaudeEntrypoint`・`[claude.notion]` (`profile`・`routes`・`override`) だけ。道具の名前は `group.json` の `tools` と同じ
+- 書けるのは `group`・`[tools]`・`[runner] enable`・`[opReason] sshRelayMode`・`[sshd]` (`authorizedKeys`・`allowUsers`・`allowFrom`)・`[t3Code] clearClaudeEntrypoint`・`[claude.notion]` (`profile`・`routes`・`override`・`tokens`) だけ。道具の名前は `group.json` の `tools` と同じ
   (runner が使うのは `windowsClaudeCode`・`windowsClaudeAccounts`・`windowsClaudeDesktop`・`windowsHerdr`・`windowsNtn`・`windowsTypeClipboard`・`windowsTailscale`・`windowsSshd`・`windowsT3Code`・`claudePrivateSkills`・`herdrHub`・`devTracker`・`gitIdentity` と、
   `op-reason` の on/off の `onePassword`、SSH の中継の `opReasonSshRelay`、runner だけが読む `privateRepos`)。知らないキー・名前・`sshRelayMode` の知らない値・`authorizedKeys` の読めない値・
   `allowUsers`・`allowFrom` の書けない値は runner が止める (終了コード 2)
@@ -526,6 +530,9 @@ scanData = "https://app.notion.com/p/…"
   runner が確かめるのは Nix の option と同じ型だけ (`profile` は `[a-z0-9][a-z0-9_-]*`・`routes` は文字列の表・`override` は表。日時は書けない)。
   プロファイルの名前やキーの綴りは、claude-skills の pjp-notion-profile が使うときに確かめる。TOML に null は無いので、`override` で値を消す形
   (Nix の `null`) は書けない
+- `[claude.notion.tokens.<名前>]` (Notion の API キーの宣言) は `notion-tokens` の手順が `%USERPROFILE%\.local\state\dotfiles\notion-tokens.json` に
+  書き、`~/.config/pjp/env` の行と ACL を確かめる。宣言の形は Nix の option と同じに runner が確かめ、`kind` と `item` に書いた字は止める文に出さない
+  ([後述](#notion-の-api-キーの宣言-claudenotiontokens))
 - dotfiles-private は、runner を build した dotfiles の clone の隣を探し、無ければ bootstrap の置き場 (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles-private`)
   を探す (一時の場所の clone から流しても見つかる)。どこを読んだかは出力の頭の「ホストの値:」に出る
 - ホストの値が無い・2 つあるときの振る舞いは、この節の頭の「引く順」のとおり。別のファイルを使うなら `--host-file <path>`
@@ -645,6 +652,7 @@ scanData = "https://app.notion.com/p/…"
 | 50 | `claude-t3` | T3 Code の会話だけの Claude の設定 (`claude-code/t3/` の `settings.json`・`CLAUDE.t3.md`) を `%USERPROFILE%\.claude\t3\` へ記録つきのコピーで置き (改行は LF にし、JSON は object かを確かめてから置く。置き先で変えたファイルは衝突として知らせ、`--force` で上書き。置くファイルから外したものは、置いたままなら消す。`t3` がリンクなら触らない)、T3 の Launch arguments の文を出す (この手順は T3 の設定を書かない。`windowsT3Code` のホストでは `t3-code-settings` が書く。[後述](#claude-code-の設定))。記録は `%LOCALAPPDATA%\dotfiles\state\claude-t3.deployed.json` | `windowsClaudeCode` | 有る (Windows だけ) |
 | 50 | `git-config` | git の設定 (`%USERPROFILE%\.config\git\config`・`ignore`) を、WSL の home-manager と同じ `nix/home/modules/git.toml` から置く (署名と delta は除く。Windows だけ `core.sshCommand` に Windows の OpenSSH の `ssh.exe` を足す。[後述](#git-の設定)) | いつも (名前とメールは `gitIdentity`) | 有る (Windows だけ) |
 | 50 | `local-env` | マシンローカルの環境変数のファイル `%USERPROFILE%\.config\pjp\env` を、無ければ作り、頭の「dotfiles が書く欄」を、つないだ skill の `pjp-env.txt` から書き直す (Linux の `bootstrap-local-env` と同じ印と書き直し方。欄の外の行と値には触れない。dotfiles の節は入れない。[後述](#マシンローカルの環境変数-configpjpenv)) | `claudePrivateSkills` | 有る (Windows だけ) |
+| 55 | `notion-tokens` | ホストの値の `[claude.notion.tokens]` から `%USERPROFILE%\.local\state\dotfiles\notion-tokens.json` を書き、宣言したプロファイルごとに `~/.config/pjp/env` の変数の行と、env の ACL を値を出さずに確かめて知らせる (Linux の home-manager と `bootstrap-notion-tokens` を 1 つにしたもの。env と ACL は書き換えない。[後述](#notion-の-api-キーの宣言-claudenotiontokens)) | `windowsClaudeCode` | 有る (Windows だけ) |
 | 55 | `pjp` | shim の `pjp` を (要れば) `cargo install` し、`pjp --build` で道具を作る | `claudePrivateSkills` | 有る (Windows だけ) |
 | 60 | `claude-skill-overrides` | `settings.json` の `skillOverrides` (pjp-dev-tracker の on/off・pjp-t3-hub の off・pack の skill を名前だけ・同期された skill を隠す) を書く | `windowsClaudeCode` | 有る (Windows だけ) |
 | 60 | `hc-hub` | ハブ `%USERPROFILE%\h` を `pjp hub init` で作る (作り済みなら雛形との差だけ直す) | `herdrHub` | 有る (Windows だけ) |
@@ -768,8 +776,12 @@ gate が違うと、試験が落ちる
   打った pwsh の引数と順・手順の行・見せた pwsh の出力・直し方が同じかを突き合わせる。PATH に `pwsh` があれば、本物の `Install-OpReason.ps1` の
   `-Check` (置き場所を一時ディレクトリに向ける。揃える流れは偽物が打たずに断る) でも突き合わせる (Windows の CI では runner の側だけ)。`local-env`
   (`src/steps/local_env.rs`) は、`nix/scripts/bootstrap-local-env.sh` を同じ skill の断片と同じ env のファイルから流し、何をしたか・欄の外のバイト・
-  skill の節・欄に入れなかった断片・移した名前・印の行番号が同じかを突き合わせる (欄の前置きと dotfiles の節は Windows のものなので比べない)。bash の版を
-  直したら、Rust の写しも同じに直す
+  skill の節・欄に入れなかった断片・移した名前・印の行番号が同じかを突き合わせる (欄の前置きと dotfiles の節は Windows のものなので比べない)。
+  `notion-tokens` (`src/steps/notion_tokens.rs`) は、runner が書いた `notion-tokens.json` と同じ env から `nix/scripts/bootstrap-notion-tokens.sh` を流し、
+  入っている・いないとしたプロファイル・入れ方の行・宣言が無いときの知らせが同じかを突き合わせる (頭の BOM と空白だけの値の数え方、権限 (Linux は
+  mode、Windows は ACL) は比べない)。`notion-tokens.json` の中身と宣言を止めるか通すかは、`tests/claude_parity.rs` が Linux の
+  `nix/lib/notion-tokens.nix` の stateText と assertions (`nix eval`) と突き合わせる。ACL の読み方は、Windows の CI で本物の PowerShell と `icacls` で
+  確かめる。bash の版を直したら、Rust の写しも同じに直す
 
 ### claude-skills と Windows のハブ (W0-2)
 
@@ -839,9 +851,59 @@ notepad "$env:USERPROFILE\.config\pjp\env"     # 値は欄より下に書く
   そのまま保つ。Windows PowerShell 5.1 のリダイレクト (`>`・`>>`) と `Out-File` は既定で UTF-16 で書く (`>>` は UTF-8 のファイルに UTF-16 の行を
   足す) ので、このファイルに使わない (pjp も読めない)。足してしまったら、その行を消して書き直す
 - 権限は締めない (`%USERPROFILE%` の下は、継いだ ACL で本人と SYSTEM・Administrators だけが読める)。書き直すたびに、env と `env.bak` は置き場所の
-  ディレクトリの ACL を継ぐ (ファイルにだけ付けた ACL は残らない)。`XDG_CONFIG_HOME` で `%USERPROFILE%` の外に置くなら、そのディレクトリの ACL を確かめる
+  ディレクトリの ACL を継ぐ (ファイルにだけ付けた ACL は残らない)。`XDG_CONFIG_HOME` で `%USERPROFILE%` の外に置くなら、そのディレクトリの ACL を確かめる。
+  Notion の API キーを宣言したホストでは、手順 `notion-tokens` が env の ACL を見て知らせる (下の節。書き換えない)
 - 値を守るために読み取り専用にしたファイルは、欄が最新のうちはそのまま ✔ で、欄を書き直すことがあるときだけ ⚠ になる (`attrib -r` で外してから流し、
   要れば `attrib +r` で付け直す。書き直したファイルは読み取り専用でなくなる)
+
+#### Notion の API キーの宣言 (`[claude.notion.tokens]`)
+
+Notion を `ntn login` でなく API キーで使うマシンは、どのプロファイルにどの種類の API キーを使うかを、ホストの値に書く (Linux の
+`dotfiles.claude.notion.tokens` と同じ名前と形。[`nix/README.md`「Notion の API キーの種類を宣言する」](../nix/README.md#notion-の-api-キーの種類を宣言する))。
+値 (token) は書かない。
+
+```toml
+[claude.notion.tokens.personal]
+kind = "personal"                                  # "integration" (integration の API キー) か "personal" (個人用アクセストークン)
+item = "op://<vault の ID>/<項目の ID>/<欄の ID>"   # 元の値の 1Password の参照。欄まで書く。分かるまで書かない (null)
+```
+
+| キー | 値 |
+| --- | --- |
+| `tokens` の下の名前 | プロファイルの名前 (`profiles.toml` の名前と同じ形。英小文字か数字で始め、英小文字・数字・`-` と `_` だけ)。変数名は名前を大文字にし、`-` を `_` にしたもの (personal → `PJP_NOTION_TOKEN_PERSONAL`) |
+| `kind` | `integration` (integration の API キー)・`personal` (個人用アクセストークン)。書かなければ止まる |
+| `item` | 元の値を置いた 1Password の参照。欄まで書く: `op://<vault の ID>/<項目の ID>/<欄の ID>` (セクションがあれば `op://<vault>/<項目>/<セクション>/<欄>`)。`pjp-op-ref` が出す ID の形の参照で、値ではない。書かなければ null |
+
+次のときは runner が止まる (終了コード 2): 名前の形が違う・同じ変数になる 2 つの名前 (`my-ws` と `my_ws`)・知らないキー・`kind` が無いか 2 つの外・
+`item` が欄まで書いた `op://` の参照でない (値そのものを書いたときも)。止める文には `kind` と `item` に書いた字を出さず、名前だけを出す (Nix の
+`nix/lib/notion-tokens.nix` と同じ見方)。
+
+手順 `notion-tokens` (order 55。`windowsClaudeCode` のホスト) は、Linux の home-manager (`notion-tokens.json` を置く) と setup の
+`bootstrap-notion-tokens.sh` (知らせる) を 1 つにしたもので、check・dry-run・apply のたびに次をする:
+
+1. `%USERPROFILE%\.local\state\dotfiles\notion-tokens.json` を書く (Linux と同じ中身。宣言が無くても `{"tokens":{}}`。check と dry-run は書かない)。
+   読むのは claude-skills の棚卸しの道具 (`pjp notion-token-audit`)
+2. 宣言したプロファイルごとに、`~/.config/pjp/env` (local-env と同じ置き場所) に変数の行があるかを、値を出さずに数える。無ければ ⚠ と、入れ方
+   (ユーザーが自分の端末で `pjp notion-profile set-token <名前>` を打つ。`item` があればその参照) を出す。宣言が無ければ env を見ない
+3. env があれば ACL を見る。読む権限を許す規則が、本人 (今のユーザー)・SYSTEM・Administrators のほかにもあれば ⚠ と直し方を出す
+   (`%USERPROFILE%` の下は、継いだ ACL でこの 3 つだけが読める。runner は ACL を書き換えない)
+
+```powershell
+dotfiles check --steps notion-tokens      # 行の有る無しと ACL を見る (何も書かない)
+dotfiles apply --steps notion-tokens      # notion-tokens.json を書き、同じく確かめる (set-token で入れた後の確かめにも)
+```
+
+- 行は、頭が `<var>=` で、`=` の後ろの値が空白だけでない行 (Windows でこのファイルを読む pjp と、棚卸しの道具と同じ数え方。ファイルの頭の
+  UTF-8 の BOM は外して読む)。`#` で始まる行・頭に空白のある行・`export <var>=` の行は数えない
+- env が無い (行が無いのと同じく知らせる。作らない)・symlink・普通のファイルでない・NUL がある (UTF-16 で保存した)・`XDG_CONFIG_HOME` が
+  相対パスのときも ⚠ で知らせる (書き換えない)
+- ACL は PowerShell の `Get-Acl` で読む。拒む規則と、自分に効かない規則 (InheritOnly・CREATOR OWNER) は数えない (拒む規則を差し引かないので、
+  読める側に寄せて知らせる)。env は書き直すたびに置き場所のディレクトリの ACL を継ぐので、直すならディレクトリの ACL を直す
+- 入れてからの日数は出さない (Linux の setup の知らせと同じ)。日数と回す時期は claude-skills の棚卸しの skill (`pjp-notion-token-audit`) が見る
+- 値はユーザーが入れる。Claude は `set-token` を打たず、env と `env.bak` を開かず、値を読まない・書かない・出さない
+  ([`nix/files/claude/CLAUDE.md`](../nix/files/claude/CLAUDE.md) の「シークレット」の例外と `pjp-secrets`。わけと守りは dotfiles-private の ADR 112 と、
+  それを Windows へ広げた ADR 114)
+- env に行が入るまで、Windows の pjp は今までどおり `ntn login` で Notion に入る
 
 ### Claude Code の設定
 

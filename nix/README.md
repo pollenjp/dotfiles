@@ -4733,6 +4733,10 @@ claude = {
 `mkHome` の引数の `claude` はそのまま `dotfiles.claude` に入るので、`modules` に `{ dotfiles.claude.notion.tokens.personal = { … }; }`
 と書いても同じになる。
 
+Windows のホストは、dotfiles-private の `win/hosts/<ユーザー>@<PC>.toml` に同じ名前と形で書く (`[claude.notion.tokens.personal]` の下に
+`kind`・`item`)。runner の手順 `notion-tokens` が同じ中身の `notion-tokens.json` を書き、`%USERPROFILE%\.config\pjp\env` の行と ACL を
+確かめて知らせる ([`win/README.md`「Notion の API キーの宣言」](../win/README.md#notion-の-api-キーの宣言-claudenotiontokens))。
+
 | キー | 値 |
 | --- | --- |
 | `tokens` のキー | プロファイルの名前（`profiles.toml` の名前と同じ形。英小文字か数字で始まり、英小文字・数字・`-` と `_` だけ）。変数名は名前を大文字にし、`-` を `_` にしたもの（personal → `PJP_NOTION_TOKEN_PERSONAL`） |

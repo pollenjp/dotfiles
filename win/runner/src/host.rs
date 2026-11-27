@@ -41,6 +41,10 @@
 //!
 //! [claude.notion.override.personal]    # プロファイルの値を、このマシンだけ差し替える
 //! scanData = "https://app.notion.com/p/…"
+//!
+//! [claude.notion.tokens.personal]      # このマシンで Notion の API キーを使うプロファイルと種類 (Nix の dotfiles.claude.notion.tokens と同じ)
+//! kind = "personal"                    # integration (integration の API キー)・personal (個人用アクセストークン)
+//! item = "op://<vault>/<項目>/<欄>"     # 元の値の 1Password の参照 (欄まで。値ではない)。書かなければ null
 //! ```
 
 use std::collections::BTreeMap;
@@ -49,6 +53,9 @@ use std::path::{Path, PathBuf};
 /// Notion へ書く skill の宛先 (ホストの値の `[claude.notion]`)。claude-skills の pjp-notion-profile が読む
 /// `~/.local/state/dotfiles/claude-notion.json` の中身になる。綴り (プロファイルがあるか・知らないキー) は claude-skills の resolver が
 /// 使うときに確かめる (Nix の option と同じ)。
+///
+/// Notion の API キーの宣言 (`[claude.notion.tokens.<名前>]`) は別のファイル `~/.local/state/dotfiles/notion-tokens.json` になる
+/// (`tokens_json`。Linux の home/modules/claude.nix と同じく、古い resolver が知らないキーで止まらないように分ける)。
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NotionValues {
     /// このマシンの既定のプロファイル (無ければ JSON の null)
@@ -57,9 +64,102 @@ pub struct NotionValues {
     pub routes: BTreeMap<String, String>,
     /// プロファイルごとの値の上書き (JSON に写したもの)
     pub overrides: serde_json::Map<String, serde_json::Value>,
+    /// このマシンで Notion の API キーを使うプロファイルと、その種類の宣言 (名前 → 宣言。値 (token) は持たない)
+    pub tokens: BTreeMap<String, NotionToken>,
+}
+
+/// Notion の API キーの種類 (Nix の `dotfiles.claude.notion.tokens.<名前>.kind` と同じ 2 つ)。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TokenKind {
+    /// integration の API キー (接続したページにだけ届く。秘密を作り直せば古いものが無効になる)
+    Integration,
+    /// 個人用アクセストークン (Notion の web で発行する。ユーザーの権限が届く範囲)
+    Personal,
+}
+
+impl TokenKind {
+    /// TOML と JSON に書く字
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TokenKind::Integration => "integration",
+            TokenKind::Personal => "personal",
+        }
+    }
+
+    /// 知らせに出す名前 (Linux の nix/scripts/bootstrap-notion-tokens.sh の kind_label と同じ)
+    pub fn label(self) -> &'static str {
+        match self {
+            TokenKind::Integration => "integration の API キー",
+            TokenKind::Personal => "個人用アクセストークン",
+        }
+    }
+}
+
+/// Notion の API キーの宣言 1 つ (`[claude.notion.tokens.<名前>]` の `kind`・`item`)。
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct NotionToken {
+    pub kind: TokenKind,
+    /// 元の値を置いた 1Password の参照 (欄まで書いた `op://…`。値ではない)。書かなければ None (JSON の null)。dotfiles は読まず、
+    /// claude-skills の棚卸しと回す手順と、手順 notion-tokens の入れ方の知らせが使う
+    pub item: Option<String>,
+}
+
+/// `~/.config/pjp/env` の変数名。名前を大文字にし、`-` を `_` にして頭に `PJP_NOTION_TOKEN_` を付ける (Linux の nix/lib/notion-tokens.nix の
+/// var と、claude-skills の resolver と同じ規則。personal → `PJP_NOTION_TOKEN_PERSONAL`、my-ws → `PJP_NOTION_TOKEN_MY_WS`)
+pub fn token_var(name: &str) -> String {
+    format!(
+        "PJP_NOTION_TOKEN_{}",
+        name.to_ascii_uppercase().replace('-', "_")
+    )
+}
+
+/// 欄まで書いた 1Password の参照か (`op://<vault>/<項目>/<欄>`、セクションがあれば `op://<vault>/<項目>/<セクション>/<欄>`)。区切りの間は空でなく、
+/// `/` と制御文字を含まない (空白と ASCII でない字は通す)。Linux の nix/lib/notion-tokens.nix の
+/// `op://[^/[:cntrl:]]+/[^/[:cntrl:]]+/[^/[:cntrl:]]+(/[^/[:cntrl:]]+)?` と、bootstrap-notion-tokens.sh の jq の形と同じ
+pub fn item_ref_ok(item: &str) -> bool {
+    let Some(rest) = item.strip_prefix("op://") else {
+        return false;
+    };
+    let parts: Vec<&str> = rest.split('/').collect();
+    matches!(parts.len(), 3 | 4)
+        && parts
+            .iter()
+            .all(|p| !p.is_empty() && !p.chars().any(char::is_control))
 }
 
 impl NotionValues {
+    /// notion-tokens.json の中身。Linux の nix/lib/notion-tokens.nix の stateText (`builtins.toJSON { tokens = …; } + "\n"`) と同じバイト列
+    /// (名前の順・キーの順・空白なしの 1 行と改行)。宣言が無くても `{"tokens":{}}`:
+    ///
+    /// `{"tokens":{"personal":{"item":null,"kind":"integration","var":"PJP_NOTION_TOKEN_PERSONAL"}}}`
+    pub fn tokens_json(&self) -> String {
+        let tokens: serde_json::Map<String, serde_json::Value> = self
+            .tokens
+            .iter()
+            .map(|(name, t)| {
+                let mut e = serde_json::Map::new();
+                e.insert(
+                    "item".to_string(),
+                    t.item
+                        .clone()
+                        .map_or(serde_json::Value::Null, serde_json::Value::String),
+                );
+                e.insert(
+                    "kind".to_string(),
+                    serde_json::Value::String(t.kind.as_str().to_string()),
+                );
+                e.insert(
+                    "var".to_string(),
+                    serde_json::Value::String(token_var(name)),
+                );
+                (name.clone(), serde_json::Value::Object(e))
+            })
+            .collect();
+        let mut top = serde_json::Map::new();
+        top.insert("tokens".to_string(), serde_json::Value::Object(tokens));
+        format!("{}\n", serde_json::Value::Object(top))
+    }
+
     /// claude-notion.json の中身。Linux の home/modules/claude.nix の `builtins.toJSON { inherit profile routes override; } + "\n"` と同じ
     /// バイト列 (キーの順・空白なしの 1 行と改行)。
     pub fn json(&self) -> String {
@@ -148,11 +248,11 @@ fn parse_claude(v: &toml::Value) -> Result<NotionValues, String> {
     let unknown: Vec<&str> = notion
         .keys()
         .map(String::as_str)
-        .filter(|k| !["profile", "routes", "override"].contains(k))
+        .filter(|k| !["profile", "routes", "override", "tokens"].contains(k))
         .collect();
     if !unknown.is_empty() {
         return Err(format!(
-            "[claude.notion] に知らないキーがあります: {} (書けるのは profile・routes・override)",
+            "[claude.notion] に知らないキーがあります: {} (書けるのは profile・routes・override・tokens)",
             unknown.join(", ")
         ));
     }
@@ -202,11 +302,99 @@ fn parse_claude(v: &toml::Value) -> Result<NotionValues, String> {
             );
         }
     };
+    let tokens = match notion.get("tokens") {
+        None => BTreeMap::new(),
+        Some(toml::Value::Table(t)) => parse_tokens(t)?,
+        Some(_) => {
+            return Err(
+                "[claude.notion] の tokens は表で書いてください ([claude.notion.tokens.<プロファイル>])"
+                    .to_string(),
+            );
+        }
+    };
     Ok(NotionValues {
         profile,
         routes,
         overrides,
+        tokens,
     })
+}
+
+/// `[claude.notion.tokens]` を読む (Linux の nix/lib/notion-tokens.nix の assertions と同じ見方)。止める文に `kind` と `item` の字を出さない
+/// (token の値を書いてしまったときに、端末やログへ値が出ないように。名前とキーの名前だけを出す)。
+fn parse_tokens(t: &toml::Table) -> Result<BTreeMap<String, NotionToken>, String> {
+    // 名前の形 (profiles.toml の名前と同じ)。変数名と ~/.config/pjp/env の行が壊れる
+    let bad: Vec<String> = t
+        .keys()
+        .filter(|n| !profile_name_ok(n))
+        .map(|n| serde_json::Value::String(n.clone()).to_string())
+        .collect();
+    if !bad.is_empty() {
+        return Err(format!(
+            "[claude.notion.tokens] のキー (プロファイルの名前) が profiles.toml の名前の形ではありません: {}。英小文字か数字で始め、英小文字・数字・- と _ だけにしてください (変数名 PJP_NOTION_TOKEN_<名前> を作るため)",
+            bad.join(" ")
+        ));
+    }
+    // 同じ変数になる名前の組 (my-ws と my_ws)。~/.config/pjp/env の 1 行を 2 つのプロファイルで取り合う
+    let mut by_var: BTreeMap<String, Vec<&str>> = BTreeMap::new();
+    for n in t.keys() {
+        by_var.entry(token_var(n)).or_default().push(n);
+    }
+    let same: Vec<String> = by_var
+        .iter()
+        .filter(|(_, ns)| ns.len() > 1)
+        .map(|(var, ns)| format!("{} → {var}", ns.join("・")))
+        .collect();
+    if !same.is_empty() {
+        return Err(format!(
+            "[claude.notion.tokens] の次の名前は、同じ変数になります (- は _ に読み替える): {}。どれか 1 つにしてください",
+            same.join("; ")
+        ));
+    }
+    let mut out = BTreeMap::new();
+    for (name, v) in t {
+        let toml::Value::Table(e) = v else {
+            return Err(format!(
+                "[claude.notion.tokens] の {name} は表で書いてください ([claude.notion.tokens.{name}] に kind と item)"
+            ));
+        };
+        let unknown: Vec<&str> = e
+            .keys()
+            .map(String::as_str)
+            .filter(|k| !["kind", "item"].contains(k))
+            .collect();
+        if !unknown.is_empty() {
+            return Err(format!(
+                "[claude.notion.tokens.{name}] に知らないキーがあります: {} (書けるのは kind・item)",
+                unknown.join(", ")
+            ));
+        }
+        let kind = match e.get("kind") {
+            None => {
+                return Err(format!(
+                    "[claude.notion.tokens.{name}] の kind を書いてください (\"integration\" か \"personal\")"
+                ));
+            }
+            Some(toml::Value::String(s)) if s == "integration" => TokenKind::Integration,
+            Some(toml::Value::String(s)) if s == "personal" => TokenKind::Personal,
+            Some(_) => {
+                return Err(format!(
+                    "[claude.notion.tokens.{name}] の kind は \"integration\" か \"personal\" で書いてください (書いた字は出しません)"
+                ));
+            }
+        };
+        let item = match e.get("item") {
+            None => None,
+            Some(toml::Value::String(s)) if item_ref_ok(s) => Some(s.clone()),
+            Some(_) => {
+                return Err(format!(
+                    "[claude.notion.tokens.{name}] の item が、欄まで書いた 1Password の参照 (op://<vault の ID>/<項目の ID>/<欄の ID>。セクションがあれば op://<vault>/<項目>/<セクション>/<欄>) の形ではありません (書いた字は出しません)。pjp-op-ref が出す ID の形の参照を書くか、分かるまで item を書かないでください。token の値そのものを書いたのなら、その行を消して、token を作り直してください (commit した値は履歴に残ります)"
+                ));
+            }
+        };
+        out.insert(name.clone(), NotionToken { kind, item });
+    }
+    Ok(out)
 }
 
 /// `groups.json` の中身 (グループごとの道具の switch の既定)。
@@ -882,6 +1070,11 @@ mod tests {
     //!   (IPv4 の組と CIDR の長さは頭に 0 を付けない・長さは 32 と 128 まで・CIDR のアドレスは範囲の頭。Install-Sshd.ps1 の
     //!   Test-SshdFromAddress と同じ例で確かめる)。! * , と空白・末尾や頭の改行・ゾーン・名前は誤り (誤りの文の値は改行を \n の字にする)。
     //!   配列でない値・文字列でない値は誤り
+    //! - Notion の API キーの宣言 ([claude.notion.tokens.<名前>] の kind・item) から、notion-tokens.json の中身 (Linux の nix/lib/notion-tokens.nix の
+    //!   stateText と同じ 1 行の JSON。名前の順・キーの順、item は書かなければ null、var は名前を大文字にし - を _ にして頭に PJP_NOTION_TOKEN_)
+    //!   を作る。宣言が無くても {"tokens":{}}。表を入れ子に書いても inline table で書いても同じ。claude-notion.json には入れない
+    //! - 宣言の誤り (tokens・名前ごとの値が表でない・名前の形・知らないキー・kind が無い・2 つの外・item が欄まで書いた op:// の参照でない・同じ
+    //!   変数になる 2 つの名前) は止める。止める文に item と kind の字を出さない (値を書いてしまったときに端末やログへ出ないように)
 
     use super::*;
     use crate::testutil::TempDir;
@@ -1238,6 +1431,151 @@ mod tests {
             assert!(e.starts_with("h.toml: "), "{e}");
             assert!(e.contains(want), "{text}: {e}");
         }
+    }
+
+    /// [claude.notion.tokens.<名前>] から ~/.local/state/dotfiles/notion-tokens.json の中身 (Linux の nix/lib/notion-tokens.nix の stateText と
+    /// 同じ 1 行の JSON) を作る
+    #[test]
+    fn notion_tokens_json() {
+        let empty = "{\"tokens\":{}}\n";
+        assert_eq!(host("").unwrap().notion.tokens_json(), empty);
+        assert_eq!(
+            HostValues::missing(Path::new("h.toml"), groups())
+                .notion
+                .tokens_json(),
+            empty
+        );
+        assert_eq!(
+            host("[claude.notion]\nprofile = \"personal\"\n")
+                .unwrap()
+                .notion
+                .tokens_json(),
+            empty
+        );
+        let h = host(
+            "[claude.notion]\nprofile = \"personal\"\n\n[claude.notion.tokens.personal]\nkind = \"personal\"\nitem = \"op://vvvv/iiii/ffff\"\n\n[claude.notion.tokens.my-ws]\nkind = \"integration\"\n\n[claude.notion.tokens.sec_1]\nkind = \"integration\"\nitem = \"op://Private Vault/My Item/s1/credential\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            h.notion.tokens_json(),
+            "{\"tokens\":{\"my-ws\":{\"item\":null,\"kind\":\"integration\",\"var\":\"PJP_NOTION_TOKEN_MY_WS\"},\"personal\":{\"item\":\"op://vvvv/iiii/ffff\",\"kind\":\"personal\",\"var\":\"PJP_NOTION_TOKEN_PERSONAL\"},\"sec_1\":{\"item\":\"op://Private Vault/My Item/s1/credential\",\"kind\":\"integration\",\"var\":\"PJP_NOTION_TOKEN_SEC_1\"}}}\n"
+        );
+        // 手順が読む形: 名前ごとの種類・item・変数名
+        let personal = &h.notion.tokens["personal"];
+        assert_eq!(personal.kind, TokenKind::Personal);
+        assert_eq!(personal.item.as_deref(), Some("op://vvvv/iiii/ffff"));
+        assert_eq!(h.notion.tokens["my-ws"].item, None);
+        assert_eq!(token_var("my-ws"), "PJP_NOTION_TOKEN_MY_WS");
+        // claude-notion.json には入れない (古い resolver が知らないキーで止まらないよう、Linux と同じく別のファイル)
+        assert_eq!(
+            h.notion.json(),
+            "{\"override\":{},\"profile\":\"personal\",\"routes\":{}}\n"
+        );
+        // inline table で書いても同じ
+        let inline = host(
+            "[claude.notion]\ntokens = { personal = { kind = \"personal\", item = \"op://vvvv/iiii/ffff\" } }\n",
+        )
+        .unwrap();
+        assert_eq!(
+            inline.notion.tokens_json(),
+            "{\"tokens\":{\"personal\":{\"item\":\"op://vvvv/iiii/ffff\",\"kind\":\"personal\",\"var\":\"PJP_NOTION_TOKEN_PERSONAL\"}}}\n"
+        );
+    }
+
+    /// 名前・item の受ける形 (Linux の nix/lib/notion-tokens.nix と同じ: 名前は profiles.toml の名前の形、item は欄まで書いた op:// の参照で、
+    /// 区切りの間に空白と ASCII でない字を許す)
+    #[test]
+    fn accepts_notion_token_forms() {
+        for item in [
+            "op://a/b/c",
+            "op://a/b/s/c",
+            "op://Private Vault/My Item/credential",
+            "op://金庫/項目/欄",
+        ] {
+            let h = host(&format!(
+                "[claude.notion.tokens.0a-b_c]\nkind = \"integration\"\nitem = \"{item}\"\n"
+            ))
+            .unwrap();
+            let t = &h.notion.tokens["0a-b_c"];
+            assert_eq!(t.kind, TokenKind::Integration, "{item}");
+            assert_eq!(t.item.as_deref(), Some(item));
+        }
+    }
+
+    /// 書けない宣言は止める。止める文に item と kind の字を出さない (token の値を書いてしまったときに、端末やログへ出ないように)
+    #[test]
+    fn rejects_notion_token_mistakes() {
+        const SECRET: &str = "ntn_secret_value_do_not_print";
+        let with_item = |item: &str| {
+            format!("[claude.notion.tokens.personal]\nkind = \"personal\"\nitem = {item}\n")
+        };
+        let item_shape = "[claude.notion.tokens.personal] の item が、欄まで書いた 1Password の参照 (op://<vault の ID>/<項目の ID>/<欄の ID>";
+        let kind_shape = "[claude.notion.tokens.personal] の kind は \"integration\" か \"personal\" で書いてください";
+        let cases: Vec<(String, &str)> = vec![
+            (
+                "[claude.notion]\ntokens = 1".to_string(),
+                "[claude.notion] の tokens は表で書いてください ([claude.notion.tokens.<プロファイル>])",
+            ),
+            (
+                format!("[claude.notion.tokens]\npersonal = \"{SECRET}\""),
+                "[claude.notion.tokens] の personal は表で書いてください ([claude.notion.tokens.personal] に kind と item)",
+            ),
+            (
+                "[claude.notion.tokens.Personal]\nkind = \"personal\"".to_string(),
+                "[claude.notion.tokens] のキー (プロファイルの名前) が profiles.toml の名前の形ではありません: \"Personal\"",
+            ),
+            (
+                "[claude.notion.tokens.-x]\nkind = \"personal\"".to_string(),
+                "の名前の形ではありません: \"-x\"",
+            ),
+            (
+                "[claude.notion.tokens.\"a b\"]\nkind = \"personal\"".to_string(),
+                "の名前の形ではありません: \"a b\"",
+            ),
+            (
+                "[claude.notion.tokens.personal]\nkind = \"personal\"\nkin = 1".to_string(),
+                "[claude.notion.tokens.personal] に知らないキーがあります: kin (書けるのは kind・item)",
+            ),
+            (
+                "[claude.notion.tokens.personal]\nitem = \"op://a/b/c\"".to_string(),
+                "[claude.notion.tokens.personal] の kind を書いてください (\"integration\" か \"personal\")",
+            ),
+            (
+                format!("[claude.notion.tokens.personal]\nkind = \"{SECRET}\""),
+                kind_shape,
+            ),
+            (
+                "[claude.notion.tokens.personal]\nkind = 1".to_string(),
+                kind_shape,
+            ),
+            // 値そのもの・欄の無い参照・区切りが 5 つ以上・前に空白・改行やタブ・空の区切り・末尾の /・空・大文字の頭・文字列でない
+            (with_item(&format!("\"{SECRET}\"")), item_shape),
+            (with_item(&format!("\"op://v/{SECRET}\"")), item_shape),
+            (with_item(&format!("\"op://v/i/s/f/{SECRET}\"")), item_shape),
+            (with_item(&format!("\" op://v/i/{SECRET}\"")), item_shape),
+            (with_item(&format!("\"op://v/i/{SECRET}\\n\"")), item_shape),
+            (with_item(&format!("\"op://v/i/{SECRET}\\tx\"")), item_shape),
+            (with_item(&format!("\"op://v//{SECRET}\"")), item_shape),
+            (with_item(&format!("\"op://v/i/{SECRET}/\"")), item_shape),
+            (with_item("\"\""), item_shape),
+            (with_item(&format!("\"OP://v/i/{SECRET}\"")), item_shape),
+            (with_item("1"), item_shape),
+            (
+                "[claude.notion.tokens.my-ws]\nkind = \"personal\"\n[claude.notion.tokens.my_ws]\nkind = \"integration\"\n"
+                    .to_string(),
+                "[claude.notion.tokens] の次の名前は、同じ変数になります (- は _ に読み替える): my-ws・my_ws → PJP_NOTION_TOKEN_MY_WS",
+            ),
+        ];
+        for (text, want) in cases {
+            let e = host(&text).unwrap_err();
+            assert!(e.starts_with("h.toml: "), "{e}");
+            assert!(e.contains(want), "{text}: {e}");
+            assert!(!e.contains(SECRET), "{text}: {e}");
+        }
+        // item の文は、値を書いてしまったときの直し方を添える
+        let e = host(&with_item(&format!("\"{SECRET}\""))).unwrap_err();
+        assert!(e.contains("書いた字は出しません"), "{e}");
+        assert!(e.contains("token を作り直してください"), "{e}");
     }
 
     #[test]

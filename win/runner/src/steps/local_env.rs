@@ -473,7 +473,8 @@ fn rescue_notes(ctx: &mut Ctx, mode: Mode, o: Outcome, shown: &str, rescued: &Re
 }
 
 /// 置き場所。`XDG_CONFIG_HOME` が空でなければその下 (pjp と同じ)、無ければ `%USERPROFILE%\.config`。相対パスなら Err (その値)。
-fn env_path(ctx: &Ctx) -> Result<PathBuf, String> {
+/// 手順 notion-tokens も同じ置き場所を見る。
+pub(super) fn env_path(ctx: &Ctx) -> Result<PathBuf, String> {
     match ctx.sys.env("XDG_CONFIG_HOME").filter(|v| !v.is_empty()) {
         Some(v) if Path::new(&v).is_absolute() => Ok(PathBuf::from(v).join("pjp").join("env")),
         Some(v) => Err(v),
@@ -482,7 +483,7 @@ fn env_path(ctx: &Ctx) -> Result<PathBuf, String> {
 }
 
 /// 手順を止めない警告を、Linux の script の warn と同じ形で出す (1 行目の頭に `!!`、続きの行は 3 字下げ)。
-fn warn(ctx: &mut Ctx, lines: &[String]) {
+pub(super) fn warn(ctx: &mut Ctx, lines: &[String]) {
     for (i, l) in lines.iter().enumerate() {
         if i == 0 {
             ctx.say(format!("!! {l}"));
