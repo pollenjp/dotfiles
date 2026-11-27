@@ -124,6 +124,8 @@ let
     opReasonSshRelay = "SSH の中継";
     ntn = "ntn";
     windowsNtn = "Win の ntn";
+    codex = "Codex CLI";
+    windowsCodex = "Win の Codex CLI";
     windowsTailscale = "Win の Tailscale";
     windowsSshd = "Win の sshd";
     gitIdentity = "git の名前とメール";
@@ -144,6 +146,7 @@ let
     "onePassword"
     "opReasonSshRelay"
     "windowsNtn"
+    "windowsCodex"
     "windowsTailscale"
     "windowsSshd"
     "windowsTypeClipboard"
@@ -313,6 +316,10 @@ let
     })
     (tool "ntn" "ntn (Notion の CLI)" [ "ntn" "enable" ] { })
     (windowsFilesTool "windowsNtn" "Windows の ntn" "ntn" { })
+    # OpenAI のコーディング エージェントの CLI。Linux は nixpkgs の codex、Windows は winget の OpenAI.Codex (Windows の runner の手順 codex
+    # だけが読む switch。WSL の setup に同じ手順は無い)
+    (tool "codex" "Codex CLI (OpenAI)" [ "codex" "enable" ] { })
+    (windowsFilesTool "windowsCodex" "Windows の Codex CLI" "codex" { })
     # tailnet にログインして使う VPN の道具
     (windowsFilesTool "windowsTailscale" "Windows の Tailscale" "tailscale" { })
     # tailnet から鍵でだけ入れる sshd。PC に外から入る口を開ける

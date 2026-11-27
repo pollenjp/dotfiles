@@ -22,7 +22,7 @@
 #   - ホストが素の値で書いた環境の誤り (WSL でないのに wsl.exeExecTrace.enable = true) は、今までどおり評価で止まる
 #   - やめたグループの名前 (personal・company・client)・知らないグループ ("customer")・やめた段の switch (aiTools.enable・
 #     personalAccounts.enable) は評価で止まる
-#   - runnerTools は全部が表の道具か runner だけの道具 (runnerOnlyTools) で、表の runner の印と runner だけの道具の数の和 (16)
+#   - runnerTools は全部が表の道具か runner だけの道具 (runnerOnlyTools) で、表の runner の印と runner だけの道具の数の和 (17)
 #   - runner の groups.json (lib.windowsGroups) は、表の道具と runner だけの道具 (privateRepos) を持つ。privateRepos は minimum で false、
 #     all で true。group.json の tools には入らない (上の「表の key を全部持つ tools だけ」。Linux の世代を変えない)
 {
@@ -299,7 +299,7 @@ let
         });
     }
     {
-      name = "runnerTools は全部が表の道具か runner だけの道具で、表の runner の印と runner だけの道具の数の和 (16)";
+      name = "runnerTools は全部が表の道具か runner だけの道具で、表の runner の印と runner だけの道具の数の和 (17)";
       ok =
         builtins.all (
           k: builtins.any (t: t.key == k) (groups.tools ++ groups.runnerOnlyTools)
@@ -307,7 +307,7 @@ let
         &&
           builtins.length (builtins.filter (t: t.runner) groups.tools)
           + builtins.length groups.runnerOnlyTools == builtins.length groups.runnerTools
-        && builtins.length groups.runnerTools == 16
+        && builtins.length groups.runnerTools == 17
         && builtins.all (r: builtins.elem r.key groups.runnerTools) groups.runnerOnlyTools
         && builtins.all (r: !(builtins.any (t: t.key == r.key) groups.tools)) groups.runnerOnlyTools;
     }

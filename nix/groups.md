@@ -10,8 +10,8 @@
 
 | グループ | 使う PC と何を入れるか | 入る道具の switch |
 | --- | --- | --- |
-| `minimum` | どの PC にも初めからあってほしいもの (基本の道具と、証明書の束・掃除)。ほとんどのホストはこれにして、使う道具をホストのファイルで足す (グループを書かないホストもこれ) | 2 / 28 |
-| `all` | 道具を全部入れる (minimum の全部と、ほかの道具の switch の全部)。環境が合わない道具 (WSL だけ・win/ を配るマシンだけ・Linux だけなど) は、そのマシンでは入らない。道具の前提 (1Password の署名の鍵・Windows の側の SSH の中継・Notion の宛先など) もそろう PC で選ぶ (README の「設定グループ」) | 28 / 28 |
+| `minimum` | どの PC にも初めからあってほしいもの (基本の道具と、証明書の束・掃除)。ほとんどのホストはこれにして、使う道具をホストのファイルで足す (グループを書かないホストもこれ) | 2 / 30 |
+| `all` | 道具を全部入れる (minimum の全部と、ほかの道具の switch の全部)。環境が合わない道具 (WSL だけ・win/ を配るマシンだけ・Linux だけなど) は、そのマシンでは入らない。道具の前提 (1Password の署名の鍵・Windows の側の SSH の中継・Notion の宛先など) もそろう PC で選ぶ (README の「設定グループ」) | 30 / 30 |
 
 `minimum` ⊂ `all`。グループを書かないホストは `minimum`。
 
@@ -60,6 +60,8 @@ on の道具は、そのグループのホストで既定で on になる。た�
 | op-reason の SSH の中継 | `opReason.sshRelay.enable` | off | on | `wsl.enable`・`wsl.windowsFiles.enable` が false・`onePassword.enable` |
 | ntn (Notion の CLI) | `ntn.enable` | off | on |  |
 | Windows の ntn | `wsl.windowsFiles.ntn.enable` | off | on | `wsl.windowsFiles.enable` |
+| Codex CLI (OpenAI) | `codex.enable` | off | on |  |
+| Windows の Codex CLI | `wsl.windowsFiles.codex.enable` | off | on | `wsl.windowsFiles.enable` |
 | Windows の Tailscale | `wsl.windowsFiles.tailscale.enable` | off | on | `wsl.windowsFiles.enable` |
 | Windows の sshd (Tailscale から鍵で入る) | `wsl.windowsFiles.sshd.enable` | off | on | `wsl.windowsFiles.enable` |
 | Windows の type-clipboard | `wsl.windowsFiles.typeClipboard.enable` | off | on | `wsl.windowsFiles.enable` |
@@ -102,6 +104,8 @@ on の道具は、そのグループのホストで既定で on になる。た�
 | op-reason の SSH の中継 | off | off | – | – |
 | ntn (Notion の CLI) | off | off | on | on |
 | Windows の ntn | off | off | on | – |
+| Codex CLI (OpenAI) | off | off | on | on |
+| Windows の Codex CLI | off | off | on | – |
 | Windows の Tailscale | off | off | on | – |
 | Windows の sshd (Tailscale から鍵で入る) | off | off | on | – |
 | Windows の type-clipboard | off | off | on | – |

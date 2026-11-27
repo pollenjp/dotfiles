@@ -14,7 +14,8 @@
 
 {
   # ntn だけは dotfiles.ntn.enable のホストに入れる (既定はグループ all だけ on)。並びは今までと同じ所に置く
-  # (home.packages の順は home-path の derivation に入るので、ntn を入れるホストの世代を変えないため)
+  # (home.packages の順は home-path の derivation に入るので、ntn を入れるホストの世代を変えないため)。codex も同じく
+  # dotfiles.codex.enable のホストにだけ入れる (末尾)
   home.packages =
     with pkgs;
     [
@@ -92,5 +93,9 @@
       tmux
       vim
       neovim
-    ];
+    ]
+    # Codex CLI (OpenAI のコーディング エージェントの CLI) は dotfiles.codex.enable のホストに入れる (既定はグループ all だけ on)。nixpkgs の
+    # codex をそのまま使う (版は nixpkgs の pin に従う)。末尾に足すのは、入れないホストの home.packages の並び (home-path の derivation) を
+    # 変えないため。Windows の Codex CLI は Windows の runner の手順 codex (win/codex/Install-Codex.ps1)
+    ++ lib.optional config.dotfiles.codex.enable codex;
 }
