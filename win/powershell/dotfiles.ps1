@@ -36,10 +36,10 @@ function hr { herdr --remote @args }
 # 書いてある。
 function c { claude --dangerously-skip-permissions --effort max --model claude-opus-5-5 --remote-control= @args }
 
-# claude のアカウント (素の claude と claude-<名前>)・権限・effort・モデル・Remote Control を矢印キーで段ごとに選び、組み立てた
-# コマンド行を見せてから起こす (claude-selector.exe。runner の手順 claude-selector が nix/pkgs/claude-selector から作って
-# %LOCALAPPDATA%\dotfiles\bin に置く)。Enter だけで進むと c から --remote-control= を外した中身になり、cs の後ろの引数は組み立てた
-# 引数の後ろにそのまま付く。WSL の fish の abbr と bash の alias の cs、下の略語の表 ($DotfilesAbbr) の cs と同じ中身にそろえる。
+# 組み立てる claude のコマンド行をいつも見せ、その項目 (アカウント (素の claude と claude-<名前>)・effort・モデル・権限・Remote Control) を
+# 矢印キーで選んで起こす (claude-selector.exe。runner の手順 claude-selector が nix/pkgs/claude-selector から作って
+# %LOCALAPPDATA%\dotfiles\bin に置く)。打ってすぐ Enter で c から --remote-control= を外した中身 (並びは effort → モデル → 権限で、c とは
+# 並びだけが違う) で起こし、cs の後ろの引数は組み立てた引数の後ろにそのまま付く。WSL の fish の abbr と bash の alias の cs、下の略語の表 ($DotfilesAbbr) の cs と同じ中身にそろえる。
 function cs { claude-selector @args }
 
 # 略語の展開 (WSL の fish の abbr に似せる)。上の e・h・hss … c・cs を、打った所 (入力行の中) で中身に広げてから実行する。

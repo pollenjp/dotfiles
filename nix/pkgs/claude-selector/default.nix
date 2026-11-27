@@ -1,14 +1,18 @@
-# claude-selector (略語 cs): claude のアカウントと option を矢印キーで段ごとに選び、組み立てたコマンドで Claude Code を起こす。
-# 使い方は nix/README.md・win/README.md の「claude-selector (cs)」。設計は dotfiles-private の docs/adr/087_claude_selector_*。
+# claude-selector (略語 cs): 組み立てるコマンド行をいつも見せ、その項目 (claude のアカウントと option) を矢印キーで選んで Claude Code を
+# 起こす。使い方は nix/README.md・win/README.md の「claude-selector (cs)」。設計は dotfiles-private の docs/adr/087_claude_selector_* (画面と
+# 引数の並びは docs/adr/116_claude_selector_command_line_*)。
 #
-#   1. アカウント      素の claude (既定) と claude-<名前> (既定のアカウントと claude-account add の登録。launcher が PATH に無いものは選べない)
-#   2. 権限            --dangerously-skip-permissions (既定)・--permission-mode auto・付けない・acceptEdits・plan
-#   3. effort          low・medium・high・xhigh・max (既定)
-#   4. モデル          claude-opus-5-5 (既定) ほかと、手で打つ
-#   5. Remote Control  付けない (既定)・名前なし (--remote-control=)・名前を付ける (--remote-control=<名前>)
+# 項目はコマンド行の区切りで、左から (起こす引数もこの並び):
 #
-# どの段も既定に印を付け、Enter だけで既定のまま進む。最後に組み立てたコマンド行を見せ、Enter で起こす (Esc・Ctrl+C でやめる)。cs の後ろの
-# 引数は、組み立てた引数の後ろにそのまま付ける。unix は exec で置き換わる。
+#   アカウント      素の claude (既定) と claude-<名前> (既定のアカウントと claude-account add の登録。launcher が PATH に無いものは選べない)
+#   effort          low・medium・high・xhigh・max (既定)
+#   モデル          claude-opus-5-5 (既定) ほかと、手で打つ
+#   権限            --dangerously-skip-permissions (既定)・--permission-mode auto・付けない・acceptEdits・plan
+#   Remote Control  付けない (既定)・名前なし (--remote-control=)・名前を付ける (--remote-control=<名前>)
+#
+# ←→ (h l) で項目を移り、↑↓ (j k) で値を選ぶと、すぐコマンド行に出る。Enter でどの項目からでも今のコマンド行のまま起こす (Esc・Ctrl+C で
+# やめる)。どの項目も既定に印を付け、打ってすぐ Enter で既定のまま起こす。cs の後ろの引数は、組み立てた引数の後ろにそのまま付ける。
+# unix は exec で置き換わる。
 #
 # Linux と Windows の両方に、この 1 つの crate を置く: Linux はこの package (home には modules/claude.nix が dotfiles.claude.enable の
 # ホストに入れる)、Windows は runner の手順 claude-selector (win/runner/src/steps/claude_selector.rs) が同じ Cargo.lock で cargo build して

@@ -1136,10 +1136,11 @@ dotfiles apply --steps claude-accounts
 
 ### claude-selector (cs)
 
-`cs` (PowerShell の function と略語。中身は `claude-selector`) は、claude のアカウントと option を矢印キーで段ごとに選び、組み立てた
-コマンド行を見せてから Claude Code を起こす。Linux の `cs` と同じ crate (`nix/pkgs/claude-selector`) の同じ画面で、選べるもの・既定・キーは
+`cs` (PowerShell の function と略語。中身は `claude-selector`) は、組み立てる claude のコマンド行をいつも見せ、その項目 (アカウントと option) を
+矢印キーで選んで Claude Code を起こす。Linux の `cs` と同じ crate (`nix/pkgs/claude-selector`) の同じ画面で、選べるもの・既定・キーは
 nix/README.md の「[アカウントと option を矢印キーで選んで起こす (claude-selector)](../nix/README.md#アカウントと-option-を矢印キーで選んで起こす-claude-selector)」
-と同じ。設計は dotfiles-private の ADR 087 (`docs/adr/087_claude_selector_*`)。
+と同じ。設計は dotfiles-private の ADR 087 (`docs/adr/087_claude_selector_*`) と、画面と引数の並びを作り替えた ADR 116
+(`docs/adr/116_claude_selector_command_line_ui_*`)。
 
 ```powershell
 dotfiles check --steps claude-selector     # 置いた exe が今の元のものか (cargo を打たない。何も書かない)

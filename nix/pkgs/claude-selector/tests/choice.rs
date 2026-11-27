@@ -2,17 +2,19 @@
 //!
 //! ## 確かめること
 //!
-//! 選んだものから claude に渡す引数を組み立てる (choice::Selection::args)。
+//! 選んだものから claude に渡す引数を組み立てる (choice::Selection::args・part_args)。
 //!
-//! - 既定 (Enter だけ) は c から `--remote-control=` を外したもの (`--dangerously-skip-permissions --effort max --model claude-opus-5-5`)
+//! - 既定 (Enter 1 回) は c から `--remote-control=` を外した中身を、選ぶ画面のコマンド行の並びにしたもの
+//!   (`--effort max --model claude-opus-5-5 --dangerously-skip-permissions`)
 //! - 権限の 5 つ (付けないときは何も足さない)・effort・モデル・Remote Control の 3 つ (名前なしは `--remote-control=`、名前は `=` でつなぐ)
-//! - 並びは 権限 → --effort → --model → --remote-control → cs の後ろの引数 (そのまま最後に。`-c`・質問の文・非 UTF-8 も)
+//! - 並びは --effort → --model → 権限 → --remote-control → cs の後ろの引数 (そのまま最後に。`-c`・質問の文・非 UTF-8 も)。
+//!   組ごとの引数 (part_args) を Part::ALL の並びにつないだものが引数になる (選ぶ画面は組ごとにコマンド行へ出す)
 //! - 起こすもののコマンドの名前 (claude・claude-<名前>)
 //! - 手で打つモデルの名前の確かめ (空・- で始まる・空白はだめ)、Remote Control の名前 (前後の空白を外し、空なら名前なし)
 
 use claude_selector::choice::{
-    self, DEFAULT_EFFORT, DEFAULT_MODEL, EFFORTS, MODELS, Permission, RemoteControl, Selection,
-    Target,
+    self, DEFAULT_EFFORT, DEFAULT_MODEL, EFFORTS, MODELS, Part, Permission, RemoteControl,
+    Selection, Target,
 };
 use std::ffi::OsString;
 
@@ -33,11 +35,11 @@ fn defaults_are_c_without_remote_control() {
     assert_eq!(
         strs(&s.args(&[])),
         [
-            "--dangerously-skip-permissions",
             "--effort",
             "max",
             "--model",
-            "claude-opus-5-5"
+            "claude-opus-5-5",
+            "--dangerously-skip-permissions"
         ]
     );
     assert_eq!(DEFAULT_EFFORT, "max");
@@ -57,15 +59,22 @@ fn permissions() {
             .args(&[]),
         )
     };
-    assert_eq!(args(Permission::Skip)[0], "--dangerously-skip-permissions");
-    assert_eq!(args(Permission::Auto)[..2], ["--permission-mode", "auto"]);
+    // 権限は --model の後ろ
     assert_eq!(
-        args(Permission::AcceptEdits)[..2],
+        args(Permission::Skip)[4..],
+        ["--dangerously-skip-permissions"]
+    );
+    assert_eq!(args(Permission::Auto)[4..], ["--permission-mode", "auto"]);
+    assert_eq!(
+        args(Permission::AcceptEdits)[4..],
         ["--permission-mode", "acceptEdits"]
     );
-    assert_eq!(args(Permission::Plan)[..2], ["--permission-mode", "plan"]);
-    // 付けない: --effort から始まる
-    assert_eq!(args(Permission::Ask)[0], "--effort");
+    assert_eq!(args(Permission::Plan)[4..], ["--permission-mode", "plan"]);
+    // 付けない: --model の値で終わる
+    assert_eq!(
+        args(Permission::Ask),
+        ["--effort", "max", "--model", "claude-opus-5-5"]
+    );
     assert_eq!(Permission::Ask.label(), "付けない");
     assert_eq!(Permission::Auto.label(), "--permission-mode auto");
     assert_eq!(Permission::ALL.len(), 5);
@@ -86,17 +95,66 @@ fn order_and_extra_args() {
     assert_eq!(
         strs(&s.args(&os(&["-c", "質問 です"]))),
         [
-            "--permission-mode",
-            "plan",
             "--effort",
             "high",
             "--model",
             "opus",
+            "--permission-mode",
+            "plan",
             "--remote-control=作業 1",
             "-c",
             "質問 です"
         ]
     );
+}
+
+#[test]
+fn parts_make_up_the_args() {
+    let s = Selection {
+        target: Target::Plain,
+        permission: Permission::AcceptEdits,
+        effort: "low",
+        model: "claude-haiku-5-5".into(),
+        remote_control: RemoteControl::Unnamed,
+    };
+    assert_eq!(
+        Part::ALL,
+        [
+            Part::Effort,
+            Part::Model,
+            Part::Permission,
+            Part::RemoteControl
+        ]
+    );
+    assert_eq!(s.part_args(Part::Effort), ["--effort", "low"]);
+    assert_eq!(s.part_args(Part::Model), ["--model", "claude-haiku-5-5"]);
+    assert_eq!(
+        s.part_args(Part::Permission),
+        ["--permission-mode", "acceptEdits"]
+    );
+    assert_eq!(s.part_args(Part::RemoteControl), ["--remote-control="]);
+    // 付けないものは空 (選ぶ画面は灰色の括弧で出し、claude には渡さない)
+    let off = Selection {
+        permission: Permission::Ask,
+        ..Selection::default()
+    };
+    assert!(off.part_args(Part::Permission).is_empty());
+    assert!(off.part_args(Part::RemoteControl).is_empty());
+    // 引数は組を Part::ALL の並びにつないだもの (後ろに cs の後ろの引数)
+    let joined: Vec<String> = Part::ALL.iter().flat_map(|p| s.part_args(*p)).collect();
+    assert_eq!(
+        joined,
+        [
+            "--effort",
+            "low",
+            "--model",
+            "claude-haiku-5-5",
+            "--permission-mode",
+            "acceptEdits",
+            "--remote-control="
+        ]
+    );
+    assert_eq!(strs(&s.args(&[]))[..], joined[..]);
 }
 
 #[test]

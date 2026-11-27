@@ -1,8 +1,9 @@
-//! 段ごとの選択肢と既定、選んだものから claude に渡す引数を組み立てる。
+//! 項目ごとの選択肢と既定、選んだものから claude に渡す引数を組み立てる。
 //!
-//! 引数の並びは c (nix/home/modules/fish.nix の abbr・bash.nix の alias・win/powershell/dotfiles.ps1 の function) と同じく、
-//! 権限 → `--effort` → `--model` → `--remote-control` の順で、cs の後ろに打った引数 (`cs -c`・`cs "質問"`) をそのまま最後に足す。
-//! 既定 (Enter だけで進んだとき) は c から `--remote-control=` を外したもの。
+//! 引数の並びは選ぶ画面のコマンド行と同じ `--effort` → `--model` → 権限 → `--remote-control` の順 ([`Part::ALL`]) で、cs の後ろに
+//! 打った引数 (`cs -c`・`cs "質問"`) をそのまま最後に足す (見せる行と起こす行を同じにするため)。c (nix/home/modules/fish.nix の
+//! abbr・bash.nix の alias・win/powershell/dotfiles.ps1 の function) の権限 → `--effort` → `--model` → `--remote-control` とは並びだけが
+//! 違う (claude は option の並びを問わない)。既定 (打ってすぐ Enter) は c から `--remote-control=` を外した中身。
 
 use std::ffi::OsString;
 
@@ -129,6 +130,35 @@ impl RemoteControl {
     }
 }
 
+/// claude に渡す引数の組 (選ぶ画面のコマンド行の項目のうち、アカウントのほかの 4 つ)。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Part {
+    Effort,
+    Model,
+    Permission,
+    RemoteControl,
+}
+
+impl Part {
+    /// 並び (claude に渡す引数も、選ぶ画面のコマンド行も、アカウントの後ろはこの並び)
+    pub const ALL: [Part; 4] = [
+        Part::Effort,
+        Part::Model,
+        Part::Permission,
+        Part::RemoteControl,
+    ];
+
+    /// option の名前 (付けないときに、選ぶ画面のコマンド行へ灰色の括弧で出す)
+    pub fn flag(self) -> &'static str {
+        match self {
+            Part::Effort => "--effort",
+            Part::Model => "--model",
+            Part::Permission => "--permission-mode",
+            Part::RemoteControl => "--remote-control",
+        }
+    }
+}
+
 /// 選んだもの。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Selection {
@@ -140,7 +170,7 @@ pub struct Selection {
 }
 
 impl Default for Selection {
-    /// どの段も既定のまま (Enter だけで進んだとき)
+    /// どの項目も既定のまま (打ってすぐ Enter)
     fn default() -> Self {
         Selection {
             target: Target::Plain,
@@ -153,16 +183,28 @@ impl Default for Selection {
 }
 
 impl Selection {
+    /// 組 `part` の引数 (付けないなら空)
+    pub fn part_args(&self, part: Part) -> Vec<String> {
+        match part {
+            Part::Effort => vec!["--effort".to_string(), self.effort.to_string()],
+            Part::Model => vec!["--model".to_string(), self.model.clone()],
+            Part::Permission => self
+                .permission
+                .args()
+                .iter()
+                .map(|a| a.to_string())
+                .collect(),
+            Part::RemoteControl => self.remote_control.arg().into_iter().collect(),
+        }
+    }
+
     /// claude (か claude-<名前>) に渡す引数。`extra` (cs の後ろに打った引数) は最後にそのまま足す
     pub fn args(&self, extra: &[OsString]) -> Vec<OsString> {
-        let mut args: Vec<OsString> = self.permission.args().iter().map(OsString::from).collect();
-        args.push("--effort".into());
-        args.push(self.effort.into());
-        args.push("--model".into());
-        args.push(self.model.clone().into());
-        if let Some(rc) = self.remote_control.arg() {
-            args.push(rc.into());
-        }
+        let mut args: Vec<OsString> = Part::ALL
+            .iter()
+            .flat_map(|p| self.part_args(*p))
+            .map(OsString::from)
+            .collect();
         args.extend(extra.iter().cloned());
         args
     }
