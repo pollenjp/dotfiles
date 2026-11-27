@@ -165,6 +165,12 @@ pub trait Step {
     fn info(&self) -> StepInfo;
     /// 手順を流す。出力は `ctx.say`、結果は締めの表の行 (ふつうは 1 つ)。
     fn run(&self, ctx: &mut Ctx, mode: Mode) -> Vec<Outcome>;
+    /// apply で、後ろの手順 `after` (id) が流れた直後に、この手順をもう一度流すか (`runner::execute` が、apply で流した手順に聞く)。
+    /// 後ろの手順が、この手順の書いた中身の前提を変えたときに true を返す (git-config は、openssh が OpenSSH を入れて core.sshCommand に
+    /// 書く ssh.exe が変わったとき)。既定は流し直さない
+    fn rerun_after(&self, _ctx: &Ctx, _after: &str) -> bool {
+        false
+    }
 }
 
 /// 手順に渡す引数 (手順が 1 つだけで使うもの)。

@@ -650,7 +650,7 @@ item = "op://<vault の ID>/<項目の ID>/<欄の ID>"   # 元の値の 1Passwo
 | 50 | `claude-skills` | claude-skills の clone の `skills/`・`agents/`・`commands/`・`rules/` の中身を `%USERPROFILE%\.claude\` へ (ディレクトリは junction、ファイルはコピー)。clone の場所を `%USERPROFILE%\.local\state\dotfiles\claude-skills-dir` に書く | `claudePrivateSkills` | 有る (Windows だけ) |
 | 50 | `claude-statusline` | `settings.json` の `statusLine` を hook の口の status line へ向ける | `windowsClaudeCode` | 有る (Windows だけ) |
 | 50 | `claude-t3` | T3 Code の会話だけの Claude の設定 (`claude-code/t3/` の `settings.json`・`CLAUDE.t3.md`) を `%USERPROFILE%\.claude\t3\` へ記録つきのコピーで置き (改行は LF にし、JSON は object かを確かめてから置く。置き先で変えたファイルは衝突として知らせ、`--force` で上書き。置くファイルから外したものは、置いたままなら消す。`t3` がリンクなら触らない)、T3 の Launch arguments の文を出す (この手順は T3 の設定を書かない。`windowsT3Code` のホストでは `t3-code-settings` が書く。[後述](#claude-code-の設定))。記録は `%LOCALAPPDATA%\dotfiles\state\claude-t3.deployed.json` | `windowsClaudeCode` | 有る (Windows だけ) |
-| 50 | `git-config` | git の設定 (`%USERPROFILE%\.config\git\config`・`ignore`) を、WSL の home-manager と同じ `nix/home/modules/git.toml` から置く (署名と delta は除く。Windows だけ `core.sshCommand` に Windows の OpenSSH の `ssh.exe` を足す。[後述](#git-の設定)) | いつも (名前とメールは `gitIdentity`) | 有る (Windows だけ) |
+| 50 | `git-config` | git の設定 (`%USERPROFILE%\.config\git\config`・`ignore`) を、WSL の home-manager と同じ `nix/home/modules/git.toml` から置く (署名と delta は除く。Windows だけ `core.sshCommand` に Windows の OpenSSH の `ssh.exe` を足す。apply では `openssh` (96) の後に、その `ssh.exe` が変わっていればもう一度流す。[後述](#git-の設定)) | いつも (名前とメールは `gitIdentity`) | 有る (Windows だけ) |
 | 50 | `local-env` | マシンローカルの環境変数のファイル `%USERPROFILE%\.config\pjp\env` を、無ければ作り、頭の「dotfiles が書く欄」を、つないだ skill の `pjp-env.txt` から書き直す (Linux の `bootstrap-local-env` と同じ印と書き直し方。欄の外の行と値には触れない。dotfiles の節は入れない。[後述](#マシンローカルの環境変数-configpjpenv)) | `claudePrivateSkills` | 有る (Windows だけ) |
 | 55 | `notion-tokens` | ホストの値の `[claude.notion.tokens]` から `%USERPROFILE%\.local\state\dotfiles\notion-tokens.json` を書き、宣言したプロファイルごとに `~/.config/pjp/env` の変数の行と、env の ACL を値を出さずに確かめて知らせる (Linux の home-manager と `bootstrap-notion-tokens` を 1 つにしたもの。env と ACL は書き換えない。[後述](#notion-の-api-キーの宣言-claudenotiontokens)) | `windowsClaudeCode` | 有る (Windows だけ) |
 | 55 | `pjp` | shim の `pjp` を (要れば) `cargo install` し、`pjp --build` で道具を作る | `claudePrivateSkills` | 有る (Windows だけ) |
@@ -717,6 +717,11 @@ item = "op://<vault の ID>/<項目の ID>/<欄の ID>"   # 元の値の 1Passwo
 3. 偽の `Sys` (`testutil::FakeSys`) で分かれ道を試す (偽のコマンドの stderr の行は `testutil::stderr_line` で印を付ける。`stdout_only` の写しに入らず、
    流す口には届く本物の口と同じになる)
 4. この節の表に行を足す
+
+手順の順は WSL の `# order:` にそろえるので、前の手順が書く中身が、後ろの手順の入れるもので変わることがある (`git-config` (50) の `core.sshCommand` と、
+OpenSSH を入れる `openssh` (96))。そのときは前の手順に trait `Step` の `rerun_after` を書く: apply で後ろの手順が流れた直後に runner が聞き、true なら
+その場でもう一度流す (行は前の手順の行の後ろに「<後ろの手順> の後に流し直した: 」で足す。check と dry-run では聞かない)。書き直すものが無ければ
+false を返す (毎回流し直さない)
 
 WSL の側に Windows の手順 (`nix/scripts/bootstrap-windows-<id>.sh`) を足したときは、runner に写すまで `runner/src/steps/pending.rs` の `PENDING`
 に足し (gate は script の `# tool:` と同じにする)、`order_matches_wsl_setup` の並びと上の表にも足す。WSL の script が一覧に無い・`# tool:` と
@@ -1198,6 +1203,11 @@ WSL と違うもの:
 - `~/.gitconfig` が無いと、`git config --global` (gh の `auth setup-git` なども) はここの `config` に書き、次の `dotfiles check` が衝突で知らせる。Windows だけの
   設定は `~/.gitconfig` に書く (`git config --file "$HOME\.gitconfig" <キー> <値>`)。git は `~/.config/git/config` の後に `~/.gitconfig` を読むので同じキーは
   `~/.gitconfig` が勝ち、`~/.gitconfig` があれば `git config --global` もそこへ書く。`~/.gitconfig` がある間は、締めの表の ※ にそう添える
+- 入れたての Windows 11 には Windows の機能の版 (`System32\OpenSSH`) が既定で入っていて、winget の版は同じ apply の手順 `openssh` (order 96) が後から
+  入れる。そこで apply は、`openssh` の後に、置いた `config` (記録どおりのもの) の `core.sshCommand` が今選ぶ `ssh.exe` と違えば `git-config` をもう一度
+  流す (見出しに「(openssh の後に流し直す)」、締めの表の行に「openssh の後に流し直した: 」と出る)。受け持ちが runner のホストなら、入れたての Windows でも
+  1 回の apply で揃う。順は 50 のまま (ハブを作る `hc-hub` (60) の `pjp hub init` の commit を、ここで書く名前とメールにする。ADR 066)。check と dry-run は
+  流し直さないので、Windows の機能の版を選んだときは、その行に「apply の手順 openssh (96) が winget の版を入れた後に書き直す」と添える
 - `core.sshCommand` を書くようになる前に置いた `config` も、中身が記録どおりなら次の `dotfiles apply` で書き換わる (衝突にならない)。`OpenSSH` を後から入れた・
   消したときも同じく書き換える。Claude Code の会話の git は `claude-env` の env (`GIT_CONFIG_*`) で GitHub の ssh の URL を https に読み替えるので、GitHub
   には ssh を使わない (この値に左右されない。GitHub の外の ssh の remote にはこの値が効く)

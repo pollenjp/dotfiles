@@ -19,6 +19,10 @@
 //! (`%SystemRoot%\System32\OpenSSH\ssh.exe`) を書く。git は値を shell で起こすので、`/` 区切りにして `'…'` で囲む。どちらも無ければ書かずに知らせる
 //! (無い exe を書くと ssh の remote が全部起こせなくなる。OpenSSH が無いことは手順 openssh が知らせる)。中継を使わないホストにも書く。
 //!
+//! 入れたての Windows 11 には Windows の機能の版が既定で入っていて、winget の版は同じ apply の手順 openssh (order 96) が後から入れる。そこで apply では
+//! openssh の後に、置いた config (記録どおりのもの) の core.sshCommand が今選ぶ ssh.exe と違えば、この手順をもう一度流す (`Step::rerun_after`。
+//! runner の `execute` が流し直す)。順は 50 のまま (ハブを作る hc-hub (60) の pjp hub init の commit を、ここで書く名前とメールにする。ADR 066)。
+//!
 //! どれも記録つきのコピー (`%LOCALAPPDATA%\dotfiles\state\git-config.deployed.json`。CLAUDE.md と同じ `linker` の判定)。Windows 側で変わった・
 //! 記録の無い違う中身は衝突で飛ばして知らせる (`~/.gitconfig` が無いと、`git config --global` はここの config に書く)。書かなくなった
 //! ファイル (gitIdentity を外した・owner を消した) は、中身が記録どおりなら消す。
@@ -422,6 +426,11 @@ impl Step for GitConfig {
         }
         let ssh = windows_ssh(ctx);
         match &ssh {
+            // Windows の機能の版 (winget の版が無い。入れたての Windows 11)。windows_ssh はそこで作ったパスを返すので、要素で見分ける
+            Some(exe) if exe.ends_with(SSH_EXES[1].1) => ctx.say(format!(
+                "git の ssh (core.sshCommand): {} (Windows の機能の OpenSSH。winget の版 (%ProgramFiles%\\OpenSSH\\ssh.exe) が無い。受け持ちが runner なら、apply の手順 openssh (96) が winget の版を入れた後に書き直す)",
+                exe.display()
+            )),
             Some(exe) => ctx.say(format!(
                 "git の ssh (core.sshCommand): {} (Windows の OpenSSH。1Password・中継の agent に届く)",
                 exe.display()
@@ -481,6 +490,44 @@ impl Step for GitConfig {
         }
         outcomes.extend(where_git_reads(ctx, &dir));
         outcomes
+    }
+
+    /// 手順 openssh の後に、置いた config の core.sshCommand が今選ぶ ssh.exe と違えば流し直す ([`ssh_outdated`])。入れたての Windows では、
+    /// この手順 (50) が Windows の機能の版を書いた後で openssh (96) が winget の版を入れるので、流し直さないと 1 回の apply で揃わない
+    /// (順は 50 のまま: ハブの pjp hub init (hc-hub。60) の commit を個人の名前にする。dotfiles-private の ADR 066)
+    fn rerun_after(&self, ctx: &Ctx, after: &str) -> bool {
+        after == "openssh" && ssh_outdated(ctx)
+    }
+}
+
+/// 置いた config (`~/.config/git/config`) の core.sshCommand が、今選ぶ ssh.exe ([`windows_ssh`]) の値と違うか。config が無い・読めない・
+/// 記録と違う (Windows 側で変わった。衝突は書いたときに知らせた) ときは違わないとする (書き直さない)
+pub fn ssh_outdated(ctx: &Ctx) -> bool {
+    let config = join_segments(&ctx.roots.user_profile, DIR).join("config");
+    let Ok(bytes) = std::fs::read(&config) else {
+        return false;
+    };
+    let Ok(records) = Records::load(&ctx.state_dir.join(RECORD_FILE)) else {
+        return false;
+    };
+    let have = fsutil::sha256_bytes(&bytes);
+    if records.get(&config.to_string_lossy()) != Some(have.as_str()) {
+        return false;
+    }
+    let text = String::from_utf8_lossy(&bytes);
+    let written: Vec<&str> = text
+        .lines()
+        .filter(|l| l.trim_start().starts_with("sshCommand = "))
+        .collect();
+    match windows_ssh(ctx) {
+        Some(exe) => {
+            let want = format!(
+                "\tsshCommand = {}",
+                IniValue::Str(ssh_command(&exe)).render()
+            );
+            written != [want.as_str()]
+        }
+        None => !written.is_empty(),
     }
 }
 
@@ -595,7 +642,9 @@ mod tests {
     //! - ~/.gitconfig があれば添える。XDG_CONFIG_HOME か HOME で git が別の場所を読むなら manual
     //! - core.sshCommand: %ProgramFiles%\OpenSSH\ssh.exe があればそれ、無ければ %SystemRoot%\System32\OpenSSH\ssh.exe を、`/` 区切りで `'…'` に囲んで
     //!   [core] に書く。どちらも無ければ書かずに知らせる。ssh.exe が増えた・減ったときは、記録どおりの config を書き換える (衝突にしない)。
-    //!   git.toml の [settings.core] の sshCommand は文を返す
+    //!   git.toml の [settings.core] の sshCommand は文を返す。Windows の機能の版を選んだら、openssh が winget の版を入れた後に書き直すと添える
+    //! - apply の openssh の後に流し直すのは、記録どおりの config の core.sshCommand が今選ぶ ssh.exe と違うときだけ (ほかの手順の後・衝突した
+    //!   config・無い config では流し直さない)。入れたての Windows で受け持ちが runner の apply を 1 回流すと、続く check の git-config が揃う
     //! - repo の git.toml を読める (本物の repo)
 
     use super::*;
@@ -838,6 +887,20 @@ postBuffer = 524288000
                 FakeSys::new(|_| unreachable!("コマンドは打たない")),
             )
         }
+
+        /// 後ろの手順 `after` の後に流し直すか (`Step::rerun_after`)
+        fn rerun_after(&self, after: &str, sys: FakeSys) -> bool {
+            let mut out = Vec::new();
+            let ctx = Ctx {
+                repo: self.t.path().join("dotfiles"),
+                roots: Roots::from_home(&self.t.path().join("home")),
+                state_dir: self.t.path().join("state"),
+                host: parse_host("", Path::new("h.toml"), Groups::embedded().unwrap()).unwrap(),
+                sys: &sys,
+                out: &mut out,
+            };
+            GitConfig.rerun_after(&ctx, after)
+        }
     }
 
     /// 名前とメールを書くホスト (gitIdentity は minimum に入らないので、使うホストが [tools] に書く)
@@ -1038,6 +1101,13 @@ postBuffer = 524288000
         let (o, out) = e.run_with(Mode::Check, "", sys());
         assert_eq!(kinds(&o), vec![Kind::Fix], "{o:?}\n{out}");
         assert!(out.contains("git の ssh (core.sshCommand): "), "{out}");
+        // winget の版が無いので Windows の機能の版を選んだ。apply では openssh の後に書き直すことを添える
+        assert!(
+            out.contains(
+                "(Windows の機能の OpenSSH。winget の版 (%ProgramFiles%\\OpenSSH\\ssh.exe) が無い。受け持ちが runner なら、apply の手順 openssh (96) が winget の版を入れた後に書き直す)"
+            ),
+            "{out}"
+        );
         let (o, _) = e.run_with(Mode::Apply { force: false }, "", sys());
         assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}");
         assert!(
@@ -1049,8 +1119,13 @@ postBuffer = 524288000
         // winget の版もある: そちらが先
         let winget = join_segments(&pf, "OpenSSH/ssh.exe");
         e.t.write("pf/OpenSSH/ssh.exe", "");
-        let (o, _) = e.run_with(Mode::Apply { force: false }, "", sys());
+        let (o, out) = e.run_with(Mode::Apply { force: false }, "", sys());
         assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}");
+        assert!(
+            out.contains("(Windows の OpenSSH。1Password・中継の agent に届く)")
+                && !out.contains("Windows の機能の OpenSSH"),
+            "{out}"
+        );
         assert!(config().contains(&line(&winget)), "{}", config());
         assert_eq!(config().matches("sshCommand").count(), 1);
 
@@ -1060,6 +1135,143 @@ postBuffer = 524288000
         let (o, _) = e.run_with(Mode::Apply { force: false }, "", sys());
         assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}");
         assert!(!config().contains("sshCommand"));
+    }
+
+    /// 入れたての Windows: 1 回目の apply の git-config (50) は Windows の機能の版を書き、openssh (96) が winget の版を入れる。openssh の後に
+    /// 流し直すのは、置いた config が記録どおりで、その core.sshCommand が今選ぶ ssh.exe と違うときだけ (ほかの手順の後・衝突した config・
+    /// 無い config では流し直さない)
+    #[test]
+    fn reruns_after_openssh_only_when_the_ssh_changed() {
+        let e = Env::new();
+        let pf = e.t.path().join("pf");
+        let sysroot = e.t.path().join("windows");
+        let sys = || {
+            FakeSys::new(|_| unreachable!())
+                .with_env("ProgramFiles", &pf.to_string_lossy())
+                .with_env("SystemRoot", &sysroot.to_string_lossy())
+        };
+        // まだ置いていない
+        e.t.write("windows/System32/OpenSSH/ssh.exe", "");
+        assert!(!e.rerun_after("openssh", sys()));
+        // Windows の機能の版を書いた。ssh.exe が同じ間は流し直さない
+        e.run_with(Mode::Apply { force: false }, "", sys());
+        assert!(!e.rerun_after("openssh", sys()));
+        // openssh が winget の版を入れた: openssh の後なら流し直す (ほかの手順の後では流し直さない)
+        e.t.write("pf/OpenSSH/ssh.exe", "");
+        assert!(e.rerun_after("openssh", sys()));
+        assert!(!e.rerun_after("files", sys()));
+        // 流し直すと winget の版になり、もう流し直さない
+        e.run_with(Mode::Apply { force: false }, "", sys());
+        assert!(!e.rerun_after("openssh", sys()));
+        // Windows 側で変えた config (衝突) は、1 回目が知らせたので流し直さない
+        let winget = join_segments(&pf, "OpenSSH/ssh.exe");
+        std::fs::remove_file(&winget).unwrap();
+        let edited = format!(
+            "{}[alias]\n\tx = y\n",
+            std::fs::read_to_string(e.git("config")).unwrap()
+        );
+        std::fs::write(e.git("config"), edited).unwrap();
+        assert!(!e.rerun_after("openssh", sys()));
+    }
+
+    /// 偽の openssh: apply で winget の版の ssh.exe を置く (入れたての Windows で OpenSSH を入れる)
+    struct FakeOpenssh(PathBuf);
+
+    impl Step for FakeOpenssh {
+        fn info(&self) -> StepInfo {
+            StepInfo {
+                id: "openssh",
+                order: 96,
+                title: "OpenSSH",
+                gate: Gate::Always,
+                ported: true,
+                windows_only: false,
+            }
+        }
+        fn run(&self, _ctx: &mut Ctx, mode: Mode) -> Vec<Outcome> {
+            if mode.writes() {
+                std::fs::create_dir_all(self.0.parent().unwrap()).unwrap();
+                std::fs::write(&self.0, "").unwrap();
+            }
+            vec![Outcome::new(Kind::Ok, "入れた")]
+        }
+    }
+
+    /// 入れたての Windows (Windows の機能の版だけがある) で、受け持ちが runner のホストの apply を 1 回流すと、openssh の後に git-config を
+    /// 流し直して winget の版を書き、続く check の git-config が揃っている
+    #[test]
+    fn one_apply_settles_the_ssh_on_a_fresh_windows() {
+        let e = Env::new();
+        let pf = e.t.path().join("pf");
+        let sysroot = e.t.path().join("windows");
+        e.t.write("windows/System32/OpenSSH/ssh.exe", "");
+        let sys = FakeSys::new(|_| unreachable!())
+            .with_env("ProgramFiles", &pf.to_string_lossy())
+            .with_env("SystemRoot", &sysroot.to_string_lossy());
+        let winget = join_segments(&pf, "OpenSSH/ssh.exe");
+        let steps: Vec<Box<dyn Step>> =
+            vec![Box::new(GitConfig), Box::new(FakeOpenssh(winget.clone()))];
+        let runner_host = "[runner]\nenable = true\n";
+        let run = |mode: Mode| {
+            let mut out = Vec::new();
+            let rows = {
+                let mut ctx = Ctx {
+                    repo: e.t.path().join("dotfiles"),
+                    roots: Roots::from_home(&e.t.path().join("home")),
+                    state_dir: e.t.path().join("state"),
+                    host: parse_host(
+                        runner_host,
+                        Path::new("h.toml"),
+                        Groups::embedded().unwrap(),
+                    )
+                    .unwrap(),
+                    sys: &sys,
+                    out: &mut out,
+                };
+                crate::runner::execute(&mut ctx, mode, &steps)
+            };
+            (rows, String::from_utf8(out).unwrap())
+        };
+        let (rows, out) = run(Mode::Apply { force: false });
+        let texts: Vec<(&str, &str)> = rows
+            .iter()
+            .map(|r| (r.id.as_str(), r.text.as_str()))
+            .collect();
+        assert_eq!(texts.len(), 3, "{texts:?}\n{out}");
+        assert_eq!(texts[0].0, "git-config");
+        assert!(
+            texts[1]
+                .1
+                .starts_with("openssh の後に流し直した: 追加 0 / 更新 1"),
+            "{texts:?}"
+        );
+        assert!(
+            out.contains("━━ [50] git-config: ") && out.contains("(openssh の後に流し直す) ━━"),
+            "{out}"
+        );
+        let config = std::fs::read_to_string(e.git("config")).unwrap();
+        assert!(
+            config.contains(&format!("\tsshCommand = \"{}\"\n", ssh_command(&winget))),
+            "{config}"
+        );
+        let (rows, out) = run(Mode::Check);
+        assert!(rows.iter().all(|r| r.kind == Kind::Ok), "{rows:?}\n{out}");
+    }
+
+    /// ssh.exe が無いまま書いた config (core.sshCommand なし) も、openssh が入れた後なら流し直す
+    #[test]
+    fn reruns_when_the_first_ssh_appears() {
+        let e = Env::new();
+        let pf = e.t.path().join("pf");
+        let sys = || {
+            FakeSys::new(|_| unreachable!())
+                .with_env("ProgramFiles", &pf.to_string_lossy())
+                .with_env("SystemRoot", &e.t.path().join("windows").to_string_lossy())
+        };
+        e.run_with(Mode::Apply { force: false }, "", sys());
+        assert!(!e.rerun_after("openssh", sys()));
+        e.t.write("pf/OpenSSH/ssh.exe", "");
+        assert!(e.rerun_after("openssh", sys()));
     }
 
     #[test]
