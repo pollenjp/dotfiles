@@ -21,6 +21,8 @@
       windowsFiles.claudeAccounts.enable = true;
       windowsFiles.claudeDesktop.enable = true;
       windowsFiles.ntn.enable = true;
+      # Windows の OpenSSH を固定した版に入れ替える (minimum では既定で off。登録するホストは on にする)
+      windowsFiles.openssh.enable = true;
     };
     claude = {
       enable = true;

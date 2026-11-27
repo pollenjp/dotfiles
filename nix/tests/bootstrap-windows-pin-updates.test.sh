@@ -16,6 +16,8 @@
 #   - group.json (設定グループ) の tools.windowsHerdr が false なら herdr・herdr-app・herdr-core を確かめず、ほかの名前は確かめる。
 #     true なら確かめる (group.json が無い前の世代も確かめる)
 #   - --candidates と --list --json は group.json を見ず、tools.windowsHerdr が false のマシンでも herdr・herdr-app・herdr-core を出す
+#   - openssh も herdr と同じく、group.json の tools.windowsOpenssh が false なら確かめない (true・欄の無い前の世代・group.json が無い
+#     ときは確かめる。前の世代は true と読む)
 #   - tailscale は group.json の tools.windowsTailscale が true のマシンでだけ確かめる (false・欄の無い前の世代・group.json が無い
 #     ときは確かめない。前の世代は false と読む)。--candidates と --list --json はいつも出す
 #   - codex も同じく group.json の tools.windowsCodex が true のマシンでだけ確かめる (false・欄の無い前の世代・group.json が無いときは
@@ -372,6 +374,29 @@ if [[ $(rc "${d}") == 0 ]] \
 else
   ng "group.json と --candidates・--list --json" \
     "rc=$(rc "${d}")/$(rc "${d2}") calls=$(cat "${d2}/calls" 2>/dev/null) $(outerr "${d}") / $(outerr "${d2}")"
+fi
+
+# 4g2. openssh は group.json の tools.windowsOpenssh が false なら確かめない。true・欄が無い (前の世代)・group.json が無いときは
+#      確かめる (前の世代は true と読む。前はどのマシンでも入れていた)。ほかの名前は今までどおり確かめる
+d=$(new_case t4os-off "${state_on}")
+printf '%s\n' '{"group":"minimum","tools":{"windowsHerdr":true,"windowsOpenssh":false},"version":2}' \
+  >"${d}/home/.local/state/dotfiles/group.json"
+run "${d}" 0
+d2=$(new_case t4os-on "${state_on}")
+printf '%s\n' '{"group":"all","tools":{"windowsHerdr":true,"windowsOpenssh":true},"version":2}' \
+  >"${d2}/home/.local/state/dotfiles/group.json"
+run "${d2}" 0
+d3=$(new_case t4os-absent "${state_on}")
+printf '%s\n' '{"group":"all","tools":{"windowsHerdr":true},"version":2}' \
+  >"${d3}/home/.local/state/dotfiles/group.json"
+run "${d3}" 0
+d4=$(new_case t4os-nogroup "${state_on}")
+run "${d4}" 0
+if [[ $(rc "${d}") == 0 ]] && ! called "${d}" -E '^winget .*openssh$' && called "${d}" -E '^winget .*ntn$' \
+  && called "${d2}" -E '^winget .*openssh$' && called "${d3}" -E '^winget .*openssh$' && called "${d4}" -E '^winget .*openssh$'; then
+  ok "openssh は tools.windowsOpenssh が false なら確かめず、true・欄が無い・group.json が無いときは確かめる"
+else
+  ng "windowsOpenssh" "calls=$(cat "${d}/calls" 2>/dev/null) / $(cat "${d2}/calls" 2>/dev/null) / $(cat "${d3}/calls" 2>/dev/null) / $(cat "${d4}/calls" 2>/dev/null)"
 fi
 
 # 4h. tailscale は group.json の tools.windowsTailscale が true のマシンでだけ確かめる。false・欄が無い (前の世代)・group.json が

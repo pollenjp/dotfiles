@@ -126,6 +126,7 @@ let
     windowsNtn = "Win の ntn";
     codex = "Codex CLI";
     windowsCodex = "Win の Codex CLI";
+    windowsOpenssh = "Win の OpenSSH";
     windowsTailscale = "Win の Tailscale";
     windowsSshd = "Win の sshd";
     gitIdentity = "git の名前とメール";
@@ -147,6 +148,7 @@ let
     "opReasonSshRelay"
     "windowsNtn"
     "windowsCodex"
+    "windowsOpenssh"
     "windowsTailscale"
     "windowsSshd"
     "windowsTypeClipboard"
@@ -320,6 +322,9 @@ let
     # だけが読む switch。WSL の setup に同じ手順は無い)
     (tool "codex" "Codex CLI (OpenAI)" [ "codex" "enable" ] { })
     (windowsFilesTool "windowsCodex" "Windows の Codex CLI" "codex" { })
+    # Windows の OpenSSH を dotfiles が固定した版 (winget の Microsoft.OpenSSH.Preview) に入れ替える。Windows には OpenSSH (System32) が
+    # 初めから入っているので、版を上げるのは minimum の役目にしない (UAC の確認が出て、Windows Installer の不調な PC では落ちる)
+    (windowsFilesTool "windowsOpenssh" "Windows の OpenSSH (固定した版)" "openssh" { })
     # tailnet にログインして使う VPN の道具
     (windowsFilesTool "windowsTailscale" "Windows の Tailscale" "tailscale" { })
     # tailnet から鍵でだけ入れる sshd。PC に外から入る口を開ける

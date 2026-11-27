@@ -17,6 +17,7 @@
 #   dotfiles.wsl.windowsFiles.claudeAccounts.enable  Windows の runner が claude-personal・claude-work を用意するか (既定は all だけ on。UAC の確認が出る)
 #   dotfiles.wsl.windowsFiles.claudeDesktop.enable  Windows に Claude Desktop を winget の MSIX で入れるか (runner だけ。既定は all だけ on。UAC の確認が出る)
 #   dotfiles.wsl.windowsFiles.herdr.enable       Windows に herdr と herdr-app を固定した版で入れるか (既定は all だけ on。win/ を配るマシン)
+#   dotfiles.wsl.windowsFiles.openssh.enable     Windows の OpenSSH を winget で固定した版に入れ替えるか (既定は all だけ on。win/ を配るマシン)
 #   dotfiles.wsl.windowsFiles.tailscale.enable   Windows に Tailscale を winget で固定した版で入れるか (既定は all だけ on。win/ を配るマシン)
 #   dotfiles.wsl.windowsFiles.sshd.enable        Windows に sshd (OpenSSH Server) を入れ、Tailscale から鍵でだけ入れるようにするか (既定は all だけ on。win/ を配るマシン)
 #   dotfiles.wsl.windowsFiles.sshd.authorizedKeys  その sshd に入れる公開鍵 (authorized_keys の行。既定 null: dotfiles は鍵を置かない)
@@ -1207,6 +1208,32 @@ in
         herdr・herdr-app・herdr-core の新しい版を確かめない。group.json が無い前の世代では、今までどおり入れる。
 
         false に戻しても、入れたものは消さない (setup が見なくなるだけ。消し方は win/README.md)。
+      '';
+    };
+
+    windowsFiles.openssh.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = config.dotfiles.group == "all" && config.dotfiles.wsl.windowsFiles.enable;
+      defaultText = lib.literalExpression ''config.dotfiles.group == "all" && config.dotfiles.wsl.windowsFiles.enable'';
+      example = true;
+      description = ''
+        Windows の OpenSSH を、dotfiles が固定した版 (winget の `Microsoft.OpenSSH.Preview`。`C:\Program Files\OpenSSH` に入る MSI) に
+        入れ替えるマシンか。効くのは `windowsFiles.enable = true` のマシンだけ (配らないマシンでは true でも何もしない)。Windows には
+        OpenSSH (`C:\Windows\System32\OpenSSH`。Windows の機能) が初めから入っていて、WSL の ssh の wrapper も git も、固定した版が無ければ
+        それを使う。版を上げるのは minimum の役目にしない (入れるときに UAC の確認が出て、Windows Installer の不調な PC では落ちる)。
+        既定はグループで決まる (all なら win/ を配るマシンで on、minimum なら off)。minimum のホストで入れるなら true を書く。
+
+        switch は Windows 側に触らない。値は `~/.local/state/dotfiles/group.json` の `tools.windowsOpenssh` に落ち
+        (home/modules/group.nix。`windows-files.json` には入れない)、`~/dotfiles/setup --update` は false なら
+        bootstrap-windows-openssh.sh を飛ばす (script の冒頭の `# tool: windowsOpenssh`。group.json やその欄が無い前の世代では、今までどおり
+        流す)。true のマシンでは、配った `Install-OpenSSH.ps1` (win/openssh/) が、入っていなければ固定した版を入れ (UAC の確認が出る)、
+        ずれていれば ⚠ で知らせる (揃えはしない。win/README.md の「OpenSSH」)。bootstrap-windows-pin-updates.sh も、false なら OpenSSH の
+        新しい版を確かめない (欄が無い前の世代は確かめる)。sshd (`windowsFiles.sshd.enable`) は固定した版の MSI に Server を足すので、sshd を
+        入れるホストでは true にする。
+
+        Windows の runner では、ホストの値 (dotfiles-private の `win/hosts/*.toml`) の `[tools]` に `windowsOpenssh = true` を書く。
+
+        false に戻しても、入れたものは消さない (setup が見なくなるだけ。外し方は win/README.md の「OpenSSH」)。
       '';
     };
 

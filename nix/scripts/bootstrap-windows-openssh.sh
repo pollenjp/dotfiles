@@ -10,6 +10,12 @@
 # ^ setup.sh が読む実行順。bootstrap-windows-files.sh (order: 90) が Install-OpenSSH.ps1 を
 #   置いた後に走らせる。仕組みは nix/README.md「bootstrap の実行順」。
 #
+# tool: windowsOpenssh (dotfiles.wsl.windowsFiles.openssh.enable)
+#
+# ^ setup.sh が読む道具の名前 (設定グループ。nix/README.md「設定グループ」)。~/.local/state/dotfiles/group.json の
+#   tools でこの道具が off のホスト (グループ minimum でこの道具を足していないホストなど) では、setup はこの手順を飛ばす
+#   (Windows に初めからある OpenSSH のまま使う)。group.json やその欄が無い前の世代では、今までどおり流す。
+#
 # ## 何のために
 #
 # WSL の ssh は Windows の ssh.exe (C:\Program Files\OpenSSH) を呼んで 1Password の agent に

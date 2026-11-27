@@ -254,7 +254,7 @@ let
         && builtins.elemAt (lines carolMd) 2 == "🌐 [HTML 版: carol@three の道具](./html/carol@three.html)"
         && lib.hasInfix "[`nix/hosts/carol@three.nix`](../../../nix/hosts/carol@three.nix)" carolMd
         && lib.hasInfix "- グループ: `minimum` (ホストで選んだ) · 環境: WSL · win/ を配る\n" carolMd
-        && lib.hasInfix "- 入る道具: 5 / 30 (ほかに基本の道具 (switch なし) が 10 個いつも入る)\n" carolMd
+        && lib.hasInfix "- 入る道具: 5 / 31 (ほかに基本の道具 (switch なし) が 10 個いつも入る)\n" carolMd
         && lib.hasInfix "ntn (Notion の CLI) on" carolMd
         && lib.hasInfix "dotfiles-private の `nix/shared/` で決めた値: 使わない store path・mise の版の掃除 off" carolMd
         && !(lib.hasInfix "効かない道具" carolMd)
@@ -439,7 +439,7 @@ let
         && lib.hasPrefix "# 登録したホストの道具\n\n🌐 [HTML 版: 登録したホストの道具](./html/hosts.html)\n" files."README.md"
         &&
           lib.hasInfix
-            "| [`carol@three`](./nix/carol@three.md) | `minimum` (ホストで選んだ) | WSL · win/ を配る | 5 / 30 |"
+            "| [`carol@three`](./nix/carol@three.md) | `minimum` (ホストで選んだ) | WSL · win/ を配る | 5 / 31 |"
             files."README.md"
         && lib.hasInfix "| [`dave@three`](./win/dave@three.md) |" files."README.md"
         && lib.hasInfix "[`dave@three`](./win/dave@three.md) |\n" files."README.md"
