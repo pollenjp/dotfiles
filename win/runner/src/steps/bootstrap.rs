@@ -1,12 +1,14 @@
-//! bootstrap (order 5): `win/bootstrap/Install-Bootstrap.ps1 -Check` を流し、runner の前提 (Git for Windows・PowerShell 7・Build Tools・rustup・
-//! clone・Smart App Control と、`-Private` の形では gh とそのログイン) を runner の出力にも出す (dotfiles-private の
+//! bootstrap (order 5): `win/bootstrap/Install-Bootstrap.ps1 -Check` を流し、runner の前提 (Git for Windows・PowerShell 7・clone・
+//! Smart App Control と、`-Private` の形では gh とそのログイン・Build Tools・rustup) を runner の出力にも出す (dotfiles-private の
 //! docs/adr/058_win_runner_bootstrap_* §2 H)。
 //!
 //! 確かめるだけ。apply でも bootstrap は流さない (UAC と gh のログインを runner の中で待たない。揃えるのは人が bootstrap を流す)。
 //! どのホストでも on。道具の switch `privateRepos` (pollenjp の private な repo と gh のログインを使うホスト) が on なら `-Private` を付けて、
-//! gh とそのログイン・dotfiles-private・claude-skills の clone も確かめる。off なら gh を使わない既定の形 (public な dotfiles の clone と、
-//! 手元のホストの値 `%USERPROFILE%\.config\dotfiles\host.toml`) を確かめる (win/README.md の「bootstrap (新しい Windows で最初に流す)」・
-//! dotfiles-private の docs/adr/111_win_runner_without_gh_*。前は claudePrivateSkills のホストだけ on だった: ADR 094)。
+//! gh とそのログイン・dotfiles-private・claude-skills の clone と、Build Tools・rustup (claude-skills の道具を cargo で作る) も確かめる。
+//! off なら gh を使わない既定の形 (public な dotfiles の clone と、手元のホストの値 `%USERPROFILE%\.config\dotfiles\host.toml`。Build Tools と
+//! rustup は見ない: runner は配った exe で動けるので、`-Rust` は付けない) を確かめる (win/README.md の
+//! 「bootstrap (新しい Windows で最初に流す)」・dotfiles-private の docs/adr/111_win_runner_without_gh_*・docs/adr/117_win_runner_exe_release_*。
+//! 前は claudePrivateSkills のホストだけ on だった: ADR 094)。
 //! SAC は bootstrap の行で見せ、runner で重ねて読まない (オンなら runner の exe はそもそも動かない)。
 
 use super::ps1::{find_powershell, powershell_command, run_streaming};

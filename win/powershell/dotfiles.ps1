@@ -364,15 +364,18 @@ function Install-Sshd { & "$HOME\.config\powershell\Install-Sshd.ps1" @args }
 
 # Windows 側の runner (dotfiles の win/runner/。Rust)。dotfiles check で手順を順に確かめ (何も書かない)、dotfiles apply で揃え
 # (このホストの受け持ちが runner のときだけ。dotfiles-private の win/hosts/<ユーザー>@<PC>.toml の [runner] enable = true)、
-# dotfiles list で手順と on/off を見る (win/README.md の「runner」)。bootstrap が clone した dotfiles の中の runner を cargo run で
-# build して起こす。cargo は win\runner に入ってから打つ: rustup は rust-toolchain.toml を今のディレクトリから探し、bootstrap は
-# 既定の toolchain を入れていないので、--manifest-path だけでは toolchain が決まらずに落ちる。--locked で Cargo.lock のまま build する。
+# dotfiles list で手順と on/off を見る (win/README.md の「runner」)。bootstrap が clone した dotfiles の中の launcher
+# (win\powershell\Invoke-DotfilesRunner.ps1) に clone と引数を渡し、launcher が clone の HEAD の runner に合う exe を GitHub の Release から落として
+# 起こす (合う exe が無ければ cargo で build する。win/README.md の「runner の exe (Release)」)。launcher は配った写しでなく clone のものを呼ぶ
+# (pull した直しが、この関数が古いままでも効く)。launcher の無い古い clone では、今までどおり runner を cargo run で build して起こす。cargo は
+# win\runner に入ってから打つ: rustup は rust-toolchain.toml を今のディレクトリから探し、bootstrap は既定の toolchain を入れていないので、
+# --manifest-path だけでは toolchain が決まらずに落ちる。--locked で Cargo.lock のまま build する。
 #
 # dotfiles --self-update [--dry-run] [<runner の引数>…] は、dotfiles・dotfiles-private・claude-skills の clone を gh の資格情報で fetch して
 # fast-forward し、runner の引数があればその後に runner に渡す (Linux の ~/dotfiles/setup --self-update に当たる。win/README.md の「clone を進める
 # (dotfiles --self-update)」)。中身は clone の中の win\powershell\Invoke-DotfilesSelfUpdate.ps1 で、ここはそれを呼ぶだけにする (配った写しでなく
 # clone のものを呼ぶので、$PROFILE で読んだこの関数が古いままでも、pull した更新の処理が次の呼び出しから効く。runner の流し方を直すときは、
-# その script の末尾の cargo の行も直す)。--self-update は最初の引数に書く。
+# その script の末尾の runner の行も直す)。--self-update は最初の引数に書く。
 function dotfiles {
     $clone = [IO.Path]::Combine($HOME, 'ghq', 'github.com', 'pollenjp', 'dotfiles')
     $runnerArgs = @(ConvertTo-DotfilesRunnerArgs -Arguments $args)
@@ -386,6 +389,12 @@ function dotfiles {
         # 変数に入れてから @ で広げる (& $selfUpdate @(…) は配列を 1 つの引数で渡し、script の側で空白でつながった 1 つの字になる)
         $selfUpdateArgs = @($runnerArgs | Select-Object -Skip 1)
         & $selfUpdate @selfUpdateArgs
+        return
+    }
+    # 出力を受けずに流す (runner が端末を見て色を付ける)。終了コードは launcher のもの ($LASTEXITCODE)
+    $launcher = [IO.Path]::Combine($clone, 'win', 'powershell', 'Invoke-DotfilesRunner.ps1')
+    if (Test-Path -LiteralPath $launcher -PathType Leaf) {
+        & $launcher $clone @runnerArgs
         return
     }
     $runner = [IO.Path]::Combine($clone, 'win', 'runner')

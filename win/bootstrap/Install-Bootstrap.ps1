@@ -1,34 +1,38 @@
 ﻿<#
 .SYNOPSIS
-新しい Windows で最初に流す setup。Rust の runner を動かせるところまで (Git for Windows・PowerShell 7・Visual Studio Build Tools・rustup と、
-dotfiles の clone) を揃える。-Private では、GitHub CLI とそのログイン・dotfiles-private・claude-skills の clone も揃える。
+新しい Windows で最初に流す setup。Rust の runner を動かせるところまで (Git for Windows・PowerShell 7 と、dotfiles の clone。runner の exe は
+dotfiles 関数が GitHub の Release から落とす) を揃える。-Rust では、runner を手元で build する Visual Studio Build Tools と rustup も揃える。
+-Private では、GitHub CLI とそのログイン・dotfiles-private・claude-skills の clone と、Build Tools・rustup も揃える。
 
 .DESCRIPTION
 dotfiles の win/bootstrap/Install-Bootstrap.ps1。新しい Windows では GitHub の raw の URL からファイルに落として流し、clone した後は
 clone の中のものを流す (win/README.md の「bootstrap (新しい Windows で最初に流す)」。経緯は dotfiles-private の
-docs/adr/058_win_runner_bootstrap_*・docs/adr/111_win_runner_without_gh_*)。manifest では配らない。
+docs/adr/058_win_runner_bootstrap_*・docs/adr/111_win_runner_without_gh_*・docs/adr/117_win_runner_exe_release_*)。manifest では配らない。
 
-形は 2 つ:
+形は 3 つ:
   既定 (引数なし)  gh を入れず、ログインもしない (gh にログインできない PC・pollenjp の private な repo を取れない PC でも流せる)。public な
                    dotfiles だけを匿名の HTTPS で clone し (origin は https://github.com/pollenjp/dotfiles.git)、雛形
                    win/templates/host.minimum.toml を %USERPROFILE%\.config\dotfiles\host.toml に写す (あれば上書きしない。dotfiles-private の
-                   clone がある PC でも写さない: ホストの値はそこから引く)
+                   clone がある PC でも写さない: ホストの値はそこから引く)。Visual Studio Build Tools と rustup は入れない・確かめない (runner は
+                   dotfiles 関数が GitHub の Release から落とした exe で動く)
+  -Rust            既定の形に、Visual Studio Build Tools と rustup を足す (gh の無い PC で、runner を手元で build する・claude-selector (cs) を
+                   作るとき)
   -Private         gh を入れて github.com にログインし、dotfiles・dotfiles-private・claude-skills を gh の資格情報で clone する (origin は
-                   WSL と同じ ssh の URL)。ホストの値は dotfiles-private の win/hosts/ から引くので、雛形は写さない。ホストの値の道具の switch
-                   privateRepos を on にした PC で流す
+                   WSL と同じ ssh の URL)。ホストの値は dotfiles-private の win/hosts/ から引くので、雛形は写さない。Build Tools と rustup も
+                   入れる (-Rust を含む。claude-skills の道具を cargo で作るため)。ホストの値の道具の switch privateRepos を on にした PC で流す
 
 すること (この順):
-  0. 最初に Smart App Control (SAC) を確かめ、オフでなければ (オン・評価モード) 警告を出して続ける (止めない)。オンだと cargo が
-     作った exe (Rust の runner・build script) が止められて動かないので、runner を流す前にオフにする (オフにするのはユーザー)
+  0. 最初に Smart App Control (SAC) を確かめ、オフでなければ (オン・評価モード) 警告を出して続ける (止めない)。オンだと runner の exe
+     (配った exe も cargo の産物も) は止められて動かないので、runner を流す前にオフにする (オフにするのはユーザー)
   1. 前提を見る: winget があるか・管理者の PowerShell でないか・CPU (x64 だけ)・普段のアカウントが管理者か (トークンに BUILTIN\Administrators が
      あるか。UAC で権限を落としていても管理者。PowerShell 7 の入れ方を決める)
-  2. Git for Windows → (-Private なら GitHub CLI →) PowerShell 7 → Visual Studio Build Tools 2022 → rustup を、下の param の固定した版で
-     winget から入れ、pin を足す (winget upgrade --all から外す)。PowerShell 7 は入れ方を問わず (MSI・MSIX (Microsoft Store・winget)・PATH の
-     ほかの pwsh)、7.6.0 より古くなければ入っているとみなし、版も pin も揃えない。入っていなければ 7.6 (LTS) の版を winget で入れ、7.6 の線に
-     留める pin (7.6.*) を足す。普段のアカウントが管理者の PC は MSIX (ユーザー単位で入り、UAC は出ない)、管理者でない PC は MSI (マシン単位。
-     UAC で管理者の資格情報を入れる。Microsoft Update の更新には入れない)。管理者でない PC は UAC で別の管理者のアカウントに昇格し、その側では
-     使う人ごとに登録される MSIX の pwsh を起こせないので、MSIX の pwsh しか無ければ MSI も入れる (--force で直に入れる。入っている MSIX があると、
-     winget の install は upgrade に替わって止まる)。Build Tools には C++ のワークロード・MSVC (x64)・
+  2. Git for Windows → (-Private なら GitHub CLI →) PowerShell 7 → (-Rust・-Private なら Visual Studio Build Tools 2022 → rustup) を、下の
+     param の固定した版で winget から入れ、pin を足す (winget upgrade --all から外す)。PowerShell 7 は入れ方を問わず
+     (MSI・MSIX (Microsoft Store・winget)・PATH のほかの pwsh)、7.6.0 より古くなければ入っているとみなし、版も pin も揃えない。入っていなければ
+     7.6 (LTS) の版を winget で入れ、7.6 の線に留める pin (7.6.*) を足す。普段のアカウントが管理者の PC は MSIX (ユーザー単位で入り、UAC は
+     出ない)、管理者でない PC は MSI (マシン単位。UAC で管理者の資格情報を入れる。Microsoft Update の更新には入れない)。管理者でない PC は UAC で
+     別の管理者のアカウントに昇格し、その側では使う人ごとに登録される MSIX の pwsh を起こせないので、MSIX の pwsh しか無ければ MSI も入れる
+     (--force で直に入れる。入っている MSIX があると、winget の install は upgrade に替わって止まる)。Build Tools には C++ のワークロード・MSVC (x64)・
      Windows SDK を入れ、入っている Build Tools に足りないものは Visual Studio Installer で足す。rustup は MSVC の host
      (x86_64-pc-windows-msvc) にし、toolchain は入れず、自己更新を止める (rustup-init が MSVC の有無を見るので、Build Tools を rustup より
      先に入れる)。GNU の host にしないのは、windows-sys 0.61 (windows-link の raw-dylib) の build に MinGW の dlltool と as が要り、GNU の
@@ -38,9 +42,10 @@ docs/adr/058_win_runner_bootstrap_*・docs/adr/111_win_runner_without_gh_*)。ma
   4. clone する。既定の形は dotfiles を資格情報なしの HTTPS で、-Private は dotfiles・dotfiles-private・claude-skills を gh の資格情報で
      HTTPS を通す組 (dotfiles の nix/pkgs/git-gh と同じ) を -c で渡して (origin は ssh の URL のまま)、%USERPROFILE%\ghq\github.com\pollenjp\ に
      clone する。core.autocrlf=false で、WSL が配ったものとバイト列をそろえる。~/.gitconfig は書かない
-  5. (既定の形だけ) 雛形を手元のホストの値に写す (上の「形は 2 つ」)
-  6. 揃え終えたら (終了コード 0)、次に打つコマンド (clone の dotfiles.ps1 を読み込んで dotfiles apply) を出す。-Check では出さない (runner の
-     手順 bootstrap が毎回 -Check を流すので)
+  5. (既定の形だけ) 雛形を手元のホストの値に写す (上の「形は 3 つ」)
+  6. 揃え終えたら (終了コード 0)、次に打つコマンド (clone の dotfiles.ps1 を読み込んで dotfiles apply) を出す。既定の形 (と -Rust) は、初めての
+     dotfiles apply が runner の exe を GitHub の Release から落とすことも添える。-Check では出さない (runner の手順 bootstrap が毎回 -Check を
+     流すので)
 
 入っている道具の版が固定した版と違っても揃えない (⚠ と ※ の手順を出すだけ。揃えるのは Rust の runner の受け持ち。PowerShell 7 は版を
 固定した版と比べず、7.6.0 より古いときだけ ⚠ を出す。管理者でない PC で MSIX の pwsh しか無いときは、入っていないものとして MSI を足す)。※ の上げ方の
@@ -72,18 +77,26 @@ PowerShell-LTS と同じ) で、7.7 からの MSIX は別の package Microsoft.P
 
 .PARAMETER VsBuildToolsVersion
 Visual Studio Build Tools 2022 (winget の Microsoft.VisualStudio.2022.BuildTools) の固定する版 (check-winget-version.sh vs-buildtools が読む)。
+入れるのは -Rust・-Private のときだけ。
 
 .PARAMETER RustupVersion
 rustup (winget の Rustlang.Rustup) の固定する版 (check-winget-version.sh rustup が読む)。toolchain は入れない (Rust の runner の
-rust-toolchain.toml が決める)。
+rust-toolchain.toml が決める)。入れるのは -Rust・-Private のときだけ。
+
+.PARAMETER Rust
+Visual Studio Build Tools と rustup も入れる形にする (既定の形に足す。gh は入れない)。gh の無い PC で、runner を手元で build する
+(win/runner に commit していない変更を試す・配った exe を使わない)・claude-selector (cs) を作るときに使う。-Private は -Rust を含む。
+runner の手順 bootstrap は -Rust を付けずに確かめる (-Rust で揃えた PC でも、Build Tools と rustup の行は出ない)。
 
 .PARAMETER Private
-gh を入れて github.com にログインし、pollenjp の private な repo (dotfiles-private・claude-skills) も clone する形にする。ホストの値の
-道具の switch privateRepos を on にした PC で使う (runner の手順 bootstrap も、そのホストでは -Check -Private を流す)。
+gh を入れて github.com にログインし、pollenjp の private な repo (dotfiles-private・claude-skills) も clone する形にする。Build Tools と
+rustup も入れる (-Rust を含む。claude-skills の道具を cargo で作るため)。ホストの値の道具の switch privateRepos を on にした PC で使う
+(runner の手順 bootstrap も、そのホストでは -Check -Private を流す)。
 
 .PARAMETER Check
-今の状態を出すだけで、何も変えない (SAC の警告は同じく最初に出す)。終了コードは 0 = 直すことが無い・3 = 入っていない・無いものだけ
-(流せば揃う)・1 = ほかに直すことがある・2 = winget が無い・思わぬ例外。
+今の状態を出すだけで、何も変えない (SAC の警告は同じく最初に出す)。表に出すのは、その形で入れるものだけ (既定の形の表に Build Tools と
+rustup の行は出ない)。終了コードは 0 = 直すことが無い・3 = 入っていない・無いものだけ (流せば揃う)・1 = ほかに直すことがある・
+2 = winget が無い・思わぬ例外。
 #>
 [CmdletBinding()]
 param(
@@ -92,6 +105,7 @@ param(
     [string]$PwshVersion = '7.6.10.0',
     [string]$VsBuildToolsVersion = '17.14.44',
     [string]$RustupVersion = '1.29.3',
+    [switch]$Rust,
     [switch]$Private,
     [switch]$Check
 )
@@ -103,6 +117,11 @@ param(
 # rustup の既定の host。GNU の host は windows-sys 0.61 (windows-link の raw-dylib) の build に MinGW の dlltool と as が要り、toolchain に
 # 同梱の dlltool だけでは import library を作れないので、MSVC にする (dotfiles-private の ADR 058)
 $script:RustHost = 'x86_64-pc-windows-msvc'
+
+# Rust の道具 (Get-BootstrapPackages の Name)。runner を手元で build する・claude-skills の道具を cargo で作るときに要り、入れる・確かめるのは
+# -Rust と -Private (-Rust を含む) のときだけ。既定の形の runner は、dotfiles 関数が GitHub の Release から落とした exe で動く (dotfiles-private の
+# ADR 117)
+$script:RustToolNames = @('vs-buildtools', 'rustup')
 
 # Build Tools に入れるもの: C++ のワークロード (必須の部品だけ)・MSVC の x64 の build tools・Windows SDK。MSVC と SDK はワークロードの
 # 推奨の部品で、ワークロードだけでは入らないので名指しする (rustup 1.29.3 が自分で Visual Studio を入れるときと同じ 2 つ)
@@ -502,10 +521,11 @@ function Get-RustupInitArgument {
     "--default-host $script:RustHost --default-toolchain none"
 }
 
-# 入れる道具。並びは入れる順 (rustup-init が MSVC の有無を見るので、Build Tools を rustup より先に)。gh は -Private のときだけ。
+# 入れる道具。並びは入れる順 (rustup-init が MSVC の有無を見るので、Build Tools を rustup より先に)。gh は -Private のときだけ、Rust の道具
+# (Build Tools・rustup。$script:RustToolNames) は -Rust か -Private (-Rust を含む) のときだけ。
 # AccountAdmin は普段のアカウントが管理者か (PowerShell 7 の入れ方を決める。Test-AccountAdmin)
 function Get-BootstrapPackages {
-    param([string]$GitVersion, [string]$GhVersion, [string]$PwshVersion, [string]$VsBuildToolsVersion, [string]$RustupVersion, [switch]$Private, [bool]$AccountAdmin)
+    param([string]$GitVersion, [string]$GhVersion, [string]$PwshVersion, [string]$VsBuildToolsVersion, [string]$RustupVersion, [switch]$Private, [switch]$Rust, [bool]$AccountAdmin)
     # パッケージ ID は 1 行ずつの変数に書く (nix/scripts/check-winget-version.sh がこの行を読む)
     $gitPackageId = 'Git.Git'
     $ghPackageId = 'GitHub.cli'
@@ -536,7 +556,8 @@ function Get-BootstrapPackages {
         [pscustomobject]@{ Name = 'vs-buildtools'; Title = 'Visual Studio Build Tools 2022'; PackageId = $vsBuildToolsPackageId; Version = $VsBuildToolsVersion; Silent = $false; Args = @('--custom', $vsCustom); RetryElevated = $false }
         [pscustomobject]@{ Name = 'rustup'; Title = 'rustup'; PackageId = $rustupPackageId; Version = $RustupVersion; Silent = $true; Args = @('--custom', (Get-RustupInitArgument)); RetryElevated = $false }
     )
-    $all | Where-Object { $Private -or ($_.Name -ne 'gh') }
+    $withRust = [bool]($Private -or $Rust)
+    $all | Where-Object { ($Private -or ($_.Name -ne 'gh')) -and ($withRust -or ($script:RustToolNames -notcontains $_.Name)) }
 }
 
 # clone する repo と置き場 (ghq の既定の root の下。後で ghq を入れても ghq root は同じ所を指す)。既定の形は public な dotfiles だけを
@@ -585,7 +606,8 @@ function Get-GitAnonymousCloneArguments {
 
 # 揃え終えたときに出す、次に打つコマンド (runner の dotfiles 関数を clone から読み込み、dotfiles apply を流す)。dotfiles apply の手順
 # powershell-profile が $PROFILE に読み込みの 1 行を足すので、2 回目からは新しい PowerShell で dotfiles を打てる。HostFile は手元の
-# ホストの値の置き場、HostFileExists はそれがあるか
+# ホストの値の置き場、HostFileExists はそれがあるか。既定の形 (と -Rust) は、初めての dotfiles apply が runner の exe を GitHub の Release から
+# 落とすことも添える (届かない PC (プロキシの内側など) で、先に分かるように)
 function Format-BootstrapNextSteps {
     param([string]$DotfilesDir, [switch]$Private, [string]$HostFile, [bool]$HostFileExists)
     # Windows のパスは字でつなぐ (Join-Path は、テストを流す Linux の pwsh で C: のドライブを探しに行く)
@@ -600,6 +622,7 @@ function Format-BootstrapNextSteps {
             "※ 手元のホストの値 ($HostFile) もある。dotfiles-private の win\hosts\ のファイルもあると、dotfiles apply は止まる (どちらを使うか決まらない)。dotfiles-private の値を使うなら、手元の host.toml を退ける"
         }
     } else {
+        '初めての dotfiles apply は、runner の exe を GitHub の Release から落とす (github.com と release-assets.githubusercontent.com に届くこと)'
         "ホストの値は $HostFile (minimum の雛形を写したもの)。使う道具は [tools] に 1 行ずつ足す (書き方は dotfiles の win\README.md の「ホストの値」)"
     }
 }
@@ -653,13 +676,14 @@ function Get-PwshRow {
     New-BootstrapRow $Package.Title "$($Package.Installed) ($how)" '' ''
 }
 
-# 状態から表の行を作る。状態の形は Get-BootstrapState (テストでは New-State) が返すもの
+# 状態から表の行を作る。状態の形は Get-BootstrapState (テストでは New-State) が返すもの。Build Tools と rustup の行は、Rust の道具を入れる形
+# (状態の Rust。-Rust・-Private) のときだけ出す (既定の形の表には出さず、終了コードにも数えない)
 function Get-BootstrapRows {
     param($State)
     $sacNote = '※ Smart App Control は、Windows セキュリティ → アプリとブラウザーの制御 → スマート アプリ コントロールの設定 でオフにする (Windows によっては、戻すのに再インストールが要る)'
     # SAC がオフでなくても止めない (ユーザーの決まり。最初の警告と、この行の ⚠ で知らせる)
     switch ($State.Sac) {
-        'on' { New-BootstrapRow 'Smart App Control' 'オン → オフにする (cargo の産物の exe が止められ、Rust の runner を作れない)' 'manual' $sacNote }
+        'on' { New-BootstrapRow 'Smart App Control' 'オン → オフにする (runner の exe (配った exe も cargo の産物も) が止められて動かない)' 'manual' $sacNote }
         'eval' { New-BootstrapRow 'Smart App Control' '評価モード → オフにする (今は止めないが、いつオンに変わるか分からない)' 'manual' $sacNote }
         'off' { New-BootstrapRow 'Smart App Control' 'オフ' '' '' }
         default { New-BootstrapRow 'Smart App Control' 'この Windows には無い' '' '' }
@@ -675,6 +699,7 @@ function Get-BootstrapRows {
         New-BootstrapRow 'CPU' "$($State.Arch) → 対象外 (x64 だけ。Rust は MSVC の host $script:RustHost を使う)" 'blocker' ''
     }
     foreach ($p in @($State.Packages)) {
+        if ((-not $State.Rust) -and ($script:RustToolNames -contains $p.Name)) { continue }
         if ($p.Name -eq 'pwsh') {
             Get-PwshRow -Package $p -AccountAdmin ([bool]$State.AccountAdmin)
             continue
@@ -748,11 +773,11 @@ function Format-SacWarning {
     $where = '   オフにする場所: Windows セキュリティ → アプリとブラウザーの制御 → スマート アプリ コントロールの設定 (Windows によっては、戻すのに再インストールが要る)'
     switch ($Sac) {
         'on' {
-            '⚠️ Smart App Control がオンになっている。cargo が作った exe (Rust の runner・build script) は止められて動かないので、Rust の runner を流す前にオフにする (bootstrap はこのまま続ける)'
+            '⚠️ Smart App Control がオンになっている。runner の exe (配った exe も cargo の産物も) は止められて動かないので、Rust の runner を流す前にオフにする (bootstrap はこのまま続ける)'
             $where
         }
         'eval' {
-            '⚠️ Smart App Control が評価モードになっている。いつオンに変わるか分からず、オンになると cargo が作った exe が止められるので、オフにしておく (bootstrap はこのまま続ける)'
+            '⚠️ Smart App Control が評価モードになっている。いつオンに変わるか分からず、オンになると runner の exe (配った exe も cargo の産物も) が止められるので、オフにしておく (bootstrap はこのまま続ける)'
             $where
         }
     }
@@ -1141,10 +1166,11 @@ function Get-RepoState {
     [pscustomobject]@{ Name = $Target.Name; Url = $Target.Url; Directory = $dir; State = $state; Origin = $origin; AutoCrlf = $crlf }
 }
 
-# 今の状態を読む (何も変えない。管理者は要らない)。-Private なら gh のログインを、既定の形なら手元のホストの値を読む。AccountAdmin は
-# 普段のアカウントが管理者か (Test-AccountAdmin で 1 回読んだもの。状態に持たせ、PowerShell 7 の行を決める)
+# 今の状態を読む (何も変えない。管理者は要らない)。-Private なら gh のログインを、既定の形なら手元のホストの値を読む。読む道具は Packages の
+# ものだけ (既定の形は Build Tools と rustup を読まない)。状態の Rust は Rust の道具を入れる形か (-Rust か -Private。表の行と入れる流れが見る)。
+# AccountAdmin は普段のアカウントが管理者か (Test-AccountAdmin で 1 回読んだもの。状態に持たせ、PowerShell 7 の行を決める)
 function Get-BootstrapState {
-    param([object[]]$Packages, $Paths, [string]$Arch, [switch]$Private, [bool]$AccountAdmin)
+    param([object[]]$Packages, $Paths, [string]$Arch, [switch]$Private, [switch]$Rust, [bool]$AccountAdmin)
     $states = foreach ($p in $Packages) {
         $exists = $false
         $installed = $null
@@ -1239,6 +1265,7 @@ function Get-BootstrapState {
         Arch         = $Arch
         Sac          = Get-BootstrapSac
         Private      = [bool]$Private
+        Rust         = [bool]($Private -or $Rust)
         Packages     = $states
         GhLoggedIn   = $loggedIn
         Repos        = @($repos)
@@ -1276,7 +1303,7 @@ function Write-BootstrapNextSteps {
 }
 
 function Invoke-InstallBootstrap {
-    param([string]$GitVersion, [string]$GhVersion, [string]$PwshVersion, [string]$VsBuildToolsVersion, [string]$RustupVersion, [switch]$Private, [switch]$Check)
+    param([string]$GitVersion, [string]$GhVersion, [string]$PwshVersion, [string]$VsBuildToolsVersion, [string]$RustupVersion, [switch]$Rust, [switch]$Private, [switch]$Check)
     # 最初に SAC を確かめ、オフでなければ警告して続ける (止めない。オフにするのはユーザー)
     $sacWarning = @(Format-SacWarning -Sac (Get-BootstrapSac))
     if ($sacWarning.Count -gt 0) {
@@ -1290,15 +1317,17 @@ function Invoke-InstallBootstrap {
     $arch = Get-OsArchitecture
     # 普段のアカウントが管理者か (1 回だけ読む)。PowerShell 7 の入れ方 (管理者の PC は MSIX、管理者でない PC は MSI) と表の行を決める
     $accountAdmin = [bool](Test-AccountAdmin)
-    $packages = @(Get-BootstrapPackages -GitVersion $GitVersion -GhVersion $GhVersion -PwshVersion $PwshVersion -VsBuildToolsVersion $VsBuildToolsVersion -RustupVersion $RustupVersion -Private:$Private -AccountAdmin $accountAdmin)
+    $packages = @(Get-BootstrapPackages -GitVersion $GitVersion -GhVersion $GhVersion -PwshVersion $PwshVersion -VsBuildToolsVersion $VsBuildToolsVersion -RustupVersion $RustupVersion -Private:$Private -Rust:$Rust -AccountAdmin $accountAdmin)
     $paths = Get-BootstrapPaths
     if ($Private) {
         Write-Host 'Windows の bootstrap (dotfiles の win/bootstrap/Install-Bootstrap.ps1 -Private。gh で github.com にログインし、dotfiles・dotfiles-private・claude-skills を clone する)'
+    } elseif ($Rust) {
+        Write-Host 'Windows の bootstrap (dotfiles の win/bootstrap/Install-Bootstrap.ps1 -Rust。gh を使わず、public な dotfiles だけを clone し、runner を手元で build する Visual Studio Build Tools と rustup も入れる。private な repo も使う PC は -Private)'
     } else {
         Write-Host 'Windows の bootstrap (dotfiles の win/bootstrap/Install-Bootstrap.ps1。gh を使わず、public な dotfiles だけを clone する。private な repo も使う PC は -Private)'
     }
 
-    $state = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch -Private:$Private -AccountAdmin $accountAdmin
+    $state = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch -Private:$Private -Rust:$Rust -AccountAdmin $accountAdmin
     $rows = @(Get-BootstrapRows -State $state)
     Write-BootstrapRows -Rows $rows
     $code = Get-BootstrapExitCode -Rows $rows
@@ -1375,10 +1404,11 @@ function Invoke-InstallBootstrap {
     }
 
     # 2. 読み直して、入っている道具に pin・Build Tools の足りないもの・rustup の自己更新の止めと既定の host を足す (PowerShell 7 の pin は
-    # 1 で入れたときだけ)
-    $state = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch -Private:$Private -AccountAdmin $accountAdmin
+    # 1 で入れたときだけ)。Build Tools と rustup に触るのは、Rust の道具を入れる形 (-Rust・-Private) のときだけ
+    $state = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch -Private:$Private -Rust:$Rust -AccountAdmin $accountAdmin
     foreach ($s in @($state.Packages)) {
         if (-not $s.Exists) { continue }
+        if ((-not $state.Rust) -and ($script:RustToolNames -contains $s.Name)) { continue }
         if ((-not $s.Pinned) -and ($s.Name -ne 'pwsh')) {
             $pin = Invoke-Winget -Arguments (Get-WingetPinAddArguments -PackageId $s.PackageId)
             if ($pin.ExitCode -eq 0) { Write-Host "$($s.Title): winget pin を足した (winget upgrade --all から外れる)" }
@@ -1414,7 +1444,7 @@ function Invoke-InstallBootstrap {
             if ($login -ne 0) {
                 Write-Host ('gh のログインが終わらなかった (止めた・失敗した。終了コード 0x{0:X8})。clone はしない。流し直すと、ログインからやり直す' -f $login) -ForegroundColor Yellow
             }
-            $state = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch -Private:$Private -AccountAdmin $accountAdmin
+            $state = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch -Private:$Private -Rust:$Rust -AccountAdmin $accountAdmin
         }
     }
 
@@ -1460,7 +1490,7 @@ function Invoke-InstallBootstrap {
 
     # 5. (既定の形だけ) 手元のホストの値が無く、dotfiles-private の clone も無ければ、clone の雛形を写す (あれば上書きしない)
     if (-not $Private) {
-        $state = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch -Private:$Private -AccountAdmin $accountAdmin
+        $state = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch -Private:$Private -Rust:$Rust -AccountAdmin $accountAdmin
         $dotfiles = @($state.Repos | Where-Object { $_.Name -eq 'dotfiles' })[0]
         if ((-not $state.HostFile.Exists) -and (-not $state.HostFile.PrivateClone) -and ($dotfiles.State -eq 'ok')) {
             $template = "$($dotfiles.Directory.TrimEnd('\'))\win\templates\host.minimum.toml"
@@ -1474,7 +1504,7 @@ function Invoke-InstallBootstrap {
 
     # 揃ったかを読み直して確かめる
     Write-Host ''
-    $after = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch -Private:$Private -AccountAdmin $accountAdmin
+    $after = Get-BootstrapState -Packages $packages -Paths $paths -Arch $arch -Private:$Private -Rust:$Rust -AccountAdmin $accountAdmin
     $rows = @(Get-BootstrapRows -State $after)
     Write-BootstrapRows -Rows $rows
     if ((Get-BootstrapExitCode -Rows $rows) -eq 0) {
@@ -1496,7 +1526,7 @@ if ($MyInvocation.InvocationName -ne '.') {
     Set-StrictMode -Version Latest
     $exitCode = $null
     try {
-        $exitCode = Invoke-InstallBootstrap -GitVersion $GitVersion -GhVersion $GhVersion -PwshVersion $PwshVersion -VsBuildToolsVersion $VsBuildToolsVersion -RustupVersion $RustupVersion -Private:$Private -Check:$Check
+        $exitCode = Invoke-InstallBootstrap -GitVersion $GitVersion -GhVersion $GhVersion -PwshVersion $PwshVersion -VsBuildToolsVersion $VsBuildToolsVersion -RustupVersion $RustupVersion -Rust:$Rust -Private:$Private -Check:$Check
     } catch {
         Write-Host "エラーで止まった: $($_.Exception.Message)" -ForegroundColor Red
         Write-Host $_.ScriptStackTrace

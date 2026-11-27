@@ -9,7 +9,9 @@
 # ## 確かめること
 #
 #   - PowerShell が配列にした `--steps files,ntn` (`--steps=files,ntn` も) を、runner には , でつないだ 1 つの引数で渡す
-#   - dotfiles は win/runner に入って cargo run --quiet --release --locked -- <引数> を打ち、終わったら元の場所に戻る
+#   - clone に launcher (win/powershell/Invoke-DotfilesRunner.ps1) があれば、clone と引数を渡して呼び、$LASTEXITCODE は launcher のもの
+#     (cargo は自分で打たない。今いる場所は動かない)
+#   - launcher の無い古い clone では、dotfiles は win/runner に入って cargo run --quiet --release --locked -- <引数> を打ち、終わったら元の場所に戻る
 #   - clone に runner が無ければ、知らせて $LASTEXITCODE を 2 にする (cargo は打たない)
 #   - dotfiles --self-update は、clone の中の Invoke-DotfilesSelfUpdate.ps1 に後ろの引数を 1 つずつの文字列で (配列は , でつないで) 渡し、
 #     $LASTEXITCODE はその終了コードにする (cargo は自分で打たない)。script が無ければ知らせて 2。--self-update が最初の引数でなければ runner に渡す
@@ -155,6 +157,19 @@ try {
     # --self-update は最初の引数のときだけ。ほかの位置なら runner の引数のまま渡す (runner が知らない option として断る)
     $out = @(Invoke-Child -TempHome $withRunner -Command 'dotfiles apply --self-update')
     Test-Case '--self-update が最初の引数でなければ、runner の引数のまま' 'args=run|--quiet|--release|--locked|--|apply|--self-update' { $out | Where-Object { $_ -like 'args=*' } }
+
+    # clone に launcher (Invoke-DotfilesRunner.ps1) があれば、clone と引数を渡して呼ぶだけ (中身は Invoke-DotfilesRunner.Tests.ps1 が確かめる)。
+    # ここでは、引数と終了コードを控える偽の launcher を clone に置き、渡し方を見る
+    $launcherClone = [IO.Path]::Combine($withRunner, 'ghq', 'github.com', 'pollenjp', 'dotfiles')
+    Set-Content -LiteralPath ([IO.Path]::Combine($launcherClone, 'win', 'powershell', 'Invoke-DotfilesRunner.ps1')) -Encoding utf8 -Value @(
+        '"launcher-args=$($args -join ''|'')"'
+        'exit 4'
+    )
+    $out = @(Invoke-Child -TempHome $withRunner -Command 'dotfiles check --steps files,ntn')
+    Test-Case 'launcher: clone に launcher があれば、clone と引数 (配列は , でつなぐ) を渡す' "launcher-args=$launcherClone|check|--steps|files,ntn" { $out | Where-Object { $_ -like 'launcher-args=*' } }
+    Test-Case 'launcher: cargo は自分で打たない' 0 { @($out | Where-Object { $_ -like 'args=*' }).Count }
+    Test-Case 'launcher: $LASTEXITCODE は launcher の終了コード' 'code=4' { $out | Where-Object { $_ -like 'code=*' } }
+    Test-Case 'launcher: 今いる場所は動かない' "after=$withRunner" { $out | Where-Object { $_ -like 'after=*' } }
 } finally {
     Remove-Item -LiteralPath $withRunner -Recurse -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $withoutRunner -Recurse -Force -ErrorAction SilentlyContinue

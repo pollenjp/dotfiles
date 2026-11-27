@@ -1,0 +1,200 @@
+name: win-runner-release
+
+# Windows の runner (win/runner/。Rust の dotfiles-win) の exe を作り、key ごとの GitHub の Release に置く (win/README.md の「runner の exe (Release)」。
+# dotfiles-private の docs/adr/117_win_runner_exe_release_*)。PC の PowerShell の dotfiles 関数 (win/powershell/Invoke-DotfilesRunner.ps1) が、
+# clone の HEAD の win/runner に合う key の exe を落として使うので、minimum の PC に Visual Studio Build Tools と rustup が要らない。
+#
+# - key は win/runner の git の tree の hash (git rev-parse HEAD:win/runner)。Release は win-runner-<key の頭 12 字> (prerelease)、asset は
+#   dotfiles-win.exe (C ランタイムを静的にリンクし、key と作った commit を埋める) と dotfiles-win.exe.sha256
+# - build の job (書けない token) が作って確かめ (Visual C++ の runtime の DLL を読まない・version の key・雛形のホストの値の list・launcher の通しの
+#   試験)、artifact に上げる。公開の job (書ける token) は artifact を落として Release に置き、attestation を作り、古い Release を消す
+#   (.github/scripts/win-runner-publish.sh)。PR では公開せず、公開の script を --dry-run で流す
+# - 公開の job が動くのは、repo の変数 WIN_RUNNER_PUBLISH が true の main の push か、main での手動の実行 (input publish) のときだけ。最初の
+#   Release は手動の実行で作り、PC で確かめてから変数を入れる
+# - 同じ key の Release があれば作らない (launcher・workflow だけを変えた push・revert で同じ中身に戻った push)。公開してある exe と .sha256 が
+#   合うかだけを見る (今回の build とはバイトで比べない。同じ key でも build は再現しない)
+on:
+  push:
+    branches: [main]
+    paths:
+      - "win/runner/**"
+      - "win/powershell/Invoke-DotfilesRunner.ps1"
+      - "win/templates/host.minimum.toml"
+      - ".github/workflows/win-runner-release.yml"
+      - ".github/scripts/win-runner-*"
+  pull_request:
+    paths:
+      - "win/runner/**"
+      - "win/powershell/Invoke-DotfilesRunner.ps1"
+      - "win/templates/host.minimum.toml"
+      - ".github/workflows/win-runner-release.yml"
+      - ".github/scripts/win-runner-*"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Release を公開する (main でだけ効く。最初の公開・打ち直し)"
+        type: boolean
+        default: false
+
+# PR は同じ branch の前の run を止める。main は止めない (key ごとの Release なので、後の push が前の push の Release を要らなくしない。待たせると、
+# 待っている前の run が後の run に取り消されるので、commit ごとに別の組にする)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    outputs:
+      key: ${{ steps.key.outputs.key }}
+    steps:
+      # PR は merge の結果でなく PR の head を build する (key を PR の branch の win/runner と同じにし、artifact の exe を、PR の branch を
+      # checkout した PC の置き場にそのまま置いて試せるように。merge の結果の確かめは win-runner.yml)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: key (win/runner の git の tree の hash)
+        id: key
+        shell: bash
+        run: |
+          key=$(git rev-parse HEAD:win/runner)
+          echo "key=${key}" >>"${GITHUB_OUTPUT}"
+          echo "key: ${key}"
+
+      # 版と components は rust-toolchain.toml から rustup が入れる
+      - name: toolchain (rust-toolchain.toml)
+        working-directory: win/runner
+        run: rustup toolchain install
+
+      # C ランタイムを静的にリンクするのは win/runner/.cargo/config.toml (環境変数 RUSTFLAGS を置くと無視されるので、ここでは置かない)
+      - name: build (key と commit を埋める)
+        working-directory: win/runner
+        env:
+          DOTFILES_WIN_RUNNER_KEY: ${{ steps.key.outputs.key }}
+          DOTFILES_WIN_RUNNER_COMMIT: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: cargo build --release --locked
+
+      # Visual C++ の再頒布可能パッケージの無い Windows (Build Tools を入れない minimum の PC) でも起きること
+      - name: Visual C++ の runtime の DLL を読まない
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Select-Object -First 1
+          $imports = & $dumpbin.FullName /nologo /dependents win/runner/target/release/dotfiles-win.exe
+          $imports
+          if ($imports -match 'vcruntime|msvcp|api-ms-win-crt') { throw 'dotfiles-win.exe が Visual C++ の runtime の DLL を読む' }
+
+      # .sha256 は sha256sum の形 (改行は LF。公開の job が sha256sum --check で読む)
+      - name: dist (exe と .sha256)
+        shell: pwsh
+        run: |
+          $dist = Join-Path $PWD 'dist'
+          $null = New-Item -ItemType Directory -Force -Path $dist
+          Copy-Item -LiteralPath win/runner/target/release/dotfiles-win.exe -Destination $dist
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $dist 'dotfiles-win.exe')).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText((Join-Path $dist 'dotfiles-win.exe.sha256'), "$hash  dotfiles-win.exe`n")
+          Get-Content -LiteralPath (Join-Path $dist 'dotfiles-win.exe.sha256')
+
+      - name: 煙試験 (version の key と、雛形のホストの値の list)
+        shell: pwsh
+        env:
+          KEY: ${{ steps.key.outputs.key }}
+        run: |
+          $lines = @(& dist/dotfiles-win.exe version)
+          $lines
+          if ($LASTEXITCODE -ne 0) { throw "version が終了コード $LASTEXITCODE で終わった" }
+          if (-not ($lines -ccontains "key=$env:KEY")) { throw "version の key が $env:KEY でない" }
+          if (-not ($lines -ccontains 'build=release')) { throw 'version が build=release でない' }
+          & dist/dotfiles-win.exe list --repo $PWD --host-file win/templates/host.minimum.toml
+          if ($LASTEXITCODE -ne 0) { throw "list が終了コード $LASTEXITCODE で終わった" }
+
+      - name: launcher の通しの試験 (手元の HTTP server から落とす)
+        shell: pwsh
+        run: ./.github/scripts/win-runner-e2e.ps1 -Dist dist -Clone $PWD
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: dotfiles-win-${{ steps.key.outputs.key }}
+          path: dist/*
+          if-no-files-found: error
+
+  # PR では公開しない。公開の script を読むだけの token で流し、作るもの・消すものを出す
+  publish-dry-run:
+    name: publish (dry-run)
+    if: github.event_name == 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: win-runner-publish.sh --dry-run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          KEY: ${{ needs.build.outputs.key }}
+          COMMIT: ${{ github.sha }}
+        run: ./.github/scripts/win-runner-publish.sh --dry-run --key "${KEY}" --commit "${COMMIT}" --dist dist
+
+  publish:
+    name: publish
+    needs: build
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      ((github.event_name == 'push' && vars.WIN_RUNNER_PUBLISH == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # 同じ key の公開を並べない (draft を消し合う・作るのがぶつかる)。待っている同じ key の公開は、後から来たものに取り消されてよい (同じ中身)
+    concurrency:
+      group: win-runner-publish-${{ needs.build.outputs.key }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: dotfiles-win-${{ needs.build.outputs.key }}
+          path: dist
+
+      - name: 同じ key の Release があるか
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          KEY: ${{ needs.build.outputs.key }}
+        run: |
+          state=$(./.github/scripts/win-runner-publish.sh --state --key "${KEY}")
+          echo "state=${state}" >>"${GITHUB_OUTPUT}"
+          echo "Release: ${state}"
+
+      # 来歴 (どの workflow がどの commit から作ったか)。gh のある PC で gh attestation verify dotfiles-win.exe -R pollenjp/dotfiles。同じ key の
+      # Release があれば、置くのは前の exe なので作らない
+      - name: attestation
+        if: steps.state.outputs.state != 'published'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/dotfiles-win.exe
+
+      - name: win-runner-publish.sh --publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          KEY: ${{ needs.build.outputs.key }}
+          COMMIT: ${{ github.sha }}
+        run: ./.github/scripts/win-runner-publish.sh --publish --key "${KEY}" --commit "${COMMIT}" --dist dist

@@ -19,7 +19,8 @@
 #     ⚠️ の行にも runner の後の繰り返しにも出さない。dotfiles の clone が無いのは今までどおり ⚠
 #   - 見出しは gh の有無で替える (gh が無ければ、GitHub の remote は資格情報なしの HTTPS で取ると出す)
 #   - --dry-run は fetch だけして (remote-tracking の ref は進む)、進める commit を出し、HEAD も runner も動かさない
-#   - runner の引数があれば、進めた後に dotfiles 関数と同じ場所 (win\runner) で同じ引数の cargo を打ち、終了コードは runner のもの (⚠ があれば
+#   - runner の引数があれば、進めた後に dotfiles 関数と同じ場所 (win\runner) で同じ引数の cargo を打ち (clone に launcher があれば launcher を通して。
+#     launcher の中は Invoke-DotfilesRunner.Tests.ps1)、終了コードは runner のもの (⚠ があれば
 #     0 と 3 を 1 に)。⚠ は runner の出力の後にもう一度出す。runner が無ければ 2
 #   - dotfiles.ps1 が変わったら、締めに新しい PowerShell を開くよう出す (配った写しが古い・無ければ、配ってから)。変わらなければ出さない
 #   - 引数の誤りと --help では、何も fetch しない
@@ -34,6 +35,7 @@ Set-StrictMode -Version Latest
 
 $Script = Join-Path $PSScriptRoot 'Invoke-DotfilesSelfUpdate.ps1'
 $dotfiles = Join-Path $PSScriptRoot 'dotfiles.ps1'
+$launcherScript = Join-Path $PSScriptRoot 'Invoke-DotfilesRunner.ps1'
 
 # dot-source すると関数だけを読み、本体は走らない (Invoke-DotfilesSelfUpdate.ps1 の末尾)
 . $Script
@@ -263,7 +265,7 @@ if ($realGit.Count -eq 0) {
     # 一時の HOME に、3 つの repo の remote (bare) と、それを clone した ghq の clone を作る。seed は remote に commit を足すための作業場。
     # dotfiles には runner の Cargo.toml (-NoRunner なら無し)・dotfiles.ps1・この script の写し (dotfiles 関数が clone の中から呼ぶ) を置く
     function New-Fixture {
-        param([switch]$NoRunner)
+        param([switch]$NoRunner, [switch]$WithLauncher)
         $root = Join-Path ([IO.Path]::GetTempPath()) ("dotfiles-self-update-tests-" + [Guid]::NewGuid())
         $fx = [pscustomobject]@{
             Root    = $root
@@ -282,6 +284,7 @@ if ($realGit.Count -eq 0) {
                 if (-not $NoRunner) { Write-TestFile ([IO.Path]::Combine($seed, 'win', 'runner', 'Cargo.toml')) "[package]`n" }
                 Write-TestFile ([IO.Path]::Combine($seed, 'win', 'powershell', 'dotfiles.ps1')) "# v1`n"
                 Copy-Item -LiteralPath $Script -Destination ([IO.Path]::Combine($seed, 'win', 'powershell', 'Invoke-DotfilesSelfUpdate.ps1'))
+                if ($WithLauncher) { Copy-Item -LiteralPath $launcherScript -Destination ([IO.Path]::Combine($seed, 'win', 'powershell', 'Invoke-DotfilesRunner.ps1')) }
             }
             $null = Invoke-TestGit @('-C', $seed, 'add', '--all')
             $null = Invoke-TestGit @('-C', $seed, 'commit', '--quiet', '-m', "$n 1")
@@ -324,7 +327,7 @@ if ($realGit.Count -eq 0) {
     # Windows PowerShell 5.1 は $HOME を HOMEDRIVE と HOMEPATH から引くので、Windows ではその 2 つも fixture の home にする。子の $HOME が fixture の
     # home でなければ、何も流さずに止める (script は $HOME の下の clone を進めるので、本物の clone に触らない)
     function Invoke-SelfUpdateChild {
-        param($Fixture, [string]$Command, [int]$CargoExit = 0, [string]$PathPrefix = '')
+        param($Fixture, [string]$Command, [int]$CargoExit = 0, [string]$PathPrefix = '', [string]$RunnerMode = '')
         $child = Join-Path $Fixture.Root 'child.ps1'
         $body = @(
             'param([string]$Script, [string]$Dotfiles, [string]$PathPrefix, [string]$ExpectedHome)'
@@ -343,7 +346,7 @@ if ($realGit.Count -eq 0) {
         Set-Content -LiteralPath $child -Value $body -Encoding utf8
         $saved = @{
             HOME = $env:HOME; USERPROFILE = $env:USERPROFILE; HOMEDRIVE = $env:HOMEDRIVE; HOMEPATH = $env:HOMEPATH
-            NO_COLOR = $env:NO_COLOR; FAKE_CARGO_EXIT = $env:FAKE_CARGO_EXIT
+            NO_COLOR = $env:NO_COLOR; FAKE_CARGO_EXIT = $env:FAKE_CARGO_EXIT; DOTFILES_RUNNER = $env:DOTFILES_RUNNER
         }
         # Windows PowerShell 5.1 は外のコマンドに空の文字列の引数を渡さないので、空の -PathPrefix は渡さない。Stop のままだと、子の stderr の
         # 1 行目で止まる
@@ -358,6 +361,7 @@ if ($realGit.Count -eq 0) {
             }
             $env:NO_COLOR = '1'
             $env:FAKE_CARGO_EXIT = "$CargoExit"
+            $env:DOTFILES_RUNNER = $RunnerMode
             $childArgs = @('-NoProfile', '-NonInteractive', '-File', $child, '-Script', $Script, '-Dotfiles', $dotfiles, '-ExpectedHome', $Fixture.Home)
             if ($PathPrefix) { $childArgs += @('-PathPrefix', $PathPrefix) }
             $pwsh = (Get-Process -Id $PID).Path
@@ -369,6 +373,7 @@ if ($realGit.Count -eq 0) {
             $env:HOMEPATH = $saved.HOMEPATH
             $env:NO_COLOR = $saved.NO_COLOR
             $env:FAKE_CARGO_EXIT = $saved.FAKE_CARGO_EXIT
+            $env:DOTFILES_RUNNER = $saved.DOTFILES_RUNNER
         }
     }
 
@@ -632,6 +637,24 @@ if ($realGit.Count -eq 0) {
         $plain = @(Invoke-SelfUpdateChild -Fixture $fx -Command '. $Dotfiles; dotfiles check --steps files,ntn')
         Test-Case 'dotfiles 関数: --self-update の runner は、--self-update なしと同じ場所・同じ引数で打つ' "$(Get-ChildValue $plain 'cargo-cwd')|$(Get-ChildValue $plain 'cargo-args')" {
             "$(Get-ChildValue $out 'cargo-cwd')|$(Get-ChildValue $out 'cargo-args')"
+        }
+    } finally {
+        Remove-Fixture $fx
+    }
+
+    # --- launcher (Invoke-DotfilesRunner.ps1) のある clone では、進めた後の clone の launcher を通して runner を起こす。DOTFILES_RUNNER=cargo なので、
+    #     launcher は win\runner で同じ cargo を打つ (Release から落とす流れは Invoke-DotfilesRunner.Tests.ps1 と CI の通しの試験)
+    $fx = New-Fixture -WithLauncher
+    try {
+        $out = @(Invoke-SelfUpdateChild -Fixture $fx -Command '. $Dotfiles; dotfiles --self-update check --steps files,ntn' -CargoExit 3 -RunnerMode 'cargo')
+        $runnerDir = [IO.Path]::Combine($fx.Clones, 'dotfiles', 'win', 'runner')
+        Test-Case 'launcher: --self-update の runner は、進めた後の clone の launcher が起こす (cargo のモードでは同じ cargo)' "$runnerDir|run|--quiet|--release|--locked|--|check|--steps|files,ntn|3" {
+            "$(Get-ChildValue $out 'cargo-cwd')|$(Get-ChildValue $out 'cargo-args')|$(Get-ChildValue $out 'code')"
+        }
+        Test-Case 'launcher: cargo のモードで build することを 1 行知らせる' $true { [bool]($out | Where-Object { $_ -like '· $env:DOTFILES_RUNNER が cargo なので*' }) }
+        $plain = @(Invoke-SelfUpdateChild -Fixture $fx -Command '. $Dotfiles; dotfiles check --steps files,ntn' -RunnerMode 'cargo')
+        Test-Case 'launcher: --self-update なしの dotfiles 関数も、同じ launcher で同じ cargo を打つ' "$(Get-ChildValue $out 'cargo-cwd')|$(Get-ChildValue $out 'cargo-args')" {
+            "$(Get-ChildValue $plain 'cargo-cwd')|$(Get-ChildValue $plain 'cargo-args')"
         }
     } finally {
         Remove-Fixture $fx
