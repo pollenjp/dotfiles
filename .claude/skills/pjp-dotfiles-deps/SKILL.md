@@ -42,6 +42,7 @@ dotfiles の依存の更新の、この repo 固有の手順と設定 (repo の�
 | type-clipboard (`win/type-clipboard/`) | 自作のアプリ。公開からの猶予を置かず、Release を出す流れで上げる。Smart App Control の評判の確かめが要る (`win/README.md` の「type-clipboard の新しい版を出したとき」) |
 | op-reason (`nix/pkgs/op-reason/` と `win/op-reason/`。`deps.toml` の `skip`) | 自作のアプリ (WSL の op の wrapper)。公開からの猶予を置かず、Release を出す流れで WSL と Windows を同じ PR で上げる (呼び出しの取り決め (payload の版) が変わった版どうしでは、WSL の op が Windows の `op-reason.exe` に断られる。`nix/README.md` の「op-reason の新しい版を出したとき」) |
 | PowerToys | 版を固定しない |
+| winget 自身 (`win/winget/Install-WinGet.ps1`) | 固定した版は下限で、新しい版を追いかけない (Store が使える PC は Store が上げる)。dotfiles の道具が新しい winget の動きを前提にするとき・直したい不具合があるときだけ、その PR で上げる (`win/README.md` の「winget の固定した版を上げる」) |
 | `nix/pkgs/upstream/` (`deps.toml` の `skip`) | 期間付きの例外 (`fromUpstream`) の中身。上げずに、片付け (「上げ方」) で扱う。項目が無いあいだはディレクトリも無い (`skip` と `[upstream_cleanup]` は、次に足す例外のために残す) |
 | `nix/pkgs/herdr-core/` の fetchurl (`deps.toml` の `skip`) | 版は `releases.json` に固定していて、Windows に固定した版 (pins の herdr-app・herdr-core) で見る。印 `# release-source:` を置かず、2 か所で知らせない (build の確かめは `[[checks]]` の `herdr-core` のまま流れる) |
 | mise のグローバルの道具 (go・node・usage・claude) | repo に版を書いていない (`nix/scripts/bootstrap-mise.sh` が版を書かずに入れる)。repo の範囲では上げず、merge の後の反映で案内する (「反映」) |

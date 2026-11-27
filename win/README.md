@@ -65,6 +65,7 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs
 | `tailscale/Install-Tailscale.ps1` | `%USERPROFILE%\.config\powershell\Install-Tailscale.ps1` | Tailscale を winget の `Tailscale.Tailscale` (machine スコープの MSI) で、固定した版で入れる (入っていないときだけ。入れた後は Tailscale の自動更新に任せる)。PowerShell の `Install-Tailscale` から呼ぶ。setup が入れるのは `dotfiles.wsl.windowsFiles.tailscale.enable = true` (minimum では既定で false) のマシンだけ ([後述](#tailscale)) |
 | `t3-code/Install-T3Code.ps1` | `%USERPROFILE%\.config\powershell\Install-T3Code.ps1` | T3 Code を winget の `T3Tools.T3Code` (user スコープ) で、固定した版で入れる (入っていないときだけ。入れた後は T3 Code の自動更新に任せる)。PowerShell の `Install-T3Code` から呼ぶ。入れるのは runner の `t3-code` で、ホストの値の `[tools] windowsT3Code = true` (minimum では既定で false) のマシンだけ ([後述](#t3-code)) |
 | `claude-desktop/Install-ClaudeDesktop.ps1` | `%USERPROFILE%\.config\powershell\Install-ClaudeDesktop.ps1` | Claude Desktop (Claude のデスクトップ版) を winget の `Anthropic.Claude` の MSIX (`--installer-type msix`) で、固定した版で入れる (入っていないときだけ。管理者の権限で入れるので UAC の確認が 1 回出る。入れた後は Claude Desktop の自動更新に任せる)。PowerShell の `Install-ClaudeDesktop` から呼ぶ。入れるのは runner の `claude-desktop` で、ホストの値の `[tools] windowsClaudeDesktop` が on (既定はグループ all だけ) のマシンだけ ([後述](#claude-desktop)) |
+| `winget/Install-WinGet.ps1` | `%USERPROFILE%\.config\powershell\Install-WinGet.ps1` | winget 自身 (アプリ インストーラー) を、GitHub の `microsoft/winget-cli` の Release から固定した版 (msixbundle と依存の zip の SHA-256 も固定) で、固定した版より古ければ上げる (下げない。UAC を出さない)。PowerShell の `Install-WinGet` から呼ぶ。入れて揃えるのは runner の `winget` (いつも。winget を使うほかの手順より先に流す) ([後述](#winget)) |
 | `codex/Install-Codex.ps1` | `%USERPROFILE%\.config\powershell\Install-Codex.ps1` | OpenAI の Codex CLI を winget の `OpenAI.Codex` の portable で固定した版に揃え、`codex` と打てる形 (`WinGet\Links` の symlink か、置き場所の `codex.exe` の hardlink) を winget に作らせる (winget は昇格せずに打つ。UAC を出さない)。PowerShell の `Install-Codex` から呼ぶ。入れて揃えるのは runner の `codex` で、ホストの値の `[tools] windowsCodex` が on (既定はグループ all だけ) のマシンだけ ([後述](#codex-cli)) |
 | `claude-code/CLAUDE.windows.md` | (配らない。runner の `claude-files` の手順が、`nix/files/claude/CLAUDE.md` の冒頭をこれに差し替えて `%USERPROFILE%\.claude\CLAUDE.md` を作る) | Windows の Claude Code の CLAUDE.md の冒頭 (runner が配ること・直し方) ([後述](#claude-code-の設定)) |
 | `claude-code/skip-skills.txt` | (配らない。runner の `claude-files` の手順が読む) | Windows の Claude Code に張らない dotfiles の skill (Nix・そのマシンの `~/dotfiles` を前提にするもの) ([後述](#claude-code-の設定)) |
@@ -742,6 +743,7 @@ item = "op://<vault の ID>/<項目の ID>/<欄の ID>"   # 元の値の 1Passwo
 | order | id | すること | on/off | runner |
 | --- | --- | --- | --- | --- |
 | 5 | `bootstrap` | `bootstrap/Install-Bootstrap.ps1 -Check` (確かめるだけ。揃えるのは人が bootstrap を流す。`privateRepos` のホストは `-Check -Private` で、gh とそのログイン・3 つの clone も確かめる。ほかは gh を使わない既定の形 (dotfiles の clone と手元のホストの値) を確かめる。dotfiles の clone が origin の既定の branch より古ければ、終了コード 0 でも `dotfiles --self-update` で進めるよう · で知らせる。[bootstrap](#bootstrap-新しい-windows-で最初に流す)) | いつも | 有る (Windows だけ) |
+| 6 | `winget` | `Install-WinGet.ps1`: winget (アプリ インストーラー) が固定した版より古い・入っていなければ、GitHub の Release の msixbundle と依存を SHA-256 で確かめてから `Add-AppxPackage` でこのユーザーに入れる (UAC は出ない。下げない)。winget を使うほかの手順より先に流す。CPU (x64・arm64 だけ)・`curl.exe` が無いなど入れられなければ知らせるだけ ([winget](#winget)) | いつも | 有る (Windows だけ) |
 | 50 | `claude-env` | Claude Code の `%USERPROFILE%\.claude\settings.json` の `env` に、Claude の git を無署名・GitHub は gh の資格情報 (HTTPS) で通す設定を足す ([後述](#claude-skills-と-windows-のハブ-w0-2)) | `windowsClaudeCode` | 有る (Windows だけ) |
 | 50 | `claude-files` | dotfiles の `CLAUDE.md` (冒頭を Windows のものに)・skill・agent・command を `%USERPROFILE%\.claude\` へ置き (ディレクトリは junction、ファイルはコピー)、hook の口 (runner の exe の写し `hooks\dotfiles-claude.exe`) を写す ([後述](#claude-code-の設定)) | `windowsClaudeCode` | 有る (Windows だけ) |
 | 50 | `claude-footer-links` | `settings.json` の `footerLinksRegexes` を `nix/files/claude/footer-links.json` にする | `windowsClaudeCode` | 有る (Windows だけ) |
@@ -1917,6 +1919,59 @@ nix/scripts/bootstrap-windows-files.sh --force
 手で設定してあった) ときも衝突になり、「置いた記録が無く」と出る。手で同じ設定をしてあっても、id や
 書式が違えばバイト列は揃わない ([PowerToys](#powertoys) など)。diff を見て、違いがそれだけなら
 `--force` で上書きしてよい。
+
+## winget
+
+dotfiles の Windows の道具は **winget 1.30 以降**を前提にする。1.30 で portable の入れ方が変わり (昇格した会話からの user スコープの portable を
+`0x8A15007D` で断る・symlink を作れないときは置き場所に別名の hardlink を作って PATH に足す)、`Install-Codex` はそれに合わせてある
+([Codex CLI](#codex-cli)。1.29 以前で開発者モードが off なら入れずに止まる)。新しく入れた Windows の winget は古いことがあり (入れたての Windows 11 で
+v1.11.510 を見た)、Microsoft Store が使えない・止められた PC (会社の PC など) では Store の自動の更新でも上がらない。そこで runner の手順 `winget`
+(order 6。bootstrap の次で、winget を使うほかの手順より先) が、winget 自身を固定した版以上に揃える
+(dotfiles-private の ADR 121 (`docs/adr/121_win_winget_pin_*`))。
+
+```powershell
+Install-WinGet -Check   # 固定した版以上か (0 = 揃っている、1 = 古い、3 = 入っていない)
+Install-WinGet          # 古ければ固定した版に上げる (dotfiles apply --steps winget と同じ)
+Install-WinGet -Force   # 固定した版と同じでも落として入れ直す (流れを確かめるため。新しい版なら何もしない)
+```
+
+| すること | 中身 |
+| --- | --- |
+| 取得元 | GitHub の `microsoft/winget-cli` の Release `v<固定した版>` の `Microsoft.DesktopAppInstaller_8wekyb3d8bbwe.msixbundle` (約 220 MB) と `DesktopAppInstaller_Dependencies.zip` (約 100 MB)。Microsoft Store は使わない |
+| 確かめ | 2 つの SHA-256 を `Install-WinGet.ps1` の表 (`Get-WinGetRelease`) の値と比べ、違えば何も入れずに止まる。msixbundle は Microsoft の署名も Windows が確かめる |
+| 依存 | zip の中のこの CPU (x64・arm64) の `Microsoft.VCLibs.140.00`・`Microsoft.VCLibs.140.00.UWPDesktop`・`Microsoft.WindowsAppRuntime.1.8` のうち、入っている framework の版が足りないものだけを `-DependencyPath` に渡す |
+| 入れ方 | `Add-AppxPackage -Path <msixbundle> -DependencyPath … -ForceApplicationShutdown` をこのユーザーに。管理者に昇格しない (UAC を出さない)。`-AllUsers`・`Add-AppxProvisionedPackage` は使わない (Release の License の xml は要らない)。Appx の cmdlet は PowerShell 7 から読めないことがあるので、いつも System32 の Windows PowerShell に打たせる |
+| 下げない | `winget --version` が固定した版以上なら何もしない (Store が上げた新しい版・preview もそのまま。`-Force` でも下げない) |
+| 入れられないとき | CPU が x64・arm64 でない・`curl.exe` が無い・固定した版の SHA-256 が表に無いときは、何もせずに知らせる (締めの行は「→ ※ の手順で直す」)。`Add-AppxPackage` が落ちたら HRESULT を出し、`0x80073CFF` (サイドロードを方針で止めた PC の見込み) などには直し方を添える |
+
+- 入れる・上げるときは、動いている winget とアプリ インストーラーが終わる (`-ForceApplicationShutdown`)。別の端末で winget を打っている間は流さない
+- 落とす先は `github.com` と `release-assets.githubusercontent.com` (proxy で止めている PC では落とせない)
+- PSGallery の `Microsoft.WinGet.Client` の `Repair-WinGetPackageManager` は使わない (module を PSGallery から入れる手が増え、落とした物の SHA-256 を
+  dotfiles で固定できない。落とす先は同じ GitHub の Release)
+
+### winget の固定した版を上げる
+
+固定した版は**下限**で、winget の新しい版を追いかけない (Store が使える PC は Store が上げる)。上げるのは次のときだけ:
+
+- dotfiles の道具が新しい winget の動きを前提にするとき (1.30 の portable の入れ方のように)。その道具の直しと同じ PR で上げる
+- 固定した版より古い winget に、直したい不具合・脆弱性が見つかったとき
+
+上げる版は、GitHub の Release の版から、出てから日の経ったもの (依存の更新の猶予。7 日を目安。急ぐときはユーザーが決める) を選び、`-preview` の版は
+選ばない。新しい版の知らせ (`pin-updates`・`winget-versions`) には載せていない (追いかけないため)。
+
+1. 上げる版の 2 つの物の SHA-256 を GitHub の API の digest で読む (Release の `<物>.txt` にも同じ値がある):
+
+   ```sh
+   gh api repos/microsoft/winget-cli/releases/tags/v<版> \
+     --jq '.published_at, .prerelease, (.assets[] | select(.name | test("msixbundle$|Dependencies.zip$")) | "\(.name) \(.digest)")'
+   ```
+
+2. `win/winget/Install-WinGet.ps1` の `-Version` の既定値と、`Get-WinGetRelease` の表 (`Bundle`・`Dependencies`) を変える (古い行は消してよい)。
+   `Install-WinGet.Tests.ps1` の `$V` も変える
+3. 依存の zip の中の形 (`<arch>/<Name>_<Version>_<arch>.appx`) と依存の名前が変わっていないかを、Release の `DesktopAppInstaller_Dependencies.json` で見る
+   (変わっていれば `Get-WinGetDependencyEntries` を直す)
+4. 試験 (`Install-WinGet.Tests.ps1`) を流し、Windows で `Install-WinGet -Check` と `Install-WinGet` (古い PC で) を打って確かめる
+5. 前提にする版を上げたなら、この節の頭と、前提を見ている道具 (`Install-Codex` の 1.30 の見分け) も合わせる
 
 ## winget の pin
 
@@ -4942,8 +4997,8 @@ winget の portable は、`codex` という名前 (manifest の `PortableCommand
   昇格した会話で winget が 1.30 以降なら winget を打たずに止まり、昇格していない PowerShell で打ち直す手を出す (runner は知らせるだけ)
 - winget 1.29 以前は hardlink を作らず、symlink を作れないと置き場所を PATH に足すだけにする (それでも「Command line alias added: codex」と出す)。
   置き場所の exe の名前は `codex-x86_64-pc-windows-msvc.exe` なので、その形では `codex` と打っても見つからない。昇格していない会話で開発者モードが
-  off で winget が 1.29 以前なら、`Install-Codex` は入れずに止まり、Microsoft Store で「アプリ インストーラー」を更新する (winget を 1.30 以降にする) か
-  開発者モードを on にする手を出す (runner は知らせるだけ)。winget の版は `winget --version` で見る
+  off で winget が 1.29 以前なら、`Install-Codex` は入れずに止まり、`Install-WinGet` で winget を固定した版 (1.30 以降。[winget](#winget)) に上げるか
+  開発者モードを on にする手を出す (runner は知らせるだけ。runner の `winget` は `codex` より先に流れるので、apply では先に上がる)。winget の版は `winget --version` で見る
 - `codex` と打てる形の無い形で入っていれば (winget 1.29 以前で入れたなど)、`-Check` が「codex と打てない」と出し、`Install-Codex` が同じ版を外してから
   入れ直す。`WinGet\Links\codex.exe` がほかを指していても入れ直す (winget が消してから作り直す)
 - 同梱の rg: codex は自分の置き場所の判定 (同梱の `codex-path\rg.exe` と `codex-resources` を使うか) を、実体の exe の名前が置き場所の
