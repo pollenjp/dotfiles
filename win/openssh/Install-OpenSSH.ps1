@@ -37,6 +37,10 @@ BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無
 .PARAMETER Force
 ssh.exe などが動いていても入れ替える (使用中のファイルは再起動まで置き換わらないことがある)。
 
+.PARAMETER NoOnePassword
+1Password の SSH agent を使わないホストで付ける (dotfiles の runner は、ホストの値の道具の switch onePassword が off なら、手順 openssh で渡す)。
+入れた・揃えた後に ssh-add -l で 1Password の鍵を見ず、1Password の案内も出さない。引数なしで揃えたときの「揃った」も、鍵が見えるかで決めない。
+
 .PARAMETER LogPath
 内部用。管理者で起動し直した子が、結果をこのファイルへ書いて親へ渡す。
 #>
@@ -46,6 +50,7 @@ param(
     [switch]$Check,
     [switch]$IfMissing,
     [switch]$Force,
+    [switch]$NoOnePassword,
     [string]$LogPath
 )
 
@@ -185,6 +190,24 @@ function Get-OpenSshIfMissingMessage {
     param([int]$Code)
     if ($Code -eq 0) { return '入れた' }
     '入れられなかった。上の出力を確かめ、Install-OpenSSH -IfMissing を打ち直す (UAC で「いいえ」を押したなら、打ち直して「はい」を押す)'
+}
+
+# 入れた・揃えた後に出す ssh-add -l の行 ($Keys は見えた鍵の本数。見えなければ $null)。1Password の SSH agent を使わないホスト
+# (-NoOnePassword) は何も返さない (鍵を見ず、1Password の案内も出さない)。見えないときは、入れたばかり (-IfMissing。新しい PC ではまだ
+# 1Password が無い) なら SSH agent を有効にした後の確かめ方、それ以外は 1Password を起動し直す手
+function Format-AgentKeyLine {
+    param($Keys, [switch]$IfMissing, [switch]$NoOnePassword)
+    if ($NoOnePassword) { return }
+    if ($null -ne $Keys) { return "  ssh-add -l      : 鍵 $Keys 本" }
+    if ($IfMissing) { return '  ssh-add -l      : 鍵が見えない → 1Password の SSH agent を有効にしたら、Install-OpenSSH -Check で確かめる' }
+    '  ssh-add -l      : 鍵が見えない → 1Password をトレイから終了して起動し直し、もう一度 -Check で確かめる'
+}
+
+# 引数なしで揃えた後に「揃った」とするか: 版・ssh-agent・pin が揃い、1Password の鍵が見える ($Keys が $null でない)。1Password の SSH agent を
+# 使わないホスト (-NoOnePassword) は鍵を数えない
+function Test-OpenSshSynced {
+    param($State, $Keys, [switch]$NoOnePassword)
+    ($State.Plan -eq 'none') -and $State.AgentDisabled -and $State.Pinned -and ($NoOnePassword -or ($null -ne $Keys))
 }
 
 # トークンのグループの SID (Install-Bootstrap.ps1 と同じ)。WindowsIdentity の Claims のうち、種類が有効なグループ (groupsid) か deny-only の
@@ -404,7 +427,7 @@ function Get-AgentKeyCount {
 }
 
 function Invoke-InstallOpenSsh {
-    param([string]$Version, [switch]$Check, [switch]$IfMissing, [switch]$Force, [string]$LogPath)
+    param([string]$Version, [switch]$Check, [switch]$IfMissing, [switch]$Force, [switch]$NoOnePassword, [string]$LogPath)
     $packageId = 'Microsoft.OpenSSH.Preview'
     $installDir = Join-Path $env:ProgramFiles 'OpenSSH'
     $target = [version]$Version
@@ -478,14 +501,11 @@ function Invoke-InstallOpenSsh {
     if ($after.Server -and ($state.Plan -ne 'none')) {
         Write-Host '  sshd            : Server の機能も入れ直した → Install-Sshd で揃える (上げ直した MSI が 22 番の受信の許可を有効に戻す)'
     }
-    $keys = Get-AgentKeyCount -SshAddExe (Join-Path $installDir 'ssh-add.exe')
-    if ($null -ne $keys) {
-        Write-Host "  ssh-add -l      : 鍵 $keys 本"
-    } elseif ($IfMissing) {
-        Write-Host '  ssh-add -l      : 鍵が見えない → 1Password の SSH agent を有効にしたら、Install-OpenSSH -Check で確かめる'
-    } else {
-        Write-Host '  ssh-add -l      : 鍵が見えない → 1Password をトレイから終了して起動し直し、もう一度 -Check で確かめる'
-    }
+    # 1Password の SSH agent を使わないホスト (-NoOnePassword) は、ssh-add -l を打たず、行も出さない
+    $keys = $null
+    if (-not $NoOnePassword) { $keys = Get-AgentKeyCount -SshAddExe (Join-Path $installDir 'ssh-add.exe') }
+    $keyLine = Format-AgentKeyLine -Keys $keys -IfMissing:$IfMissing -NoOnePassword:$NoOnePassword
+    if ($keyLine) { Write-Host $keyLine }
     # -IfMissing (新しい PC) の成否は版・ssh-agent・pin で決める。1Password をまだ入れていないので鍵は数えない
     if ($IfMissing) {
         $code = Get-OpenSshExitCode -State $after
@@ -493,7 +513,7 @@ function Invoke-InstallOpenSsh {
         if ($code -eq 0) { return 0 }
         return 1
     }
-    if (($after.Plan -eq 'none') -and $after.AgentDisabled -and $after.Pinned -and ($null -ne $keys)) {
+    if (Test-OpenSshSynced -State $after -Keys $keys -NoOnePassword:$NoOnePassword) {
         Write-Host '揃った'
         return 0
     }
@@ -510,7 +530,7 @@ if ($MyInvocation.InvocationName -ne '.') {
     $ErrorActionPreference = 'Stop'
     Set-StrictMode -Version Latest
     try {
-        exit (Invoke-InstallOpenSsh -Version $Version -Check:$Check -IfMissing:$IfMissing -Force:$Force -LogPath $LogPath)
+        exit (Invoke-InstallOpenSsh -Version $Version -Check:$Check -IfMissing:$IfMissing -Force:$Force -NoOnePassword:$NoOnePassword -LogPath $LogPath)
     } catch {
         Write-Host "エラーで止まった: $($_.Exception.Message)" -ForegroundColor Red
         Write-Host $_.ScriptStackTrace

@@ -664,7 +664,7 @@ item = "op://<vault の ID>/<項目の ID>/<欄の ID>"   # 元の値の 1Passwo
 | 94 | `starship-init` | `$PROFILE` (pwsh に聞く `CurrentUserCurrentHost`) に、starship を起こす 1 行 (`Get-Command starship` で囲む) を、`dotfiles.ps1` を読む行より前に足す (無ければ末尾に。新しい PC では、続く `powershell-profile` がその後ろに足す)。starship の init の行 (手で書いた行も) があれば何もせず、`dotfiles.ps1` を読む行より後ろにあれば前へ移すよう知らせる。足した後で消した 1 行は足し直さない (`--force` で足す)。差し込むときは前の中身を `%LOCALAPPDATA%\dotfiles\state\starship-init\backup\` へ写す。記録は `%LOCALAPPDATA%\dotfiles\state\starship-init.added.json` ([starship](#starship)) | いつも | 有る (Windows だけ) |
 | 95 | `google-ime-install` | `Install-GoogleJapaneseInput.ps1`: 入っていなければ入れる (UAC)。ずれは知らせるだけ | いつも | 有る |
 | 95 | `powershell-profile` | `$PROFILE` (pwsh に聞く `CurrentUserCurrentHost`) に `dotfiles.ps1` を読む 1 行を足す。読む行があれば何もせず、足した後で消した 1 行は足し直さない (`--force` で足す)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-powershell-profile.json` ([PowerShell](#powershell)) | いつも | 有る |
-| 96 | `openssh` | `Install-OpenSSH.ps1`: 入っていなければ入れる (UAC)。ずれは知らせるだけ | いつも | 有る |
+| 96 | `openssh` | `Install-OpenSSH.ps1`: 入っていなければ入れる (UAC)。ずれは知らせるだけ。`onePassword` が off のホストは `-NoOnePassword` を付けて流し、1Password の SSH agent の案内を出さない ([OpenSSH](#openssh)) | いつも | 有る |
 | 96 | `sshd` | `Install-Sshd.ps1`: 入っていなければ OpenSSH の MSI に Server を足して揃える (UAC)。ずれは知らせるだけ。受け持ちが runner のホストでは、先にホストの値の `[sshd] authorizedKeys` から鍵の写しを、`allowUsers`・`allowFrom` からユーザーと送り元の写しを置く (受け持ちが WSL のホストは、鍵の写しは WSL の setup が置き、ユーザーと送り元は既定) | `windowsSshd` | 有る |
 | 96 | `tailscale` | `Install-Tailscale.ps1`: 入っていなければ入れる (UAC)。古いときは知らせるだけ (入っている版の方が新しければ揃っている扱い) | `windowsTailscale` | 有る |
 | 97 | `claude-code` | `Install-ClaudeCode.ps1`: 入れる・揃える (PATH のずれは知らせるだけ) | `windowsClaudeCode` | 有る |
@@ -2867,6 +2867,7 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
 | `Install-OpenSSH -Check` (PowerShell) | 差を出すだけ。管理者は要らない。揃っていれば終了コード 0、入っていなければ 3、ほかの差があれば 1 |
 | `Install-OpenSSH -IfMissing` (PowerShell) | 入っていなければ固定した版を入れる (UAC が 1 回出る)。ssh-agent を止めて無効にし、pin も足す。入っていれば `-Check` と同じ。入れたあとは、1Password の鍵が見えなくても成功にする (新しい PC ではまだ 1Password を入れていない) |
 | `Install-OpenSSH` (PowerShell) | 揃える。直すことがあるときだけ UAC が 1 回出る |
+| `-NoOnePassword` を足す (PowerShell) | 1Password の SSH agent を使わないホスト向け。入れた・揃えた後に `ssh-add -l` で 1Password の鍵を見ず、1Password の案内も出さない (引数なしの「揃った」も鍵で決めない)。runner の手順 `openssh` は、ホストの値の道具の switch `onePassword` が off なら `-Check` にも `-IfMissing` にも付け、直し方のコマンドにも添える |
 | `nix/scripts/bootstrap-windows-openssh.sh` (WSL) | `setup --update` でも毎回走る (order 96)。`-Check` を流し、入っていなければ `-IfMissing` で入れ (UAC が出る。待つのは 600 秒まで)、差があれば ⚠ で囲んで知らせる (揃えはしない) |
 | `nix/scripts/bootstrap-windows-openssh.sh --apply` (WSL) | WSL から揃える。UAC は Windows のデスクトップに出る |
 | `nix/scripts/check-winget-version.sh openssh` (WSL・CI) | 固定した版を winget の版の一覧と比べる。GitHub Actions の `winget-versions` が週 1 回流し、新しい版が GitHub に出て 30 日たつと落ちて知らせる ([後述](#openssh-の新しい版が出たとき)) |

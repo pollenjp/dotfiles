@@ -432,6 +432,59 @@ Test-Case '管理者で起動し直した子 (-LogPath) は、揃える段の行
     Invoke-ChildLogScenario
 }
 
+# 揃えた・入れた後の ssh-add -l の行。1Password の SSH agent を使わないホスト (-NoOnePassword) は出さない
+Test-Case 'ssh-add -l の行: 鍵が見えれば本数' '  ssh-add -l      : 鍵 2 本' { Format-AgentKeyLine -Keys 2 }
+Test-Case 'ssh-add -l の行: 入れたばかり (-IfMissing) で見えなければ、1Password の SSH agent を有効にした後の確かめ方' '  ssh-add -l      : 鍵が見えない → 1Password の SSH agent を有効にしたら、Install-OpenSSH -Check で確かめる' {
+    Format-AgentKeyLine -Keys $null -IfMissing
+}
+Test-Case 'ssh-add -l の行: 揃えた後に見えなければ、1Password を起動し直す手' '  ssh-add -l      : 鍵が見えない → 1Password をトレイから終了して起動し直し、もう一度 -Check で確かめる' {
+    Format-AgentKeyLine -Keys $null
+}
+Test-Case 'ssh-add -l の行: 1Password を使わないホスト (-NoOnePassword) は、見えても見えなくても出さない' '0 0 0' {
+    "$(@(Format-AgentKeyLine -Keys $null -IfMissing -NoOnePassword).Count) $(@(Format-AgentKeyLine -Keys $null -NoOnePassword).Count) $(@(Format-AgentKeyLine -Keys 2 -NoOnePassword).Count)"
+}
+# 引数なしで揃えた後の「揃った」: 版・ssh-agent・pin に加えて 1Password の鍵が見えること。-NoOnePassword は鍵を数えない
+Test-Case '揃った: 鍵が見えなければ揃っていない。1Password を使わないホストは鍵を数えない' 'True False True False' {
+    $synced = [pscustomobject]@{ Plan = 'none'; AgentDisabled = $true; Pinned = $true }
+    "$(Test-OpenSshSynced -State $synced -Keys 1) $(Test-OpenSshSynced -State $synced -Keys $null) $(Test-OpenSshSynced -State $synced -Keys $null -NoOnePassword) $(Test-OpenSshSynced -State $unpinned -Keys $null -NoOnePassword)"
+}
+
+# 入っていない PC で -IfMissing を打った形 (管理者の窓から。Test-IsAdmin が真) で流し、画面に出た行を返す。-NoOnePassword なら ssh-add -l を
+# 打たず、1Password の行を出さない。状態の読み取り・winget・サービスの cmdlet・ssh-add・Write-Host を偽物に替える
+function Invoke-IfMissingScenario {
+    param([switch]$NoOnePassword)
+    $missSaid = [System.Collections.Generic.List[string]]::new()
+    $missKeys = [System.Collections.Generic.List[string]]::new()
+    $missStates = [System.Collections.Generic.Queue[object]]::new()
+    $missStates.Enqueue([pscustomobject]@{
+            Installed = $null; Plan = 'install'; AgentStatus = $null; AgentStartType = $null
+            AgentDisabled = $true; Pinned = $false; Latest = [version]'10.4.0.0'; Inbox = $true; Server = $false
+        })
+    $missStates.Enqueue([pscustomobject]@{
+            Installed = [version]'10.4.0.0'; Plan = 'none'; AgentStatus = 'Stopped'; AgentStartType = 'Disabled'
+            AgentDisabled = $true; Pinned = $true; Latest = [version]'10.4.0.0'; Inbox = $true; Server = $false
+        })
+    function Get-Command { param($Name, $ErrorAction) [pscustomobject]@{ Name = 'winget' } }
+    function Get-OpenSshState { param($PackageId, $InstallDir, $Target) $missStates.Dequeue() }
+    function Test-IsAdmin { $true }
+    function Invoke-Winget { param([string[]]$Arguments) [pscustomobject]@{ ExitCode = 0; Lines = @() } }
+    function Get-Service { param($Name, $ErrorAction) $null }
+    function Get-AgentKeyCount { param($SshAddExe) $missKeys.Add('ssh-add'); $null }
+    function Write-Host { param($Object, $ForegroundColor) $missSaid.Add("$Object") }
+    Remove-Variable -Name StepLog -Scope Script -ErrorAction SilentlyContinue
+    $savedPf = $env:ProgramFiles
+    $env:ProgramFiles = Join-Path ([IO.Path]::GetTempPath()) "install-openssh-ifmissing-$PID"
+    try {
+        $code = Invoke-InstallOpenSsh -Version '10.4.0.0' -IfMissing -NoOnePassword:$NoOnePassword
+    } finally {
+        $env:ProgramFiles = $savedPf
+    }
+    $onePassword = @($missSaid | Where-Object { $_.Contains('1Password') }).Count
+    "$code|$($missKeys.Count)|$onePassword|$(@($missSaid | Where-Object { $_.Contains('入れた') }).Count -gt 0)"
+}
+Test-Case '-IfMissing で入れた後、鍵が見えなければ 1Password の SSH agent の案内を出す' '0|1|1|True' { Invoke-IfMissingScenario }
+Test-Case '-IfMissing -NoOnePassword で入れた後は、ssh-add -l を打たず、1Password の行を出さない' '0|0|0|True' { Invoke-IfMissingScenario -NoOnePassword }
+
 # 本体の入口: 思わぬ例外でも、終了コード 2 で止まる (成功に見せない)。
 # Linux の pwsh には $env:ProgramFiles が無く、本体の最初で例外になるのを使う
 # (2026-10-06 の本番で、例外のあと外側の exit $LASTEXITCODE が中の winget の 0 を返し「揃いました」と出た)
