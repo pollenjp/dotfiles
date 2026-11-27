@@ -8,23 +8,31 @@ PowerShell では dotfiles.ps1 の Install-Codex から呼ぶ (win/README.md の
 入れて揃えるのは Windows の runner の手順 codex (ホストの値の [tools] windowsCodex が on のマシンだけ。既定はグループで決まり、all で on)。
 
 winget の OpenAI.Codex は zip の中の portable で、管理者無しで %LOCALAPPDATA%\Microsoft\WinGet\Packages の下に入る。置き場所の exe の
-名前は codex-x86_64-pc-windows-msvc.exe (arm64 は codex-aarch64-pc-windows-msvc.exe) で、codex という名前は、winget が
-%LOCALAPPDATA%\Microsoft\WinGet\Links に置く symlink (manifest の PortableCommandAlias) でだけ付く。winget は symlink を作れないと
-(昇格していない winget は、開発者モードが off だと作れない)、symlink の代わりに置き場所をユーザーの PATH に足すだけにし、それでも
-「Command line alias added: codex」と出す。その形では codex と打っても見つからない (codex-x86_64-pc-windows-msvc とは打てる)。
-そこで、開発者モードが off なら winget を昇格した Windows PowerShell で打ち (UAC の確認が入れる・入れ直すときの 1 回だけ出る。昇格しても
-同じユーザーなので、置き場所も symlink もこのユーザーのもの)、symlink を winget に作らせる。開発者モードが on か、もう昇格した会話なら、
-そのまま打つ。symlink が無い形で入っていれば (前に手で winget install を打ったなど)、入れ直して作る。
+名前は codex-x86_64-pc-windows-msvc.exe (arm64 は codex-aarch64-pc-windows-msvc.exe) で、codex という名前 (manifest の PortableCommandAlias) は、
+winget が次のどちらかの形で付ける (winget の PortableFlow.cpp・PortableInstaller.cpp):
+  - symlink の形: %LOCALAPPDATA%\Microsoft\WinGet\Links\codex.exe (置き場所の exe への symlink)。winget が symlink を作れるとき (開発者モードが on か、
+    昇格した winget)
+  - hardlink の形: 置き場所の codex.exe (置き場所の exe の hardlink) と、置き場所をユーザーの PATH に足した行。winget 1.30 から。winget が symlink を
+    作れないとき (昇格していない winget で、開発者モードが off) は、Links の代わりに置き場所を PATH に足し、その codex.exe が引かれる
+winget 1.29 までは hardlink を作らず、symlink を作れないと置き場所を PATH に足すだけなので、codex と打っても見つからない。
 
-codex は自分の置き場所の判定 (同梱の rg.exe と codex-resources を使うか) と、sandbox の helper (codex-command-runner.exe など) を探すのに、
-実体の exe のパスと名前を使う (symlink は実体へたどる)。hardlink や名前を替えた写しでは判定が外れるので作らない。
+winget は UAC で昇格して打たない (そのまま打つ)。winget 1.30 は、昇格した会話 (UAC で昇格した token) から user スコープの portable を入れる・外すのを
+0x8A15007D で断る。次のときは winget を打たずに止め、直し方を出す (runner は知らせるだけ):
+  - 昇格した会話で、winget が 1.30 以降 (昇格していない PowerShell で打ち直す)
+  - 昇格していない会話で、開発者モードが off で、winget が 1.29 以前 (入れても codex と打てない。アプリ インストーラーを更新するか、開発者モードを on にする)
+codex と打てる形が無い形で入っていれば (1.29 以前の winget で入れたなど)、同じ版を入れ直して作らせる。
+
+codex は自分の置き場所の判定 (同梱の codex-path\rg.exe と codex-resources を使うか) を、実体の exe の名前が置き場所の codex-package.json の
+entrypoint と同じかで行う (codex の codex-rs/install-context)。symlink は実体へたどるので当たるが、hardlink の codex.exe は名前が違うので外れ、
+codex は rg を PATH から探す。そこで PATH で引かれる codex が置き場所の codex.exe (hardlink の形) なら、置き場所の codex-path (同梱の rg.exe が
+ある) をユーザーの PATH に足す。sandbox の helper (codex-command-runner.exe など) と codex-code-mode-host.exe は exe の隣で探すので、どちらの形でも
+見つかる。名前を替えた写しや .cmd の shim は作らない。
 
 winget の manifest の依存 (BurntSushi.ripgrep.MSVC と Microsoft.VCRedist.2015+) は入れない (--skip-dependencies)。codex の exe は
-VC++ のランタイムを使わず (CRT を静的に持つ)、rg.exe は zip の中 (codex-path\rg.exe) にあって codex がそれを使う。VCRedist は machine に
-入るので、入れると開発者モードの PC でも UAC の確認が出る。
+VC++ のランタイムを使わず (CRT を静的に持つ)、rg.exe は zip の中 (codex-path\rg.exe) にある。VCRedist は machine に入るので、入れると UAC の確認が出る。
 
 codex.exe が動いている間は置き換えられないので、入れ替えが要るときに置き場所の exe が動いていれば、何も変えずに止める (止めはしない)。
-形は Install-Fzf.ps1 と同じ (常駐が無いので、版のずれも揃える)。違うのは、symlink を見ることと、そのために昇格した winget を使うこと。
+形は Install-Fzf.ps1 と同じ (常駐が無いので、版のずれも揃える)。違うのは、codex と打てる形 (symlink か hardlink) と、同梱の rg を見ること。
 
 BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無い UTF-8 を CP932 として読む)。
 
@@ -33,7 +41,7 @@ BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無
 
 .PARAMETER Check
 今の状態と固定した版との差を出すだけで、何も変えない。揃っていれば終了コード 0、差があれば 1、入っていなければ 3
-(winget が symlink を作れない PC (管理者でなく、開発者モードも off) では、入っていなくても 1)。
+(winget を打てない会話・入れても codex と打てない PC では、入っていなくても 1)。
 
 .PARAMETER IfMissing
 入っていなければ固定した版を入れて pin を足す。入っていれば -Check と同じで、入れ替えはしない。
@@ -67,6 +75,26 @@ function Get-WingetVersionList {
     }
 }
 
+# winget --version の出力 ("v1.30.310" など。preview は "v1.30.140-preview") から winget 自身の版を拾う。読めなければ $null
+function Get-WingetClientVersion {
+    param([string[]]$Lines)
+    foreach ($line in $Lines) {
+        if ("$line" -match '^\s*v?(\d+)\.(\d+)(\.(\d+))?') {
+            $build = if ($Matches[4]) { [int]$Matches[4] } else { 0 }
+            return [version]::new([int]$Matches[1], [int]$Matches[2], $build)
+        }
+    }
+    $null
+}
+
+# winget が、symlink を作れないときに置き場所へ codex.exe の hardlink を作り、昇格した会話からの user スコープの portable を断る版 (1.30 以降) か。
+# 読めなければ $null (どちらとも決めない)
+function Test-WingetModernPortable {
+    param($WingetVersion)
+    if ($null -eq $WingetVersion) { return $null }
+    $WingetVersion -ge [version]'1.30'
+}
+
 # WinGet\Links の codex.exe が、置き場所の exe への symlink か。ok (そう) / missing (無い) / wrong (ほかを指す・symlink でない)。
 # Target は Get-Item の Target (5.1 は配列、7 は文字列。呼ぶ側が 1 つにする)。比べるのは大文字小文字を区別しない (Windows のパスと同じ)
 function Get-CodexLinkState {
@@ -78,33 +106,49 @@ function Get-CodexLinkState {
     'wrong'
 }
 
-# winget を昇格して打つか。direct (そのまま打っても symlink を作れる: 昇格した会話か、開発者モードが on) / elevated (このユーザーが
-# 管理者なので、UAC で昇格した winget に作らせる) / blocked (管理者でなく、開発者モードも off。UAC で別のアカウントに昇格すると、
-# 置き場所がそのアカウントのものになるので昇格しない。そのまま打っても symlink を作れない)
+# 置き場所の codex.exe が、置き場所の exe の hardlink か。ok (そう) / missing (無い) / wrong (symlink などの reparse point・大きさが違う・
+# 置き場所の exe が無い)。hardlink は同じファイルなので大きさが同じ (winget が hardlink を作れずに写しにしたときも同じ)
+function Get-CodexHardlinkState {
+    param([bool]$Exists, [string]$LinkType, [long]$Length, [long]$ExeLength)
+    if (-not $Exists) { return 'missing' }
+    if ($LinkType) { return 'wrong' }
+    if (($ExeLength -lt 0) -or ($Length -ne $ExeLength)) { return 'wrong' }
+    'ok'
+}
+
+# codex と打てる形。symlink (WinGet\Links の symlink) / hardlink (置き場所の codex.exe) / wrong (Links の codex.exe がほかを指す・置き場所の
+# codex.exe が違う) / missing (どちらも無い)。Links の codex.exe がほかを指していれば、置き場所の hardlink があっても wrong にする
+# (Links が PATH で先に引かれる。入れ直すと winget が Links の codex.exe を消してから作り直す)
+function Get-CodexAliasState {
+    param([string]$LinkState, [string]$HardlinkState)
+    if ($LinkState -eq 'ok') { return 'symlink' }
+    if ($LinkState -eq 'wrong') { return 'wrong' }
+    if ($HardlinkState -eq 'ok') { return 'hardlink' }
+    if ($HardlinkState -eq 'wrong') { return 'wrong' }
+    'missing'
+}
+
+# winget を打てるか。direct (そのまま打つ) / elevated (昇格した会話で winget が 1.30 以降。winget が user スコープの portable を断る) /
+# old-winget (昇格していない会話で、開発者モードが off で、winget が 1.29 以前。symlink も hardlink も作れず、入れても codex と打てない)。
+# winget の版が読めなければ direct (打ってみる)。昇格した会話の 1.29 以前の winget は symlink を作れるので direct
 function Get-CodexInstallRoute {
-    param([bool]$Elevated, [bool]$DeveloperMode, [bool]$Admin)
-    if ($Elevated -or $DeveloperMode) { return 'direct' }
-    if ($Admin) { return 'elevated' }
-    'blocked'
-}
-
-# whoami /groups /fo csv /nh の出力に、Administrators (S-1-5-32-544) の行があるか。昇格していない管理者の token にも、
-# 拒否にだけ使う形 (Group used for deny only) で並ぶ。管理者でないユーザーには無い
-function Test-AdminMember {
-    param([string[]]$Lines)
-    foreach ($line in $Lines) {
-        if ("$line" -match '(^|,)"S-1-5-32-544"(,|$)') { return $true }
+    param([bool]$Elevated, [bool]$DeveloperMode, $WingetVersion)
+    $modern = Test-WingetModernPortable -WingetVersion $WingetVersion
+    if ($Elevated) {
+        if ($modern -eq $true) { return 'elevated' }
+        return 'direct'
     }
-    $false
+    if ($DeveloperMode -or ($modern -ne $false)) { return 'direct' }
+    'old-winget'
 }
 
-# 入っているか・入っている版・固定した版・symlink から、することを決める。exe があるのに版が読めないときも入れ替える。
-# 版が揃っていて symlink だけが無い・違うときは relink (同じ版を入れ直して、winget に symlink を作らせる)
+# 入っているか・入っている版・固定した版・codex と打てる形から、することを決める。exe があるのに版が読めないときも入れ替える。
+# 版が揃っていて codex と打てる形だけが無い・違うときは relink (同じ版を入れ直して、winget に作らせる)
 function Get-CodexPlan {
-    param([bool]$Exists, [string]$Installed, [string]$Target, [string]$LinkState)
+    param([bool]$Exists, [string]$Installed, [string]$Target, [string]$AliasState)
     if (-not $Exists) { return 'install' }
     if ($Installed -cne $Target) { return 'change' }
-    if ($LinkState -ne 'ok') { return 'relink' }
+    if ($AliasState -notin @('symlink', 'hardlink')) { return 'relink' }
     'none'
 }
 
@@ -131,8 +175,8 @@ function Test-WingetPinned {
 }
 
 # plan ごとに打つ winget の引数 (配列の配列)。入れ替え・入れ直しは、外してから入れる (portable の置き場所は版によらず同じ。codex の
-# 設定とログイン (%USERPROFILE%\.codex) は置き場所の外にある)。install は portable を名指しし、user スコープで入れ (昇格した winget が
-# machine スコープを選ばないように)、manifest の依存 (ripgrep・VCRedist) は入れない (頭の説明)
+# 設定とログイン (%USERPROFILE%\.codex) は置き場所の外にある)。install は portable を名指しし、user スコープで入れ、manifest の依存
+# (ripgrep・VCRedist) は入れない (頭の説明)
 function Get-WingetCommands {
     param([string]$Plan, [string]$PackageId, [string]$Version)
     $common = @('--id', $PackageId, '--exact', '--source', 'winget', '--silent',
@@ -173,38 +217,76 @@ function Resolve-CodexOnPath {
     $null
 }
 
-# PATH で引かれる codex がどこのものか。'winget' (WinGet\Links の codex.exe) / 'other' (npm の codex.cmd・公式の install.ps1 の
-# codex.exe など) / 'none'
+# PATH で引かれる codex がどこのものか。'links' (WinGet\Links\codex.exe。symlink の形) / 'package' (置き場所の codex.exe。hardlink の形) /
+# 'other' (npm の codex.cmd・公式の install.ps1 の codex.exe など) / 'none'
 function Get-CodexPathKind {
-    param([string]$Resolved, [string]$LinksDir)
+    param([string]$Resolved, [string]$LinksDir, [string]$PackageDir)
     if (-not $Resolved) { return 'none' }
     # -eq は大文字小文字を区別しない (Windows のパスと同じ)
-    if ($LinksDir -and ($Resolved -eq "$($LinksDir.TrimEnd('\'))\codex.exe")) { return 'winget' }
+    if ($LinksDir -and ($Resolved -eq "$($LinksDir.TrimEnd('\'))\codex.exe")) { return 'links' }
+    if ($PackageDir -and ($Resolved -eq "$($PackageDir.TrimEnd('\'))\codex.exe")) { return 'package' }
     'other'
 }
 
-# 揃える手順 (Install-Codex) で直す差 (版・pin・symlink) があるか
-function Test-CodexDrift {
-    param($State)
-    ($State.Plan -ne 'none') -or (-not $State.Pinned)
+# PATH の 1 つの要素が $Dir を指すか。前後の空白と " を落とし、%VAR% を展開し、末尾の \ を落としてから、大文字小文字を区別せずに比べる
+# (Install-HerdrApp.ps1 と同じ)
+function Test-CodexPathEntry {
+    param([string]$Entry, [string]$Dir)
+    $value = [Environment]::ExpandEnvironmentVariables($Entry.Trim().Trim('"')).TrimEnd('\')
+    if (-not $value) { return $false }
+    $value -ieq $Dir.TrimEnd('\')
 }
 
-# PATH のずれ (ほかの codex が先に引かれる・symlink はあるのに PATH で見つからない) があるか。揃える手順では直らないので、※ の行で
-# 直し方を添える。入れる・入れ直す前 (symlink が無い) に見つからないのは当たり前なので数えない
+# PATH の値 (; 区切り) に、$Dir を指す要素があるか
+function Test-CodexPathListed {
+    param([string]$Raw, [string]$Dir)
+    foreach ($entry in ($Raw -split ';')) {
+        if (Test-CodexPathEntry -Entry $entry -Dir $Dir) { return $true }
+    }
+    $false
+}
+
+# $Dir を末尾に足した PATH の生の値 (末尾の ; を落として ;<Dir>)。既にあれば変えない (Install-HerdrApp.ps1 と同じ)
+function Get-CodexPathValueWithEntry {
+    param([string]$Raw, [string]$Dir)
+    if (Test-CodexPathListed -Raw $Raw -Dir $Dir) { return $Raw }
+    if ($Raw) { return "$($Raw.TrimEnd(';'));$Dir" }
+    $Dir
+}
+
+# 同梱の rg を codex が引けるか。PATH で引かれる codex が置き場所の codex.exe (hardlink の形) のときだけ見る (codex は同梱の rg を自分では
+# 見つけないので、置き場所の codex-path を PATH に置いて引かせる)。na (hardlink の形でない) / absent (置き場所に codex-path\rg.exe が無い) /
+# ok (codex-path が PATH にある) / missing (無い。Install-Codex がユーザーの PATH に足す)
+function Get-CodexRgState {
+    param([string]$PathKind, [bool]$BundledRg, [string]$PathValue, [string]$RgDir)
+    if ($PathKind -ne 'package') { return 'na' }
+    if (-not $BundledRg) { return 'absent' }
+    if (Test-CodexPathListed -Raw $PathValue -Dir $RgDir) { return 'ok' }
+    'missing'
+}
+
+# 揃える手順 (Install-Codex) で直す差 (版・pin・codex と打てる形・同梱の rg の PATH) があるか
+function Test-CodexDrift {
+    param($State)
+    ($State.Plan -ne 'none') -or (-not $State.Pinned) -or ($State.RgState -eq 'missing')
+}
+
+# PATH のずれ (ほかの codex が先に引かれる・codex と打てる形はあるのに PATH で見つからない) があるか。揃える手順では直らないので、※ の行で
+# 直し方を添える。入れる・入れ直す前 (codex と打てる形が無い) に見つからないのは当たり前なので数えない
 function Test-CodexPathDrift {
     param($State)
     ($State.PathKind -eq 'other') -or (($State.PathKind -eq 'none') -and ($State.Plan -notin @('install', 'relink')))
 }
 
-# 入れる・入れ直すのに、winget が symlink を作れない (管理者でなく、開発者モードも off) か。揃える手順では直らない (人が開発者モードを
-# on にする)。版が揃っていて symlink があれば、入れ直さないので当たらない
+# 入れる・入れ替える・入れ直すのに、winget を打てない (昇格した会話の 1.30 以降の winget) か、打っても codex と打てない (1.29 以前の winget で
+# 開発者モードが off) か。揃える手順では直らない (人が打ち直す・winget を更新する)。版が揃っていて codex と打てれば、winget を打たないので当たらない
 function Test-CodexBlocked {
     param($State)
-    ($State.Route -eq 'blocked') -and ($State.Plan -in @('install', 'change', 'relink'))
+    ($State.Route -in @('elevated', 'old-winget')) -and ($State.Plan -in @('install', 'change', 'relink'))
 }
 
-# 終了コード。winget が symlink を作れないなら 1 (入っていなくても 3 にしない。runner が -IfMissing で入れにいかないように)、
-# 入っていなければ 3、版・pin・symlink・PATH が揃っていれば 0、ほかは 1
+# 終了コード。winget を打てない・打っても codex と打てないなら 1 (入っていなくても 3 にしない。runner が -IfMissing で入れにいかないように)、
+# 入っていなければ 3、版・pin・codex と打てる形・同梱の rg の PATH・PATH が揃っていれば 0、ほかは 1
 function Get-CodexExitCode {
     param($State)
     if (Test-CodexBlocked -State $State) { return 1 }
@@ -214,12 +296,13 @@ function Get-CodexExitCode {
 }
 
 # 揃える前に止める理由。無ければ $null
-#   blocked:    入れる・入れ直すのに、winget が symlink を作れない (入れても codex と打てない)
+#   elevated:   入れる・入れ直すのに、昇格した会話で winget が 1.30 以降 (winget が user スコープの portable を断る)
+#   old-winget: 入れる・入れ直すのに、winget が 1.29 以前で開発者モードが off (入れても codex と打てない)
 #   not-listed: 入れる・入れ替えるのに、固定した版が winget に無い (版の一覧が読めたときだけ判断する)
 #   busy:       入れ替える・入れ直すのに、置き場所の exe が動いている (置き換えられない)
 function Get-CodexApplyBlocker {
     param([string]$Plan, [string[]]$Versions, [string]$Target, [int]$BusyCount, [string]$Route)
-    if (($Route -eq 'blocked') -and ($Plan -in @('install', 'change', 'relink'))) { return 'blocked' }
+    if (($Route -in @('elevated', 'old-winget')) -and ($Plan -in @('install', 'change', 'relink'))) { return $Route }
     $known = @($Versions | Where-Object { $_ })
     if (($Plan -ne 'none') -and ($known.Count -gt 0) -and ($known -cnotcontains $Target)) { return 'not-listed' }
     if (($Plan -in @('change', 'relink')) -and ($BusyCount -gt 0)) { return 'busy' }
@@ -227,7 +310,7 @@ function Get-CodexApplyBlocker {
 }
 
 # 状態の表の行 (Text と、直すことがあるかの Warn)。直すことがある行だけ先頭に ⚠ を付け、ほかは 2 字下げる。ずれではないこと
-# (新しい版がある・動いている codex がある・昇格して打つ) は ※ で添える
+# (新しい版がある・動いている codex がある) は ※ で添える
 function Format-CodexState {
     param($State, [string]$Target, [string]$PackageId, [string]$PackageDir)
     $direction = if ($State.Direction -eq 'up') { ' (上げる)' } elseif ($State.Direction -eq 'down') { ' (下げる)' } else { '' }
@@ -240,17 +323,22 @@ function Format-CodexState {
     $latestText = if ($State.Latest) { $State.Latest } else { '不明 (winget show が失敗)' }
     $pinText = if ($State.Pinned) { 'あり' } else { '無し → 足す' }
     $exeName = if ($State.ExeName) { $State.ExeName } else { 'codex-x86_64-pc-windows-msvc.exe' }
-    $linkText = switch ($State.LinkState) {
-        'ok' { "WinGet\Links\codex.exe (置き場所の $exeName への symlink)" }
-        'wrong' { "WinGet\Links\codex.exe が置き場所の exe を指していない ($($State.LinkTarget)) → 入れ直す" }
+    $aliasText = switch ($State.AliasState) {
+        'symlink' { "WinGet\Links\codex.exe (置き場所の $exeName への symlink)" }
+        'hardlink' { "置き場所の codex.exe ($exeName の hardlink。winget が symlink を作れずに、置き場所を PATH に足した形)" }
+        'wrong' {
+            if ($State.LinkState -eq 'wrong') { "WinGet\Links\codex.exe が置き場所の exe を指していない ($($State.LinkTarget)) → 入れ直す" }
+            else { "置き場所の codex.exe が $exeName の hardlink ではない → 入れ直す" }
+        }
         default {
-            if ($State.Plan -eq 'install') { '入れるときに winget が WinGet\Links\codex.exe を作る' }
-            else { '無い → 入れ直す (winget が symlink を作れずに、置き場所を PATH に足した形。codex と打っても見つからない)' }
+            if ($State.Plan -eq 'install') { '入れるときに winget が作る (WinGet\Links\codex.exe の symlink か、置き場所の codex.exe の hardlink)' }
+            else { '無い → 入れ直す (winget 1.29 以前が symlink を作れずに、置き場所を PATH に足しただけの形。codex と打っても見つからない)' }
         }
     }
     $pathText = switch ($State.PathKind) {
-        'winget' { 'winget の symlink (WinGet\Links\codex.exe)' }
-        'other' { "$($State.PathResolved) (winget の symlink ではない)" }
+        'links' { 'winget の symlink (WinGet\Links\codex.exe)' }
+        'package' { 'winget の hardlink (置き場所の codex.exe)' }
+        'other' { "$($State.PathResolved) (winget のものではない)" }
         default { '見つからない' }
     }
     $rows = @(
@@ -259,9 +347,19 @@ function Format-CodexState {
         @{ Text = "固定した版      : $Target → $planText"; Warn = ($State.Plan -in @('install', 'change')); Indent = $true }
         @{ Text = "winget の最新版 : $latestText"; Warn = $false; Indent = $true }
         @{ Text = "winget pin      : $pinText"; Warn = (-not $State.Pinned); Indent = $true }
-        @{ Text = "codex の別名    : $linkText"; Warn = (($State.Plan -ne 'install') -and ($State.LinkState -ne 'ok')); Indent = $true }
+        @{ Text = "codex の別名    : $aliasText"; Warn = (($State.Plan -ne 'install') -and ($State.AliasState -notin @('symlink', 'hardlink'))); Indent = $true }
         @{ Text = "PATH の codex   : $pathText"; Warn = (Test-CodexPathDrift -State $State); Indent = $true }
     )
+    if ($State.PathKind -eq 'links') {
+        $rows += @{ Text = '同梱の rg       : codex が置き場所の codex-path\rg.exe を自分で使う (symlink の形)'; Warn = $false; Indent = $true }
+    } elseif ($State.PathKind -eq 'package') {
+        $rgText = switch ($State.RgState) {
+            'ok' { '置き場所の codex-path が PATH にある (hardlink の形の codex は同梱の rg を自分では見つけないので、PATH で引かせる)' }
+            'missing' { '置き場所の codex-path が PATH に無い → ユーザーの PATH に足す (hardlink の形の codex は同梱の rg を自分では見つけない)' }
+            default { '置き場所に codex-path\rg.exe が無い (codex は PATH の rg を使う)' }
+        }
+        $rows += @{ Text = "同梱の rg       : $rgText"; Warn = ($State.RgState -eq 'missing'); Indent = $true }
+    }
     foreach ($row in $rows) {
         $prefix = if (-not $row.Indent) { '' } elseif ($row.Warn) { '⚠ ' } else { '  ' }
         [pscustomobject]@{ Text = "$prefix$($row.Text)"; Warn = [bool]$row.Warn }
@@ -277,10 +375,14 @@ function Format-CodexState {
         [pscustomobject]@{ Text = "※ winget に固定した版より新しい $($versions[0]) がある。上げるなら Install-Codex.ps1 の -Version の既定値を変える"; Warn = $false }
     }
     if (Test-CodexBlocked -State $State) {
-        [pscustomobject]@{ Text = '⚠ winget が codex の symlink を作れない (このアカウントは管理者でなく、開発者モードも off)。入れても codex と打てないので、Install-Codex は入れない'; Warn = $true }
-        [pscustomobject]@{ Text = '※ 管理者に開発者モードを on にしてもらい (設定 > システム > 開発者向け)、Install-Codex を打ち直す (win/README.md の「Codex CLI」)'; Warn = $false }
-    } elseif (($State.Route -eq 'elevated') -and ($State.Plan -in @('install', 'change', 'relink'))) {
-        [pscustomobject]@{ Text = '※ 開発者モードが off なので、Install-Codex は winget を UAC で昇格して打つ (昇格しない winget は symlink を作れず、codex と打てない形で入る)'; Warn = $false }
+        $wingetText = if ($State.WingetVersion) { "winget $($State.WingetVersion)" } else { 'winget' }
+        if ($State.Route -eq 'elevated') {
+            [pscustomobject]@{ Text = "⚠ 昇格した PowerShell では winget が codex を入れない ($wingetText は、昇格した会話から user スコープの portable を入れる・外すのを断る)。Install-Codex は winget を打たない"; Warn = $true }
+            [pscustomobject]@{ Text = '※ 昇格していない PowerShell (デスクトップの普通の端末) で Install-Codex を打ち直す (win/README.md の「Codex CLI」)'; Warn = $false }
+        } else {
+            [pscustomobject]@{ Text = "⚠ winget が古く、codex と打てる形を作れない ($wingetText は symlink を作れないときに codex.exe の hardlink を作らず、開発者モードも off)。入れても codex と打てないので、Install-Codex は入れない"; Warn = $true }
+            [pscustomobject]@{ Text = '※ Microsoft Store で「アプリ インストーラー」を更新して winget を 1.30 以降にするか、開発者モードを on にして (設定 > システム > 開発者向け。管理者が要る)、Install-Codex を打ち直す (win/README.md の「Codex CLI」)'; Warn = $false }
+        }
     }
     if ($State.PathKind -eq 'other') {
         # PATH のずれは揃える手順 (Install-Codex) では直らないので、直し方を添える
@@ -288,7 +390,7 @@ function Format-CodexState {
         $dir = if ($cut -ge 0) { $State.PathResolved.Substring(0, $cut) } else { $State.PathResolved }
         [pscustomobject]@{ Text = "※ PATH のずれは Install-Codex では直らない。$dir の codex を外す (npm の @openai/codex なら npm uninstall -g @openai/codex) か、$dir をユーザーの PATH から外す (win/README.md の「Codex CLI」)"; Warn = $false }
     } elseif (($State.PathKind -eq 'none') -and ($State.Plan -notin @('install', 'relink'))) {
-        [pscustomobject]@{ Text = '※ WinGet\Links がユーザーの PATH に無い。%LOCALAPPDATA%\Microsoft\WinGet\Links をユーザーの PATH に足し、新しい PowerShell を開く'; Warn = $false }
+        [pscustomobject]@{ Text = "※ PATH で codex が見つからない。symlink の形なら %LOCALAPPDATA%\Microsoft\WinGet\Links を、hardlink の形なら置き場所 ($PackageDir) をユーザーの PATH に足し、新しい PowerShell を開く"; Warn = $false }
     }
     if (($State.Plan -in @('change', 'relink')) -and ($State.BusyCount -gt 0)) {
         [pscustomobject]@{ Text = "※ codex が $($State.BusyCount) 個動いている。入れ替えるには、動いている codex (ほかの端末の会話など) を終わらせる"; Warn = $false }
@@ -297,12 +399,16 @@ function Format-CodexState {
 
 # 締めの行 (-Check の最後と、揃えた後の最後)。揃っていれば何も返さない。直すことごとに ⚠️ で始まる行を返す。
 # Windows の runner (win/runner/src/steps/ps1.rs) は「→ Install-Codex で入れる」「→ Install-Codex で揃える」「→ ※ の手順で直す」の
-# 文言で、入れるか・揃えるか・知らせるだけかを決め、symlink を作れない行 (「winget が codex の symlink を作れない」) で直し方を選ぶ
-# (文言を変えるときは向こうも直す)。symlink を作れないなら、その 1 行だけ (入れも入れ直しもしない)
+# 文言で、入れるか・揃えるか・知らせるだけかを決め、winget を打てない行 (「昇格した PowerShell では winget が codex を入れない」
+# 「winget が古く、codex と打てる形を作れない」) で直し方を選ぶ (文言を変えるときは向こうも直す)。winget を打てないなら、その 1 行だけ
 function Format-CodexVerdict {
     param($State)
     if (Test-CodexBlocked -State $State) {
-        '⚠️ winget が codex の symlink を作れない (管理者でなく、開発者モードも off) → ※ の手順で直す ⚠️'
+        if ($State.Route -eq 'elevated') {
+            '⚠️ 昇格した PowerShell では winget が codex を入れない (winget 1.30 から) → ※ の手順で直す ⚠️'
+        } else {
+            '⚠️ winget が古く、codex と打てる形を作れない (winget 1.29 以前で、開発者モードも off) → ※ の手順で直す ⚠️'
+        }
         return
     }
     if ($State.Plan -eq 'install') {
@@ -310,104 +416,17 @@ function Format-CodexVerdict {
         return
     }
     if (($State.Plan -eq 'change') -or (-not $State.Pinned)) { '⚠️ 固定した版と揃っていない → Install-Codex で揃える ⚠️' }
-    if ($State.LinkState -ne 'ok') { '⚠️ codex と打てない (WinGet\Links に codex.exe の symlink が無い) → Install-Codex で揃える ⚠️' }
-    if (Test-CodexPathDrift -State $State) { '⚠️ PATH の codex が winget の symlink ではない → ※ の手順で直す ⚠️' }
+    if ($State.AliasState -notin @('symlink', 'hardlink')) { '⚠️ codex と打てない (WinGet\Links の symlink も、置き場所の codex.exe の hardlink も無い・違う) → Install-Codex で揃える ⚠️' }
+    if ($State.RgState -eq 'missing') { '⚠️ codex が同梱の rg を引けない (置き場所の codex-path が PATH に無い) → Install-Codex で揃える ⚠️' }
+    if (Test-CodexPathDrift -State $State) { '⚠️ PATH の codex が winget のものではない → ※ の手順で直す ⚠️' }
 }
 
-# 昇格した winget を起こせなかったとき (Start-Process -Verb RunAs の例外) の終了コード。UAC で断った (Win32Exception の ERROR_CANCELLED。
-# Start-Process は InvalidOperationException に包む) なら 1223、ほか (UAC を出せない SSH の会話など) は -1 (Install-Bootstrap.ps1 と同じ)
-function Get-ElevationFailureCode {
-    param([Exception]$Exception)
-    $e = $Exception
-    while ($null -ne $e) {
-        if (($e -is [System.ComponentModel.Win32Exception]) -and ($e.NativeErrorCode -eq 1223)) { return 1223 }
-        $e = $e.InnerException
-    }
-    -1
-}
-
-# winget の出力の行から、進み具合の表示 (回る棒・帯 █▒) を除く (Install-Bootstrap.ps1 と同じ)
-function Select-WingetOutputLines {
-    param([string[]]$Lines)
-    foreach ($line in $Lines) {
-        $s = "$line"
-        if (($s -notmatch '^\s*[-\\|/]?\s*$') -and ($s -notmatch '[\u2588\u2592]')) { $s }
-    }
-}
-
-# PowerShell の一重引用符の文字列にする (中の ' を重ねる。全角の引用符も PowerShell は ' と読むので重ねる。Install-Bootstrap.ps1 と同じ)
-function ConvertTo-PsLiteral {
-    param([string]$Text)
-    $quotes = @([char]0x27, [char]0x2018, [char]0x2019, [char]0x201A, [char]0x201B)
-    $sb = New-Object System.Text.StringBuilder
-    foreach ($c in "$Text".ToCharArray()) {
-        [void]$sb.Append($c)
-        if ($quotes -contains $c) { [void]$sb.Append($c) }
-    }
-    "'" + $sb.ToString() + "'"
-}
-
-# PowerShell の本文を -EncodedCommand に渡す形 (UTF-16LE の base64) にする
-function ConvertTo-EncodedCommand {
-    param([string]$Script)
-    [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Script))
-}
-
-# 昇格した Windows PowerShell に渡す本文 (Windows PowerShell 5.1 の書き方だけ)。1 行目に昇格した側のアカウントを書き、そのアカウントの
-# winget (実行エイリアス %LOCALAPPDATA%\Microsoft\WindowsApps\winget.exe、無ければ PATH の winget の .exe だけ。関数・alias・.cmd・.ps1 は
-# 管理者の権限で流さない) で $Commands を上から打ち、出力 (stderr も) を UTF-8 で読んで $LogPath に UTF-8 で書き足す。0 で終わらない
-# winget があれば、そこで止めてその終了コードで終わる (外した後に入れられなかったときも、Install-Codex が読み直して知らせる)。
-# winget が無い・起こせなければ、わけを書いて 2 で終わる ($LASTEXITCODE を先に 2 にしておく。起こせないまま exit に届くと 0 で終わり、
-# 入ったように見える)。Start-Process -Verb RunAs は昇格した process の出力を受け取れないので、ファイルで返す
-function Get-ElevatedWingetScript {
-    param([object[]]$Commands, [string]$LogPath)
-    $log = ConvertTo-PsLiteral -Text $LogPath
-    $lines = @(
-        "`$ErrorActionPreference = 'Continue'"
-        '$global:LASTEXITCODE = 2'
-        'try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch { }'
-        "('account: ' + `$env:USERNAME) | Out-File -LiteralPath $log -Encoding utf8"
-        '$w = $null'
-        'if ($env:LOCALAPPDATA) {'
-        "    `$alias = Join-Path `$env:LOCALAPPDATA 'Microsoft\WindowsApps\winget.exe'"
-        '    if (Test-Path -LiteralPath $alias) { $w = $alias }'
-        '}'
-        'if (-not $w) {'
-        '    $found = @(Get-Command -Name winget -CommandType Application -ErrorAction SilentlyContinue | Where-Object { "$($_.Source)" -like ''*.exe'' })'
-        '    if ($found.Count -gt 0) { $w = $found[0].Source }'
-        '}'
-        'if (-not $w) {'
-        "    ('winget が見つからない (昇格した側のアカウント: ' + `$env:USERNAME + ')') | Out-File -LiteralPath $log -Encoding utf8 -Append"
-        '    exit 2'
-        '}'
-        '$commands = @()'
-    )
-    foreach ($command in $Commands) {
-        $lines += '$commands += , @(' + (@($command | ForEach-Object { ConvertTo-PsLiteral -Text $_ }) -join ', ') + ')'
-    }
-    $lines += @(
-        '$code = 0'
-        'foreach ($c in $commands) {'
-        "    ('> winget ' + (`$c -join ' ')) | Out-File -LiteralPath $log -Encoding utf8 -Append"
-        '    try {'
-        "        & `$w @c 2>&1 | ForEach-Object { `"`$_`" } | Out-File -LiteralPath $log -Encoding utf8 -Append"
-        '        $code = $LASTEXITCODE'
-        '    } catch {'
-        "        ('winget を起こせなかった: ' + `$_.Exception.Message) | Out-File -LiteralPath $log -Encoding utf8 -Append"
-        '        $code = 2'
-        '    }'
-        '    if ($code -ne 0) { break }'
-        '}'
-        'exit $code'
-    )
-    $lines -join "`n"
-}
-
-# 昇格した側のログの 1 行目 (account: <名前>) から、昇格した側のアカウントを読む。無ければ $null
-function Get-ElevatedAccount {
-    param([string[]]$Lines)
-    foreach ($line in $Lines) {
-        if ("$line" -match '^\s*account:\s*(.+?)\s*$') { return $Matches[1] }
+# winget の失敗の終了コードに添える行。無ければ $null。0x8A15007D (APPINSTALLER_CLI_ERROR_ADMIN_CONTEXT_ACTION_PROHIBITED) は、昇格した会話から
+# user スコープの portable を入れる・外すのを winget が断ったとき (会話の昇格を見誤ったとき。Get-CodexInstallRoute が先に止める)
+function Get-WingetFailureHint {
+    param([int]$ExitCode)
+    if ($ExitCode -eq -1978335107) {
+        return '昇格した会話から user スコープの portable を入れる・外すのを winget が断った (0x8A15007D)。昇格していない PowerShell で Install-Codex を打ち直す'
     }
     $null
 }
@@ -446,31 +465,6 @@ function Invoke-Winget {
     [pscustomobject]@{ ExitCode = $code; Lines = @($lines) }
 }
 
-# 昇格した winget で $Commands を打つ (UAC の確認が 1 回出る。確認なしで昇格する設定の PC では出ない)。System32 の Windows PowerShell
-# (同じユーザーが差し替えられないもの) を Start-Process -Verb RunAs で昇格させ、Get-ElevatedWingetScript の本文を -EncodedCommand で渡す。
-# 昇格した側は出力を一時ファイルに書き、最後に打った winget の終了コードで終わる。こちらはその終了コードと、ファイルの行 (進み具合の表示は
-# 除く) と、昇格した側のアカウントを返す。UAC を断った・起こせなかったときは、UAC で断ったなら 1223、ほか (UAC を出せない SSH の会話など) は
-# -1 (Get-ElevationFailureCode)。待つのは昇格した PowerShell だけ (5.1 の -Wait は子孫のプロセスまで待つので、handle を掴んで WaitForExit)
-function Invoke-ElevatedWinget {
-    param([object[]]$Commands)
-    $log = Join-Path ([IO.Path]::GetTempPath()) ('dotfiles-codex-winget-{0}.log' -f [guid]::NewGuid().ToString('N'))
-    $shell = Join-Path ([Environment]::SystemDirectory) 'WindowsPowerShell\v1.0\powershell.exe'
-    $encoded = ConvertTo-EncodedCommand -Script (Get-ElevatedWingetScript -Commands $Commands -LogPath $log)
-    try {
-        $p = Start-Process -FilePath $shell -ArgumentList @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encoded) -Verb RunAs -WindowStyle Hidden -PassThru -ErrorAction Stop
-        $null = $p.Handle
-        $p.WaitForExit()
-    } catch {
-        return [pscustomobject]@{ ExitCode = (Get-ElevationFailureCode -Exception $_.Exception); Lines = @("UAC: $($_.Exception.Message)"); Account = $null }
-    }
-    $lines = @()
-    if (Test-Path -LiteralPath $log) {
-        $lines = @(Select-WingetOutputLines -Lines @(Get-Content -LiteralPath $log -Encoding UTF8))
-        Remove-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue
-    }
-    [pscustomobject]@{ ExitCode = $p.ExitCode; Lines = @($lines | Where-Object { $_ -notmatch '^\s*account:' }); Account = (Get-ElevatedAccount -Lines $lines) }
-}
-
 # 置き場所の codex の exe を探す。この PC の CPU の名前 (x64 は codex-x86_64-pc-windows-msvc.exe、arm64 は codex-aarch64-pc-windows-msvc.exe)
 # を先に見て、無ければもう一方。どちらも無ければ $null
 function Find-CodexExe {
@@ -507,32 +501,89 @@ function Get-CodexLink {
     [pscustomobject]@{ Exists = $true; LinkType = "$($item.LinkType)"; Target = "$target" }
 }
 
+# 置き場所の codex.exe (winget 1.30 が置く hardlink) が、置き場所の exe の hardlink かを読む
+function Get-CodexHardlink {
+    param([string]$PackageDir, [string]$ExePath)
+    $item = Get-Item -LiteralPath (Join-Path $PackageDir 'codex.exe') -Force -ErrorAction SilentlyContinue
+    if (-not $item) { return 'missing' }
+    # LinkType は hardlink なら HardLink、symlink なら SymbolicLink。reparse point (symlink・junction) かは Attributes で見る
+    $reparse = if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { 'ReparsePoint' } else { '' }
+    $exeLength = -1
+    if ($ExePath) {
+        $exeItem = Get-Item -LiteralPath $ExePath -Force -ErrorAction SilentlyContinue
+        if ($exeItem) { $exeLength = $exeItem.Length }
+    }
+    Get-CodexHardlinkState -Exists $true -LinkType $reparse -Length $item.Length -ExeLength $exeLength
+}
+
 # 開発者モード (設定 > システム > 開発者向け) が on か。on なら、昇格していない winget も symlink を作れる
 function Test-DeveloperMode {
     $key = Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock' -Name 'AllowDevelopmentWithoutDevLicense' -ErrorAction SilentlyContinue
     [bool]($key -and ($key.AllowDevelopmentWithoutDevLicense -eq 1))
 }
 
-# 今の PowerShell が管理者の権限で動いているか (昇格した会話なら、UAC を出さずにそのまま winget を打つ)
+# 今の PowerShell が UAC で昇格した token (TokenElevationTypeFull) で動いているか。winget 1.30 が user スコープの portable を断るのと同じ見方
+# (winget の Runtime::IsRunningWithNonDefaultFullToken)。UAC の分かれていない管理者 (Administrator・UAC が off) は Default なので当たらない。
+# token を読めなければ、管理者のロールで代える
 function Test-Elevated {
+    try {
+        if (-not ('DotfilesCodex.TokenInfo' -as [type])) {
+            Add-Type -Namespace DotfilesCodex -Name TokenInfo -MemberDefinition @'
+[DllImport("advapi32.dll", SetLastError = true)]
+public static extern bool GetTokenInformation(IntPtr token, int infoClass, out int info, int length, out int returnLength);
+'@
+        }
+        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+        $type = 0
+        $returned = 0
+        # 18 は TokenElevationType。1 = Default、2 = Full (UAC で昇格した)、3 = Limited
+        if ([DotfilesCodex.TokenInfo]::GetTokenInformation($identity.Token, 18, [ref]$type, 4, [ref]$returned)) { return ($type -eq 2) }
+    } catch {
+    }
     $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
     (New-Object Security.Principal.WindowsPrincipal $identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-}
-
-# このユーザーが管理者 (Administrators) か。昇格していない token でも whoami /groups に出る
-function Test-IsAdminAccount {
-    $ErrorActionPreference = 'Continue'
-    try {
-        $out = @(& whoami.exe /groups /fo csv /nh 2>&1 | ForEach-Object { "$_" })
-    } catch {
-        return $false
-    }
-    Test-AdminMember -Lines $out
 }
 
 # これから開く PowerShell が使う PATH (マシン → ユーザーの順)。今のプロセスの PATH は古いことがある
 function Get-CodexPathValue {
     @([Environment]::GetEnvironmentVariable('Path', 'Machine'), [Environment]::GetEnvironmentVariable('Path', 'User')) -join ';'
+}
+
+# PATH で引かれる codex と、同梱の rg の状態を読む
+function Get-CodexPathState {
+    param([string]$PackageDir, [string]$LinksDir)
+    $pathValue = Get-CodexPathValue
+    $resolved = Resolve-CodexOnPath -PathValue $pathValue -Names @('codex.exe', 'codex.cmd', 'codex.bat', 'codex.ps1') -Exists { param($p) Test-Path -LiteralPath $p -PathType Leaf }
+    $kind = Get-CodexPathKind -Resolved $resolved -LinksDir $LinksDir -PackageDir $PackageDir
+    $rgDir = Join-Path $PackageDir 'codex-path'
+    $bundled = Test-Path -LiteralPath (Join-Path $rgDir 'rg.exe') -PathType Leaf
+    [pscustomobject]@{
+        Resolved = $resolved
+        Kind     = $kind
+        RgDir    = $rgDir
+        RgState  = Get-CodexRgState -PathKind $kind -BundledRg $bundled -PathValue $pathValue -RgDir $rgDir
+    }
+}
+
+# $Dir をユーザーの PATH の末尾に足す (無いときだけ)。値の型 (REG_EXPAND_SZ など) を保ち、user 変数を書いて消して、動いているプログラムに
+# 環境変数が変わったことを知らせる (Install-HerdrApp.ps1 と同じ)。今のプロセスの PATH にも足す
+function Add-CodexUserPath {
+    param([string]$Dir)
+    $key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+    try {
+        $has = $key.GetValueNames() -contains 'Path'
+        $raw = if ($has) { [string]$key.GetValue('Path', '', [Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames) } else { '' }
+        if (-not (Test-CodexPathListed -Raw $raw -Dir $Dir)) {
+            $kind = if ($has) { $key.GetValueKind('Path') } else { [Microsoft.Win32.RegistryValueKind]::ExpandString }
+            $key.SetValue('Path', (Get-CodexPathValueWithEntry -Raw $raw -Dir $Dir), $kind)
+            Write-Host "ユーザーの PATH に $Dir を足した (codex が同梱の rg を引く。新しく開くシェルから効く)"
+        }
+    } finally {
+        $key.Close()
+    }
+    [Environment]::SetEnvironmentVariable('DOTFILES_CODEX_PATH_REFRESH', '1', 'User')
+    [Environment]::SetEnvironmentVariable('DOTFILES_CODEX_PATH_REFRESH', $null, 'User')
+    if (-not (Test-CodexPathListed -Raw $env:Path -Dir $Dir)) { $env:Path = Get-CodexPathValueWithEntry -Raw $env:Path -Dir $Dir }
 }
 
 # 置き場所の下の exe (codex・同梱の helper) か、WinGet\Links\codex.exe から起動して動いているプロセス
@@ -556,28 +607,35 @@ function Get-CodexState {
     if ($exists) { $installed = Get-CodexInstalledVersion -Exe $exe }
     $link = Get-CodexLink -LinksDir $LinksDir
     $linkState = Get-CodexLinkState -Exists $link.Exists -LinkType $link.LinkType -Target $link.Target -ExePath $exe
+    $hardlinkState = Get-CodexHardlink -PackageDir $PackageDir -ExePath $exe
+    $aliasState = Get-CodexAliasState -LinkState $linkState -HardlinkState $hardlinkState
+    $wingetVersion = Get-WingetClientVersion -Lines (Invoke-Winget -Arguments @('--version')).Lines
     $pins = Invoke-Winget -Arguments @('pin', 'list', '--id', $PackageId, '--exact', '--accept-source-agreements', '--disable-interactivity')
     $show = Invoke-Winget -Arguments @('show', '--id', $PackageId, '--exact', '--versions', '--source', 'winget', '--accept-source-agreements', '--disable-interactivity')
     # @() で包む。関数が返す空の配列は呼び出し側で $null にほどける (Install-OpenSSH.ps1 で踏んだ)
     $versions = @(Get-WingetVersionList -Lines $show.Lines)
     $latest = $null
     if ($versions.Count -gt 0) { $latest = $versions[0] }
-    $resolved = Resolve-CodexOnPath -PathValue (Get-CodexPathValue) -Names @('codex.exe', 'codex.cmd', 'codex.bat', 'codex.ps1') -Exists { param($p) Test-Path -LiteralPath $p -PathType Leaf }
+    $path = Get-CodexPathState -PackageDir $PackageDir -LinksDir $LinksDir
     [pscustomobject]@{
-        Exists       = $exists
-        Installed    = $installed
-        ExeName      = $(if ($exe) { Split-Path -Leaf $exe } else { $null })
-        Plan         = Get-CodexPlan -Exists $exists -Installed $installed -Target $Target -LinkState $linkState
-        Direction    = Get-CodexDirection -Versions $versions -Installed $installed -Target $Target
-        Pinned       = Test-WingetPinned -Lines $pins.Lines -PackageId $PackageId
-        Versions     = $versions
-        Latest       = $latest
-        LinkState    = $linkState
-        LinkTarget   = $link.Target
-        PathResolved = $resolved
-        PathKind     = Get-CodexPathKind -Resolved $resolved -LinksDir $LinksDir
-        Route        = Get-CodexInstallRoute -Elevated (Test-Elevated) -DeveloperMode (Test-DeveloperMode) -Admin (Test-IsAdminAccount)
-        BusyCount    = @(Get-CodexBusyProcess -PackageDir $PackageDir -LinksDir $LinksDir).Count
+        Exists        = $exists
+        Installed     = $installed
+        ExeName       = $(if ($exe) { Split-Path -Leaf $exe } else { $null })
+        Plan          = Get-CodexPlan -Exists $exists -Installed $installed -Target $Target -AliasState $aliasState
+        Direction     = Get-CodexDirection -Versions $versions -Installed $installed -Target $Target
+        Pinned        = Test-WingetPinned -Lines $pins.Lines -PackageId $PackageId
+        Versions      = $versions
+        Latest        = $latest
+        LinkState     = $linkState
+        LinkTarget    = $link.Target
+        HardlinkState = $hardlinkState
+        AliasState    = $aliasState
+        PathResolved  = $path.Resolved
+        PathKind      = $path.Kind
+        RgState       = $path.RgState
+        WingetVersion = $wingetVersion
+        Route         = Get-CodexInstallRoute -Elevated (Test-Elevated) -DeveloperMode (Test-DeveloperMode) -WingetVersion $wingetVersion
+        BusyCount     = @(Get-CodexBusyProcess -PackageDir $PackageDir -LinksDir $LinksDir).Count
     }
 }
 
@@ -623,16 +681,21 @@ function Invoke-InstallCodex {
         Write-Host '揃っている。何もしない'
         return 0
     }
-    # 揃える手順で直す差 (版・pin・symlink) が無く、残っているのは PATH のずれだけ
+    # 揃える手順で直す差 (版・pin・codex と打てる形・同梱の rg の PATH) が無く、残っているのは PATH のずれだけ
     if (-not (Test-CodexDrift -State $state)) {
-        Write-Host '版と pin と symlink は揃っている。PATH のずれは Install-Codex では直らない (上の ※ の行の手順で直す)'
+        Write-Host '版と pin と codex と打てる形は揃っている。PATH のずれは Install-Codex では直らない (上の ※ の行の手順で直す)'
         Write-CodexVerdict -State $state
         return 1
     }
 
     $blocker = Get-CodexApplyBlocker -Plan $state.Plan -Versions $state.Versions -Target $Version -BusyCount $state.BusyCount -Route $state.Route
-    if ($blocker -eq 'blocked') {
-        Write-Host 'winget が codex の symlink を作れないので、入れずに止める。上の ※ の行の手順で開発者モードを on にしてから打ち直す'
+    if ($blocker -eq 'elevated') {
+        Write-Host '昇格した PowerShell では winget が codex を入れないので、何も変えずに止める。昇格していない PowerShell で Install-Codex を打ち直す'
+        Write-CodexVerdict -State $state
+        return 1
+    }
+    if ($blocker -eq 'old-winget') {
+        Write-Host '入れても codex と打てないので、入れずに止める。上の ※ の行の手順で winget を更新するか開発者モードを on にしてから打ち直す'
         Write-CodexVerdict -State $state
         return 1
     }
@@ -669,40 +732,18 @@ function Invoke-InstallCodex {
         $unpin = Invoke-Winget -Arguments @('pin', 'remove', '--id', $packageId, '--exact', '--accept-source-agreements', '--disable-interactivity')
         if ($unpin.ExitCode -ne 0) { Write-Host ('winget pin remove が失敗した (終了コード 0x{0:X8})' -f $unpin.ExitCode) }
     }
-    $commands = @(Get-WingetCommands -Plan $state.Plan -PackageId $packageId -Version $Version)
-    if ($commands.Count -gt 0) {
-        if ($state.Route -eq 'elevated') {
-            # 外す・入れるを 1 回の昇格で打つ (UAC を断れば、どちらも打たない)
-            foreach ($arguments in $commands) { Write-Host "[管理者] winget $($arguments -join ' ')" }
-            Write-Host 'Windows のデスクトップに UAC の確認が出る。出たら「はい」を押す (昇格した側の窓は隠すので、終わるまで winget の出力は出ない)'
-            $result = Invoke-ElevatedWinget -Commands $commands
-            $result.Lines | Select-Object -Last 10 | ForEach-Object { Write-Host "  $_" }
-            if (($null -ne $result.Account) -and ($result.Account -ne $env:USERNAME)) {
-                Write-Host "昇格した側のアカウント ($($result.Account)) が、このユーザー ($env:USERNAME) と違う。codex はそのアカウントの置き場所に入ったかもしれないので、そのアカウントで winget uninstall --id $packageId --exact を打って外す"
+    foreach ($arguments in @(Get-WingetCommands -Plan $state.Plan -PackageId $packageId -Version $Version)) {
+        Write-Host "winget $($arguments -join ' ')"
+        $result = Invoke-Winget -Arguments $arguments
+        $result.Lines | Select-Object -Last 5 | ForEach-Object { Write-Host "  $_" }
+        if ($result.ExitCode -ne 0) {
+            Write-Host ('winget が失敗した (終了コード 0x{0:X8})' -f $result.ExitCode)
+            $hint = Get-WingetFailureHint -ExitCode $result.ExitCode
+            if ($hint) { Write-Host $hint }
+            if ($arguments[0] -eq 'install') {
+                Write-Host 'install が落ちたので、codex が入っていないことがある。ネットワークを確かめて Install-Codex を打ち直す (dotfiles apply でも入る)'
             }
-            if ($result.ExitCode -eq 1223) {
-                Write-Host 'UAC の確認で「はい」を押さなかったので、何も変えていない。Install-Codex を打ち直して「はい」を押す'
-            } elseif ($result.ExitCode -eq -1) {
-                Write-Host '昇格した winget を起こせなかった (UAC を出せない SSH の会話など)。Windows のデスクトップの PowerShell で Install-Codex を打ち直す'
-            } elseif ($result.ExitCode -ne 0) {
-                Write-Host ('winget が失敗した (終了コード 0x{0:X8})' -f $result.ExitCode)
-                if ($state.Plan -ne 'install') {
-                    Write-Host '外した後に入れられなかったことがある。ネットワークを確かめて Install-Codex を打ち直す (dotfiles apply でも入る)'
-                }
-            }
-        } else {
-            foreach ($arguments in $commands) {
-                Write-Host "winget $($arguments -join ' ')"
-                $result = Invoke-Winget -Arguments $arguments
-                $result.Lines | Select-Object -Last 5 | ForEach-Object { Write-Host "  $_" }
-                if ($result.ExitCode -ne 0) {
-                    Write-Host ('winget が失敗した (終了コード 0x{0:X8})' -f $result.ExitCode)
-                    if ($arguments[0] -eq 'install') {
-                        Write-Host 'install が落ちたので、codex が入っていないことがある。ネットワークを確かめて Install-Codex を打ち直す (dotfiles apply でも入る)'
-                    }
-                    break
-                }
-            }
+            break
         }
     }
     # 入っていれば pin を足す (入れ替えた後は、上で外したので足し直しになる)
@@ -712,6 +753,10 @@ function Invoke-InstallCodex {
         if ($pin.ExitCode -eq 0) { Write-Host 'winget pin を足した (winget upgrade --all から外れる)' }
         else { Write-Host ('winget pin add が失敗した (終了コード 0x{0:X8})' -f $pin.ExitCode) }
     }
+    # hardlink の形で PATH の codex が置き場所の codex.exe なら、同梱の rg (置き場所の codex-path) をユーザーの PATH に足す (入れた後の
+    # PATH で決める。winget が置き場所を PATH に足すのは、入れたとき)
+    $pathNow = Get-CodexPathState -PackageDir $packageDir -LinksDir $linksDir
+    if ($pathNow.RgState -eq 'missing') { Add-CodexUserPath -Dir $pathNow.RgDir }
 
     # 揃ったかを読み直して確かめる
     Write-Host ''
@@ -721,8 +766,8 @@ function Invoke-InstallCodex {
         Write-Host '揃った (新しい PowerShell から codex と打てる)'
         return 0
     }
-    # 版と pin と symlink は揃い、残っているのは PATH のずれだけ
-    if (-not (Test-CodexDrift -State $after)) { Write-Host '版と pin と symlink は揃った' }
+    # 版と pin と codex と打てる形は揃い、残っているのは PATH のずれだけ
+    if (-not (Test-CodexDrift -State $after)) { Write-Host '版と pin と codex と打てる形は揃った' }
     Write-CodexVerdict -State $after
     return 1
 }
