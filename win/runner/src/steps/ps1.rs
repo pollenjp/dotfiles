@@ -17,7 +17,7 @@
 //! sshd は、受け持ちが runner のホストでは ps1 を流す前に鍵の写し (`sshd_keys`。WSL の wrapper が写しを置くのと同じ段) と、ユーザーと送り元の
 //! 写し (`sshd_allow`。ホストの値の `[sshd] allowUsers`・`allowFrom`) を置く。
 //!
-//! Windows にしか無い手順 (t3-code・claude-desktop・ghq・fzf・starship。`windows_only`) は WSL の wrapper を持たないので、判断は同じ型の Policy で
+//! Windows にしか無い手順 (t3-code・claude-desktop・ghq・fzf・starship・codex。`windows_only`) は WSL の wrapper を持たないので、判断は同じ型の Policy で
 //! 決め、ps1 の締めの行の文言と出力の印は試験が ps1 の字と突き合わせる。
 //!
 //! ps1 の締めの行の文言 (「→ Install-Ntn で揃える」など) を変えるときは、ここも直す (WSL の wrapper と同じ約束)。
@@ -915,6 +915,57 @@ pub const SPECS: &[Ps1Spec] = &[
         notices: &[],
         alerts: &[],
     },
+    // Codex CLI (OpenAI のコーディング エージェントの CLI。Windows にしか無い手順。WSL の setup には無い)。道具の switch windowsCodex で on/off
+    // (minimum では off)。winget の portable を固定した版で入れ、版のずれも揃える (Policy::Sync)。codex と打てるのは winget が WinGet\Links に
+    // 置く symlink だけなので、開発者モードが off なら ps1 が winget を UAC で昇格して打ち (UAC の確認が 1 回出る)、symlink の無い形 (手で
+    // winget install を打った) は入れ直す。管理者でなく開発者モードも off なら、ps1 は入れずに 1 を返し、締めの行は「→ ※ の手順で直す」だけに
+    // なる。その行の印で直し方を出す (dotfiles-private の docs/adr/118_codex_cli_*)
+    Ps1Spec {
+        id: "codex",
+        windows_only: true,
+        order: 97,
+        title: "Codex CLI を固定した版 (portable) に揃え、codex と打てる symlink を置く",
+        gate: Gate::Tool("windowsCodex"),
+        script: "win/codex/Install-Codex.ps1",
+        command: "Install-Codex",
+        subject: "Windows の Codex CLI",
+        package: "Codex CLI (winget の OpenAI.Codex)",
+        header: Header::Contains("Codex CLI (winget の OpenAI.Codex"),
+        check_secs: 120,
+        // zip は約 200 MB (展開して約 600 MB)。UAC の確認を押すまでの間も待つ
+        install_secs: 1800,
+        policy: Policy::Sync,
+        // 開発者モードが off の PC では、winget を UAC で昇格して打つ (on なら出ない)
+        uac: true,
+        ok_text: "Windows の Codex CLI は、dotfiles で固定した版に揃っています。",
+        installed: &[
+            "Windows に Codex CLI を入れました (固定した版と pin と、codex と打つ WinGet\\Links の symlink が揃っています)。新しい PowerShell から codex と打てます (herdr-app の中の端末なら herdr-app を上げ直してから)。ログインは codex を起こして手でする。",
+        ],
+        synced: &[
+            "Windows の Codex CLI を揃えました (固定した版と pin と、codex と打つ WinGet\\Links の symlink が揃っています)。",
+        ],
+        manual_fix: &[
+            "PATH のずれは揃える手順では直らない。上の ※ の行の手順で直す (win/README.md の「Codex CLI」)",
+        ],
+        sync_fix: &[
+            "揃えるには PowerShell で Install-Codex を打つか、dotfiles apply --steps codex を流し直す (開発者モードが off なら UAC の確認が出る。SSH の会話では出せないので、デスクトップの端末で流す。入れ替えるときは、動いている codex を先に終わらせる)",
+        ],
+        releases_file: false,
+        ssh_relay: false,
+        sshd_keys: false,
+        one_password: false,
+        missing_blocked: None,
+        output_fixes: &[(
+            "winget が codex の symlink を作れない",
+            "このアカウントは管理者でなく、開発者モードも off なので、winget は codex の symlink を作れない (入れても codex と打てない)。管理者に開発者モードを on にしてもらい (設定 > システム > 開発者向け)、dotfiles apply --steps codex を流し直す (win/README.md の「Codex CLI」)",
+        )],
+        install_notice: None,
+        sync_notice: None,
+        check_hang: None,
+        leftover: None,
+        notices: &[],
+        alerts: &[],
+    },
 ];
 
 /// herdr の Herdr.Herdr.Preview を外す手順 (Install-Herdr.ps1 の締めの行と同じ中身)
@@ -1753,6 +1804,9 @@ mod tests {
     //!   1Password の行を出さず、手で打つ直し方のコマンドにも -NoOnePassword を添える。on のホストは渡さず、入れた後に 1Password の行を出す
     //! - ghq・fzf・starship は Windows にしか無い手順で、いつも on。ntn と同じく 3 は -IfMissing で入れ、「→ … で揃える」なら引数なしで揃え、
     //!   PATH のずれだけなら知らせる。fzf・starship は MSI の締めの行 (「→ ※ の手順で直す」だけ) なら打たずに知らせ、MSI の外し方を出す
+    //! - codex は Windows にしか無い手順で、道具の switch (windowsCodex) で on/off。fzf と同じく入れる・揃える (codex と打つ symlink が無い形も
+    //!   「→ Install-Codex で揃える」で揃える) が、入れる・揃える前に UAC を知らせる。winget が symlink を作れない締めの行 (「→ ※ の手順で直す」
+    //!   だけ) なら打たずに知らせ、開発者モードの手を出す
     //! - claude-desktop は Windows にしか無い手順で、道具の switch (windowsClaudeDesktop) で on/off。3 は UAC を先に知らせて -IfMissing で
     //!   入れ (固定した版が winget に無ければ打たない)、1 は知らせるだけ。旧来の exe の Claude が残っている (締めの行。入っていなくても 1) なら、
     //!   check も apply もその外し方の行にして何も打たない。仮想マシン プラットフォームが off (出力の印) なら、状態の表が出たときだけ
@@ -2143,6 +2197,136 @@ mod tests {
         }
     }
 
+    /// codex: 道具の switch (windowsCodex) で on/off の Windows にしか無い手順。fzf と同じく 3 は -IfMissing で入れ、「→ Install-Codex で揃える」
+    /// (版・pin のずれと、codex と打つ symlink が無い形) なら引数なしで揃え、PATH のずれだけなら知らせる。開発者モードが off の PC では ps1 が
+    /// winget を UAC で昇格して打つので、入れる・揃える前に UAC を知らせる。winget が symlink を作れない (管理者でなく開発者モードも off) なら、
+    /// ps1 は入れずに 1 を返し、締めの行は「→ ※ の手順で直す」だけになる。runner は打たずに知らせ、開発者モードの手を出す
+    #[test]
+    fn codex_syncs_with_uac_and_reports_when_the_symlink_cannot_be_made() {
+        let s = spec("codex");
+        assert!(s.windows_only);
+        assert_eq!(s.gate, Gate::Tool("windowsCodex"));
+        assert_eq!(s.order, 97);
+        assert_eq!(s.policy, Policy::Sync);
+        assert!(s.uac);
+        // minimum のホストでは off (使うホストが [tools] windowsCodex = true を書く)
+        let minimum = crate::host::parse(
+            "group = \"minimum\"\n",
+            Path::new("h.toml"),
+            Groups::embedded().unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            s.gate.off_reason(&minimum).unwrap(),
+            "このホストでは off (windowsCodex = false。グループ minimum の既定)"
+        );
+        // 3: UAC を先に知らせて -IfMissing で入れ、新しい PowerShell から codex と打てると添える
+        let sys1 = sys(
+            (
+                3,
+                vec![
+                    header_line(s),
+                    "⚠️ Codex CLI が入っていない → Install-Codex で入れる ⚠️".into(),
+                ],
+            ),
+            (0, vec![]),
+        );
+        let (o, out, calls) = run("codex", &sys1, APPLY);
+        assert_eq!(o, vec![Outcome::new(Kind::Ok, "入れた")]);
+        assert_eq!(ends(&calls), vec!["-Check", "-IfMissing"]);
+        assert!(
+            out.contains("Windows に Codex CLI (winget の OpenAI.Codex) が入っていないので、固定した版を入れます (Install-Codex.ps1 -IfMissing。1800 秒まで待ちます)。"),
+            "{out}"
+        );
+        assert!(out.contains("UAC の確認が出ます"), "{out}");
+        assert!(
+            out.contains("新しい PowerShell から codex と打てます"),
+            "{out}"
+        );
+        // 1 (codex と打つ symlink が無い形): 引数なしで揃える (ps1 が入れ直す)
+        let sys2 = sys(
+            (
+                1,
+                vec![
+                    header_line(s),
+                    "⚠️ codex と打てない (WinGet\\Links に codex.exe の symlink が無い) → Install-Codex で揃える ⚠️".into(),
+                ],
+            ),
+            (0, vec![]),
+        );
+        let (o, out, calls) = run("codex", &sys2, APPLY);
+        assert_eq!(o, vec![Outcome::new(Kind::Ok, "揃えた")]);
+        assert_eq!(ends(&calls), vec!["-Check", ""]);
+        assert!(out.contains("Windows の Codex CLI を揃えました"), "{out}");
+        // check と dry-run は -Check だけを打つ
+        let sys2_check = sys(
+            (
+                1,
+                vec![
+                    header_line(s),
+                    "⚠️ codex と打てない (WinGet\\Links に codex.exe の symlink が無い) → Install-Codex で揃える ⚠️".into(),
+                ],
+            ),
+            (0, vec![]),
+        );
+        let (o, _, calls) = run("codex", &sys2_check, Mode::Check);
+        assert_eq!(o[0].kind, Kind::Fix);
+        assert_eq!(ends(&calls), vec!["-Check"]);
+        // 1 (PATH のずれだけ): 知らせるだけ
+        let sys3 = sys(
+            (
+                1,
+                vec![
+                    header_line(s),
+                    "⚠️ PATH の codex が winget の symlink ではない → ※ の手順で直す ⚠️".into(),
+                ],
+            ),
+            (0, vec![]),
+        );
+        let (o, _, calls) = run("codex", &sys3, APPLY);
+        assert_eq!(o.len(), 1);
+        assert_eq!(o[0].kind, Kind::Manual);
+        assert_eq!(ends(&calls), vec!["-Check"]);
+        assert_eq!(
+            o[0].notes,
+            vec![
+                "PATH のずれは揃える手順では直らない。上の ※ の行の手順で直す (win/README.md の「Codex CLI」)"
+                    .to_string()
+            ]
+        );
+        // winget が symlink を作れない: 打たずに知らせ、開発者モードの手を出す (check も apply も)
+        let blocked = (
+            1,
+            vec![
+                header_line(s),
+                "⚠ winget が codex の symlink を作れない (このアカウントは管理者でなく、開発者モードも off)。入れても codex と打てないので、Install-Codex は入れない".into(),
+                "⚠️ winget が codex の symlink を作れない (管理者でなく、開発者モードも off) → ※ の手順で直す ⚠️".into(),
+            ],
+        );
+        for mode in [Mode::Check, APPLY] {
+            let sys4 = sys(blocked.clone(), (0, vec![]));
+            let (o, _, calls) = run("codex", &sys4, mode);
+            assert_eq!(o.len(), 1);
+            assert_eq!(o[0].kind, Kind::Manual);
+            assert_eq!(
+                o[0].text,
+                "winget が codex の symlink を作れない (Install-Codex -Check の ※ の行。runner は直さない)"
+            );
+            assert_eq!(ends(&calls), vec!["-Check"]);
+            assert_eq!(o[0].notes.len(), 1);
+            assert!(
+                o[0].notes[0].contains("開発者モードを on"),
+                "{:?}",
+                o[0].notes
+            );
+            assert!(
+                o[0].notes[0].contains("dotfiles apply --steps codex"),
+                "{:?}",
+                o[0].notes
+            );
+        }
+    }
+
     /// ps1 の字からコメント (`<# … #>` の塊と、`#` で始まる行) を除く。突き合わせを、コメントに写した文言で通さないため
     fn ps1_code(text: &str) -> String {
         let mut out = String::new();
@@ -2183,7 +2367,14 @@ mod tests {
         let only: Vec<&Ps1Spec> = SPECS.iter().filter(|s| s.windows_only).collect();
         assert_eq!(
             only.iter().map(|s| s.id).collect::<Vec<_>>(),
-            vec!["t3-code", "claude-desktop", "ghq", "fzf", "starship"]
+            vec![
+                "t3-code",
+                "claude-desktop",
+                "ghq",
+                "fzf",
+                "starship",
+                "codex"
+            ]
         );
         for s in only {
             let text = ps1_code(&std::fs::read_to_string(repo.join(s.script)).unwrap());
