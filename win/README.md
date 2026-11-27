@@ -21,9 +21,9 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs
 
 | ファイル | 置き先 (Windows) | 中身 |
 | --- | --- | --- |
-| `bootstrap/Install-Bootstrap.ps1` | (配らない。新しい Windows で URL から落として流し、clone した後は clone の中のものを流す) | 新しい Windows で最初に流す setup。Git for Windows・PowerShell 7・Visual Studio Build Tools・rustup (MSVC の host) を固定した版で入れ、public な dotfiles を Windows の ghq に clone し、ホストの値の雛形を写す。`-Private` は GitHub CLI とそのログインも入れ、dotfiles・dotfiles-private・claude-skills を clone する ([後述](#bootstrap-新しい-windows-で最初に流す)) |
+| `bootstrap/Install-Bootstrap.ps1` | (配らない。新しい Windows で URL から落として流し、clone した後は clone の中のものを流す) | 新しい Windows で最初に流す setup。Git for Windows・PowerShell 7 を固定した版で入れ、public な dotfiles を Windows の ghq に clone し、ホストの値の雛形を写す。`-Rust` は runner を手元で build する Visual Studio Build Tools・rustup (MSVC の host) も入れる。`-Private` は GitHub CLI とそのログイン・Build Tools・rustup も入れ、dotfiles・dotfiles-private・claude-skills を clone する ([後述](#bootstrap-新しい-windows-で最初に流す)) |
 | `templates/host.minimum.toml` | (配らない。引数なしの bootstrap が `%USERPROFILE%\.config\dotfiles\host.toml` に写す) | runner のホストの値の雛形 (設定グループ minimum だけの値・受け持ちは runner)。gh にログインできない PC (pollenjp の private な repo を取れない PC) のホストの値になる ([ホストの値](#ホストの値)) |
-| `runner/` | (配らない。Windows の clone の中で `dotfiles` 関数が `cargo run` で build して起こす) | Windows 側の runner (Rust の `dotfiles-win`)。WSL の setup の Windows の手順を写したもので、`dotfiles check` で確かめ、受け持ちを切り替えたホストでは `dotfiles apply` で揃える ([後述](#runner-windows-の側で確かめて揃える)) |
+| `runner/` | (配らない。CI が key ごとの GitHub の Release に置いた exe を、`dotfiles` 関数が clone に合うものを落として起こす。合う exe が無ければ clone の中で `cargo run` で build する。[runner の exe (Release)](#runner-の-exe-release)) | Windows 側の runner (Rust の `dotfiles-win`)。WSL の setup の Windows の手順を写したもので、`dotfiles check` で確かめ、受け持ちを切り替えたホストでは `dotfiles apply` で揃える ([後述](#runner-windows-の側で確かめて揃える)) |
 | `orca/keybindings.json` | `%USERPROFILE%\.orca\keybindings.json` | Orca のキーバインド ([TKT-25](https://app.notion.com/p/Orca-worktree-Ctrl-Alt-Ctrl-Ctrl-W-3e779149a66f8177809ac8632bf68b2c)) |
 | `powershell/dotfiles.ps1` | `%USERPROFILE%\.config\powershell\dotfiles.ps1` | PowerShell の共有設定 (herdr と Claude Code の alias、`e` = `exit`、それらの略語を入力行の中で広げる PSReadLine の割り当て、入力行の Vi モード (挿入モードの bash に似たキー (Alt+f・Alt+b・Ctrl+w・Alt+d・Ctrl+a・Ctrl+e・Ctrl+k・Ctrl+u) と、モードを示すカーソルの形)、ghq の repo を fzf で選んで移る `cdrepo`、runner を流す `dotfiles` (`dotfiles --self-update` は 3 つの clone を進めてから))。`$PROFILE` から読む ([後述](#powershell)、[TKT-77](https://app.notion.com/p/PowerShell-profile-dotfiles-win-herdr-alias-h-hss-hls-Windows-3ef79149a66f817abc28dd3fa5241903)) |
 | (`nix/files/starship.toml`) | `%USERPROFILE%\.config\starship.toml` | starship のプロンプトの設定。Linux の home-manager も同じファイルを `~/.config/starship.toml` に置くので `nix/` に置き、manifest の `base = "nix"` で配る。sh で判定する custom module は Windows では出さない。starship 本体は下の `starship/Install-Starship.ps1` (runner の `starship`) が、`$PROFILE` の init の 1 行は runner の `starship-init` が入れる ([後述](#starship)) |
@@ -75,22 +75,27 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs
 ## bootstrap (新しい Windows で最初に流す)
 
 新しい Windows で最初に流す PowerShell の script (`bootstrap/Install-Bootstrap.ps1`)。Rust の runner を動かせるところまで (Git for Windows・
-PowerShell 7・Visual Studio Build Tools・rustup と dotfiles の clone) を揃える。WSL は要らない。Windows の環境を Windows 側の runner で作る最初の段で、
+PowerShell 7 と dotfiles の clone。runner の exe は `dotfiles` 関数が GitHub の Release から落とす。[runner の exe (Release)](#runner-の-exe-release))
+を揃える。WSL は要らない。Windows の環境を Windows 側の runner で作る最初の段で、
 その後は runner (`runner/`。[後述](#runner-windows-の側で確かめて揃える)) が受け持つ。ホストごとに受け持ちを runner に切り替えるまで、Windows の
 アプリと設定を配るのは今までどおり WSL の setup ([配る](#配る))。経緯は
 [ADR 058](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/058_win_runner_bootstrap_20261115T225331JST/README.md)
 (ADR 010 の前提「WSL のある Windows だけ」を改めた) と、gh にログインできない PC でも流せる形にした dotfiles-private の ADR 111
-(`docs/adr/111_win_runner_without_gh_*`)。
+(`docs/adr/111_win_runner_without_gh_*`)、runner を build 済みの exe で配り、既定の形から Build Tools と rustup を外した dotfiles-private の
+ADR 117 (`docs/adr/117_win_runner_exe_release_*`)。
 
-形は 2 つ。どの Windows でも流せる:
+形は 3 つ。どの Windows でも流せる:
 
-| 形 | 使う PC | gh | clone | ホストの値 |
-| --- | --- | --- | --- | --- |
-| 既定 (引数なし) | gh にログインできない PC (客先の PC など。pollenjp の private な repo を取れない) と、private な repo を使わない PC | 入れない・ログインしない | public な dotfiles だけを、資格情報なしの HTTPS で (origin は `https://github.com/pollenjp/dotfiles.git`) | 雛形 `templates/host.minimum.toml` を `%USERPROFILE%\.config\dotfiles\host.toml` に写す (あれば上書きしない。dotfiles-private の clone がある PC でも写さない) |
-| `-Private` | private な repo (dotfiles-private・claude-skills) を使う PC (ホストの値の `privateRepos` が on のもの。[ホストの値](#ホストの値)) | 入れて、個人の gh のアカウントで github.com にログインする | dotfiles・dotfiles-private・claude-skills を gh の資格情報で (origin は WSL と同じ ssh の URL) | dotfiles-private の `win/hosts/` から引く (雛形は写さない) |
+| 形 | 使う PC | gh | Build Tools と rustup | clone | ホストの値 |
+| --- | --- | --- | --- | --- | --- |
+| 既定 (引数なし) | gh にログインできない PC (客先の PC など。pollenjp の private な repo を取れない) と、private な repo を使わない PC | 入れない・ログインしない | 入れない・確かめない (runner は配った exe で動く) | public な dotfiles だけを、資格情報なしの HTTPS で (origin は `https://github.com/pollenjp/dotfiles.git`) | 雛形 `templates/host.minimum.toml` を `%USERPROFILE%\.config\dotfiles\host.toml` に写す (あれば上書きしない。dotfiles-private の clone がある PC でも写さない) |
+| `-Rust` | 既定の形の PC のうち、runner を手元で build する (win/runner を直して試す)・claude-selector (cs) を作る PC | 既定と同じ | 入れる | 既定と同じ | 既定と同じ |
+| `-Private` | private な repo (dotfiles-private・claude-skills) を使う PC (ホストの値の `privateRepos` が on のもの。[ホストの値](#ホストの値)) | 入れて、個人の gh のアカウントで github.com にログインする | 入れる (`-Rust` を含む。claude-skills の道具を cargo で作るため) | dotfiles・dotfiles-private・claude-skills を gh の資格情報で (origin は WSL と同じ ssh の URL) | dotfiles-private の `win/hosts/` から引く (雛形は写さない) |
 
-- bootstrap はホストの値を読まない (clone する前に流すので)。どちらの形で流すかは、人がこの表で決める。runner の手順 `bootstrap` (`-Check` で確かめる
-  だけ) はいつも on で、`privateRepos` のホストでは `-Check -Private` を流す ([runner の手順](#runner-の手順))
+- bootstrap はホストの値を読まない (clone する前に流すので)。どの形で流すかは、人がこの表で決める。runner の手順 `bootstrap` (`-Check` で確かめる
+  だけ) はいつも on で、`privateRepos` のホストでは `-Check -Private` を流す (`-Rust` は付けないので、`-Rust` で揃えた PC でも Build Tools と rustup の
+  行は出ない。[runner の手順](#runner-の手順))
+- 既定の形で揃えた PC で、後から runner を手元で build したくなったら `-Rust` で流し直す (Build Tools と rustup を足す)
 - 既定の形で流した PC で後から private な repo を使うなら、`-Private` で流し直す (gh を入れてログインし、無い clone を足す)。手元の `host.toml` が
   残っていて dotfiles-private にもホストの値を書くと、runner の apply は止まる (どちらを使うか決まらない。手元の方を退ける)
 - 普通の (管理者でない) PowerShell で流す。管理者の PowerShell だと何も変えずに止まる (clone と rustup が管理者の持ち物になり、普通の
@@ -107,8 +112,9 @@ PowerShell 7・Visual Studio Build Tools・rustup と dotfiles の clone) を揃
 $f = Join-Path $env:TEMP 'Install-Bootstrap.ps1'
 Invoke-WebRequest -UseBasicParsing -OutFile $f https://raw.githubusercontent.com/pollenjp/dotfiles/main/win/bootstrap/Install-Bootstrap.ps1
 powershell -NoProfile -ExecutionPolicy Bypass -File $f -Check            # 何も変えずに状態を出す
-powershell -NoProfile -ExecutionPolicy Bypass -File $f                   # 揃える (既定の形。gh を使わない)
-powershell -NoProfile -ExecutionPolicy Bypass -File $f -Private          # private な repo も使う PC (gh でログインする)
+powershell -NoProfile -ExecutionPolicy Bypass -File $f                   # 揃える (既定の形。gh も Build Tools も使わない)
+powershell -NoProfile -ExecutionPolicy Bypass -File $f -Rust             # runner を手元で build する PC (Build Tools と rustup も入れる)
+powershell -NoProfile -ExecutionPolicy Bypass -File $f -Private          # private な repo も使う PC (gh でログインする。Build Tools と rustup も)
 ```
 
 clone した後は、clone の中のものを流す (冪等。揃っていれば何もしない。`-Private` で揃えた PC は `-Private` も付ける):
@@ -127,6 +133,9 @@ PowerShell。bootstrap を流した窓は PATH が古い) で、clone の `dotfi
 dotfiles apply
 ```
 
+- 初めての `dotfiles apply` は、clone に合う runner の exe を GitHub の Release から落とす (github.com と release-assets.githubusercontent.com に
+  届くこと。[runner の exe (Release)](#runner-の-exe-release))。プロキシの内側の PC は、Windows のプロキシの設定 (PowerShell の `Invoke-WebRequest` が
+  使う) を先に入れる
 - `dotfiles apply` の手順 `powershell-profile` が `$PROFILE` に `dotfiles.ps1` を読む 1 行を足すので、2 回目からは新しい PowerShell で `dotfiles` を
   打てる。先に見るなら `dotfiles check` か `dotfiles apply --dry-run`
 - ホストの値は、既定の形なら手元の `host.toml` (minimum の雛形)、`-Private` なら dotfiles-private の `win/hosts/<ユーザー>@<PC>.toml`。無ければ
@@ -147,10 +156,12 @@ dotfiles apply
 ### bootstrap がすること
 
 1. 最初に Smart App Control (SAC) を確かめる (`-Check` でも)。オフでなければ (オン・評価モード) 警告を出して続ける (止めない)。
-   オンだと cargo が作った exe (Rust の runner・build script) が止められて動かないので、runner を流す前にオフにする (Windows セキュリティ →
-   アプリとブラウザーの制御 → スマート アプリ コントロールの設定。Windows によっては戻すのに再インストールが要る)。script は SAC を変えない
+   オンだと runner の exe (配った exe も、cargo が作った exe と build script も) は止められて動かないので、runner を流す前にオフにする
+   (Windows セキュリティ → アプリとブラウザーの制御 → スマート アプリ コントロールの設定。Windows によっては戻すのに再インストールが要る)。
+   SAC は、出どころによらず評判も署名も無い exe を止める (配った exe は署名していない)。組織の管理下の PC では SAC は無効になる。script は
+   SAC を変えない
 2. 道具を固定した版で入れ、winget の pin を足す (この順。rustup-init が MSVC を見るので、Build Tools を rustup より先に入れる。GitHub CLI は
-   `-Private` のときだけ。PowerShell 7 は入れ方を問わず認め、入っていないときだけ入れる。普段のアカウントが管理者でない PC は、MSIX しか無ければ
+   `-Private` のときだけ、Build Tools と rustup は `-Rust`・`-Private` のときだけ。PowerShell 7 は入れ方を問わず認め、入っていないときだけ入れる。普段のアカウントが管理者でない PC は、MSIX しか無ければ
    MSI を足す。[PowerShell 7 (入れ方を問わず認める)](#powershell-7-入れ方を問わず認める)):
 
    | 道具 | winget の ID | 固定した版 (param) | 入れ方 |
@@ -158,8 +169,8 @@ dotfiles apply
    | Git for Windows | `Git.Git` | `2.56.0.4` (`-GitVersion`) | machine の scope (`C:\Program Files\Git`)。インストーラーの選択肢は既定のまま。入れたての Windows 11 の winget (v1.11.510) は、昇格していないと machine の scope の source を開けず、`Failed to open the predefined source` (`0x80070005`) で落ちる。そのときだけ、同じ引数を昇格した winget で打ち直す (System32 の Windows PowerShell を UAC で昇格させて打つ。UAC の確認は Git の installer の代わりにそこで 1 回出る。普段のアカウントが管理者でない PC で、昇格した側のアカウントに winget が無ければ、そのアカウントと登録の手を出す) |
    | GitHub CLI (`-Private` だけ) | `GitHub.cli` | `2.103.3` (`-GhVersion`) | MSI (`C:\Program Files\GitHub CLI`)。`--silent` を付けないので、UAC と進み具合の小さな窓が出る (per-machine の MSI は、quiet だと管理者でない PowerShell から UAC を出せずに落ちる) |
    | PowerShell 7 | `Microsoft.PowerShell` | `7.6.10.0` (`-PwshVersion`) | 入っていないときだけ入れる。普段のアカウントが管理者の PC は MSIX (`--installer-type msix`。ユーザー単位に入るので UAC は出ない。`--silent`)、管理者でない PC は MSI (`--installer-type wix --custom "USE_MU=0 ENABLE_MU=0"`。`C:\Program Files\PowerShell\7`。`--silent` を付けないので、UAC で管理者の資格情報を入れる。Microsoft Update の更新には入れない)。管理者でない PC で MSIX しか無ければ MSI を `--force` で足す (入っている MSIX があると、winget は install を upgrade に替えて止まるため)。入れた直後に、7.6 の線に留める pin (`--version 7.6.*`) を足す。7.6 (LTS) の MSIX は package `Microsoft.PowerShell-LTS` で、7.7 からの MSIX (別の package `Microsoft.PowerShell`) へは上がらない。7.7 からは MSI も無い |
-   | Visual Studio Build Tools 2022 | `Microsoft.VisualStudio.2022.BuildTools` | `17.14.44` (`-VsBuildToolsVersion`) | C++ のワークロード (`Workload.VCTools`。必須の部品だけ)・x64 の MSVC (`VC.Tools.x86.x64`)・Windows SDK (`Windows11SDK.26100`)・英語の言語パック。MSVC と SDK は rustup が自分で入れるときと同じ部品。`--silent` を付けないので、UAC と進み具合の窓が出る。数 GB を落とすので 10 分以上かかることがある |
-   | rustup | `Rustlang.Rustup` | `1.29.3` (`-RustupVersion`) | 既定の host を MSVC (`--default-host x86_64-pc-windows-msvc`) にし、toolchain は入れない (`--default-toolchain none`。版は runner の `rust-toolchain.toml` が決める)。自己更新を止める (`rustup set auto-self-update disable`) |
+   | Visual Studio Build Tools 2022 (`-Rust`・`-Private` だけ) | `Microsoft.VisualStudio.2022.BuildTools` | `17.14.44` (`-VsBuildToolsVersion`) | C++ のワークロード (`Workload.VCTools`。必須の部品だけ)・x64 の MSVC (`VC.Tools.x86.x64`)・Windows SDK (`Windows11SDK.26100`)・英語の言語パック。MSVC と SDK は rustup が自分で入れるときと同じ部品。`--silent` を付けないので、UAC と進み具合の窓が出る。数 GB を落とすので 10 分以上かかることがある |
+   | rustup (`-Rust`・`-Private` だけ) | `Rustlang.Rustup` | `1.29.3` (`-RustupVersion`) | 既定の host を MSVC (`--default-host x86_64-pc-windows-msvc`) にし、toolchain は入れない (`--default-toolchain none`。版は runner の `rust-toolchain.toml` が決める)。自己更新を止める (`rustup set auto-self-update disable`) |
 
    Rust は MSVC の host (`x86_64-pc-windows-msvc`) を使う。GNU の host (`x86_64-pc-windows-gnu`) にしないのは、`windows-sys` 0.61 が使う
    `windows-link` の `raw-dylib` の build に MinGW の `dlltool` と `as` が要り、GNU の toolchain に同梱の `dlltool` だけでは import library を
@@ -194,6 +205,10 @@ dotfiles apply
   固定した版を並べて入れる。どちらが使われるかは PATH の順や rustc の探し方で決まるので、気になれば別の形のものを外す。PowerShell 7 だけは
   入れ方を問わず認め、版も比べない (下の「PowerShell 7 (入れ方を問わず認める)」)
 - Git for Windows を入れると、Windows の Claude Code が Git Bash を見つけて使えるようになる
+- 前の bootstrap (ADR 117 より前は、どの形でも Build Tools と rustup を入れていた) で入れた Build Tools と rustup は、既定の形で流し直しても消さない
+  (`-Check` の表に出なくなるだけ)。runner は配った exe で動くので、minimum の PC で要らなければ手で外す: `winget pin remove --id Rustlang.Rustup`・
+  `winget uninstall --id Rustlang.Rustup` (`%USERPROFILE%\.cargo` と `%USERPROFILE%\.rustup` も消してよい)、Build Tools は `winget pin remove --id
+  Microsoft.VisualStudio.2022.BuildTools` の後に「アプリ」の一覧か Visual Studio Installer から外す。後で build したくなったら `-Rust` で入れ直す
 
 ### PowerShell 7 (入れ方を問わず認める)
 
@@ -343,10 +358,11 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)。
   `Install-*.ps1`・`$PROFILE` の 1 行など) は今までどおり WSL の setup が配り ([配る](#配る))、runner は `dotfiles check` で確かめるだけ (同じ commit の clone なら、WSL と
   同じ判定を出すかを突き合わせられる)。Windows にしか無い手順 (claude-skills を Windows の Claude Code で使う W0-2 の手順など。[後述](#claude-skills-と-windows-のハブ-w0-2))
   は、WSL の setup が Windows に配らないので、受け持ちによらず runner の `dotfiles apply` が流す (dotfiles-private の ADR 064 (`docs/adr/064_win_w02_claude_skills_hub_*`))
-- 流すのは bootstrap が clone した dotfiles (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles`) の中の runner。PowerShell の `dotfiles` 関数
-  (`powershell/dotfiles.ps1`) が `win\runner` に入って `cargo run --quiet --release --locked` を打つ (rustup は `rust-toolchain.toml` を今の
-  ディレクトリから探す。初回は rustup がその版を入れ、build に少しかかる)。clone を pull すれば、次の呼び出しから新しいコードで動く。runner は clone を
-  取得しない。3 つの clone を進めるのは `dotfiles --self-update` ([後述](#clone-を進める-dotfiles---self-update))
+- 流すのは、bootstrap が clone した dotfiles (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles`) の HEAD の runner に合う exe。PowerShell の
+  `dotfiles` 関数 (`powershell/dotfiles.ps1`) が clone の launcher (`powershell/Invoke-DotfilesRunner.ps1`) を呼び、launcher が CI の作った exe を
+  GitHub の Release から落として起こす (合う exe が無ければ、cargo があれば `win\runner` で `cargo run --quiet --release --locked` で build する。
+  [後述](#runner-の-exe-release))。clone を pull すれば、次の呼び出しから新しい clone に合う exe で動く。runner は clone を取得しない。3 つの clone を
+  進めるのは `dotfiles --self-update` ([後述](#clone-を進める-dotfiles---self-update))
 
 ### runner を流す
 
@@ -416,7 +432,7 @@ dotfiles --self-update apply --dry-run          # 進めてから dotfiles apply
   ホストは WSL の `~/dotfiles/setup --self-update --update`。WSL は WSL の clone から配る)
 - 中身は clone の中の `powershell/Invoke-DotfilesSelfUpdate.ps1` (配らない)。`dotfiles` 関数は配った写しでなく clone の中のものを呼ぶので、更新の処理を直した
   pull は、開いている PowerShell の関数が古いままでも、次の `dotfiles --self-update` から効く (その回は、pull する前に読み込んだ script のまま流れる)。runner は
-  clone から作り直すので、進めた後のコードで動く
+  進めた後の clone の launcher で起こすので、進めた後の clone に合う exe で動く (合う exe がまだ無ければ cargo で build する。[runner の exe (Release)](#runner-の-exe-release))
 
 `--self-update` を知らない古い `dotfiles` 関数 (この節を足す前に開いた PowerShell・配った写しがまだ古い PC) では、runner が「`--self-update` は PowerShell の
 dotfiles 関数が受け持つが、…古いもの」(runner も古ければ「知らないコマンドです: --self-update」) で止まる。そのときは一度だけ手で進めて配る:
@@ -430,6 +446,61 @@ dotfiles apply                     # dotfiles.ps1 を配る (受け持ちが WSL
 # 新しい PowerShell を開いて
 dotfiles --self-update --dry-run   # 3 つの clone が最新と出る
 ```
+
+### runner の exe (Release)
+
+runner の exe は CI ([`.github/workflows/win-runner-release.yml`](../.github/workflows/win-runner-release.yml)) が作り、public な dotfiles の GitHub の
+Release に置く。PowerShell の `dotfiles` 関数は、clone の launcher (`powershell/Invoke-DotfilesRunner.ps1`。配らない。clone のものを呼ぶ) で、clone の
+HEAD の runner に合う exe を落として起こす。minimum の PC に Visual Studio Build Tools と rustup が要らない (経緯は dotfiles-private の ADR 117
+(`docs/adr/117_win_runner_exe_release_*`))。
+
+- **key**: clone の HEAD の `win/runner` の git の tree の hash (`git rev-parse HEAD:win/runner`)。exe の中身は `win/runner` の中身だけで決まる
+  (runner は `win/runner` の外のファイルを exe に埋めない。外のファイルは動くときに clone から読む。`runner/tests/embeds.rs` が見る)
+- **Release**: tag `win-runner-<key の頭 12 字>` (prerelease)。asset は `dotfiles-win.exe` (C ランタイムを静的にリンク。key と作った commit を埋める) と
+  `dotfiles-win.exe.sha256` (`<64 字の 16 進>  dotfiles-win.exe`)。URL は `https://github.com/pollenjp/dotfiles/releases/download/<tag>/<asset>` で、
+  launcher は REST API を呼ばない
+- **置き場**: `%LOCALAPPDATA%\dotfiles\runner\<key>\` に exe と `.sha256` を置き、exe が `dotfiles-win.exe version` で名乗る key を確かめたら印
+  `verified` を置く。新しい方から 3 つの key のディレクトリを残し、ほかは消す
+- **確かめ方**: 落とした exe の sha256 を `.sha256` と比べ、合うときだけ置く。置いた後に 1 回だけ `version` を打って key を比べる (起こせなければ、
+  ここで Smart App Control などに止められたと分かる)。key を埋めた exe は、clone の HEAD の `win/runner` が自分の key と違えば流さない (終了コード 2)
+- **来歴**: CI は exe に build の attestation を作る。gh のある PC で `gh attestation verify dotfiles-win.exe -R pollenjp/dotfiles` を打てば、どの
+  workflow がどの commit から作ったかを確かめられる (launcher は確かめない。gh か cosign が要るため)
+- launcher は runner の引数の 1 つ目 (コマンド) の直後に `--repo <clone>` を差し込む。Release の exe の既定の clone も
+  `%USERPROFILE%\ghq\github.com\pollenjp\dotfiles` (手元の build の既定は build した clone)
+- `Invoke-WebRequest -OutFile` で落とすので Mark of the Web は付かず、SmartScreen も出ない。手で置いた物 (ブラウザーで落とした物) のために、sha256 を
+  確かめた後に `Unblock-File` を打つ。exe は署名していないので、Smart App Control がオンの PC では止められる (cargo の産物と同じ。オフにする)
+
+選び方 (環境変数 `DOTFILES_RUNNER`。空なら自動):
+
+| 場面 | 自動 (空) | `exe` | `cargo` |
+| --- | --- | --- | --- |
+| HEAD の key の exe が置き場にある | 起こす | 起こす | `win\runner` で `cargo run` |
+| 置き場に無い | 落として確かめてから起こす | 同じ | 同じ |
+| `win/runner` に commit していない変更がある (手元で直している) | cargo があれば build する (1 行知らせる)。無ければ ⚠ を出して HEAD の exe で流す (変更は効かない) | ⚠ を出して HEAD の exe | 同じ |
+| 落とせない (Release が無い (404)・つながらない) | cargo があれば build する (1 行知らせる)。無ければ直し方を出して止まる (終了コード 2) | 止まる | 同じ |
+| sha256・key が合わない・置き場の中身が `.sha256` と合わない | cargo があっても build に戻らずに止まる (終了コード 2。置き場を消して打ち直すと落とし直す) | 同じ | 同じ |
+
+- Release が無いのは、merge の直後で CI がまだ作り終えていない (数分待つ)・clone が古く、その key の Release が消えた (`dotfiles --self-update` で
+  進める)・`win/runner` を変えた commit が手元にある (push して merge するか、`Install-Bootstrap.ps1 -Rust` で build できるようにする) のどれか
+- github.com に届かない PC は、別の PC で落とした 2 つのファイル (`dotfiles-win.exe` と `dotfiles-win.exe.sha256`) を、置き場の key のディレクトリに
+  置けば使う (sha256 と key は確かめる)。PR の exe を試すときも同じ手 (gh のある PC で PR の CI の artifact `dotfiles-win-<key>` を
+  `gh run download` で落として置く。key は PR の branch の `git rev-parse HEAD:win/runner`)
+
+公開 (CI):
+
+- build の job (書けない token) が作って確かめ (Visual C++ の runtime の DLL を読まない・`version` の key・雛形のホストの値の `list`・launcher の通しの
+  試験 (`.github/scripts/win-runner-e2e.ps1`))、artifact に上げる。公開の job (書ける token) が artifact を落とし、attestation を作って Release を
+  作る (`.github/scripts/win-runner-publish.sh`)。PR では公開せず、公開の script を `--dry-run` で流す
+- 公開の job が動くのは、repo の変数 `WIN_RUNNER_PUBLISH` が `true` の main の push か、main での手動の実行 (Actions の画面の「Run workflow」で
+  `publish` に印) のときだけ。最初の Release は手動の実行で作り、PC で確かめてから変数を入れる
+  (`gh variable set WIN_RUNNER_PUBLISH --body true -R pollenjp/dotfiles`)
+- 同じ key の Release があれば作らない (launcher・workflow だけを変えた push・revert で同じ中身に戻った push)。公開してある exe と `.sha256` が合うかだけを
+  見る (今回の build とはバイトで比べない。exe に作った commit を埋め、link の時刻・image の C ランタイムでも変わるので、同じ key でも build は再現しない)
+- tag は、main の commit を親にした Release 用の commit に付ける (main の外なので、clone の `git fetch` は tag を拾わない)
+- 30 日より古い `win-runner-` の Release は、新しい方から 20 本を残して消す (tag も)
+- repo の設定の immutable releases を入れると、公開した exe・`.sha256`・tag を差し替えられなくなる。そのとき、消した Release の tag の名前は二度と使えない
+  ので、30 日より後に同じ中身へ戻ると、その key の Release は作れない (公開の job が落ちる)。cargo の無い PC は、`win/runner` を 1 行変えて別の key に
+  するまで、その commit では止まる (めったに起きない)
 
 ### ホストの値
 
@@ -740,6 +811,13 @@ gate が違うと、試験が落ちる
 
 ### runner を直すとき
 
+- Windows の clone で runner を直して試すと、launcher は `win/runner` に commit していない変更を見て、cargo で build して流す (cargo が要る。gh の無い
+  PC は `Install-Bootstrap.ps1 -Rust`)。commit した後・push していない間も、その key の Release が無いので cargo で build する。いつも build するなら
+  `$env:DOTFILES_RUNNER = 'cargo'` ([runner の exe (Release)](#runner-の-exe-release))
+- runner の exe に `win/runner` の外のファイルを埋めない (`include_str!`・`include_bytes!`)。key は `win/runner` の tree だけで決まるので、外を埋めると、
+  そのファイルを変えても古い中身の exe が選ばれる。外のファイルは動くときに clone から読む (`runner/tests/embeds.rs` が見る)
+- C ランタイムは `runner/.cargo/config.toml` で静的にリンクする (MSVC の target だけ。環境変数 `RUSTFLAGS` を置くと無視される)。Release の exe の CI が
+  `dumpbin /dependents` で確かめる
 - `win/runner` で `cargo fmt`・`cargo clippy --all-targets -- -D warnings`・`cargo test`。CI
   ([`.github/workflows/win-runner.yml`](../.github/workflows/win-runner.yml)) は Linux と `windows-latest` (MSVC) で流し、Linux では manifest の
   読み方を `nix-instantiate` (`nix/lib/windows-files.nix`) と突き合わせる (`DOTFILES_WIN_NIX_PARITY=1`。手元でも nix-instantiate があれば流れる)
@@ -1159,8 +1237,10 @@ cs                                         # 選んで起こす。cs -c・cs "�
   に置いて、置き場をユーザーの PATH の末尾に足す (claude-<名前>.exe と同じ置き場。動いていれば退けてから置く)
 - 作り直すかは、crate の元 (`Cargo.toml`・`Cargo.lock`・`src\` の下の全部) と toolchain の版の SHA-256 を、置いた exe の SHA-256 と組で
   `%LOCALAPPDATA%\dotfiles\state\claude-selector.built.json` に控えて決める。元・toolchain・置いた exe のどれかが変わっていれば、`dotfiles check` が
-  「作り直して置く」と出し、`dotfiles apply` が作り直す。作れなければ (cargo が落ちた・cargo が無い) この手順だけが落ち、置いてある exe と控えは
-  そのまま
+  「作り直して置く」と出し、`dotfiles apply` が作り直す。作れなければ (cargo が落ちた) この手順だけが落ち、置いてある exe と控えはそのまま
+- cargo が無いホスト (Build Tools と rustup を入れない minimum の PC。runner は配った exe で動く) では、作り直しが要っても作らず、`·` で
+  「cs を使うなら `Install-Bootstrap.ps1 -Rust` で Build Tools と rustup を入れる」と知らせる (PATH にも触らない。置いてある exe が今の元のものなら ✔)。
+  cs の exe も runner と同じ Release で配るのは、後続の PR (dotfiles-private の ADR 117)
 - claude-<名前>.exe・claude-account.exe と違って runner の exe の写しにしないのは、画面の crate (crossterm とその依存) を runner に入れず、
   selector の `Cargo.lock` を Linux の Nix と同じ 1 つにするため。`claude-accounts` の外に置くのは、`windowsClaudeAccounts` が
   off のホストでも素の `claude` を選んで起こせるようにするため
@@ -2295,8 +2375,10 @@ Set-PSReadLineOption -EditMode Windows
   `-ViMode Command`)
 - 5.1 の PSReadLine 2.0.0 に無い関数・引数を使うなら、有るかを見て分ける (Ctrl+u の `BackwardKillInput` のように。`-Function` に無い名前を
   渡すと落ちる)。`dotfiles.Tests.ps1` は 5.1 でも流す (Windows で `powershell.exe -NoProfile -ExecutionPolicy Bypass -File …\dotfiles.Tests.ps1`)
-- `dotfiles` 関数の runner の流し方 (`cargo run …` の行) を直すときは、`Invoke-DotfilesSelfUpdate.ps1` の末尾の cargo の行も同じに直す (`dotfiles --self-update`
-  は進めた後に、その行で runner を流す。`Invoke-DotfilesSelfUpdate.Tests.ps1` が、同じ場所で同じ引数を渡すかを突き合わせる)。`Invoke-DotfilesSelfUpdate.ps1` も
+- `dotfiles` 関数の runner の流し方 (launcher を呼ぶ行と、launcher の無い clone の `cargo run …` の行) を直すときは、`Invoke-DotfilesSelfUpdate.ps1` の
+  末尾の runner の行も同じに直す (`dotfiles --self-update` は進めた後に、その行で runner を流す。`Invoke-DotfilesSelfUpdate.Tests.ps1` が、同じものを
+  同じ引数で打つかを突き合わせる)。launcher (`Invoke-DotfilesRunner.ps1`) も 5.1 で動かし、引数は `$args` で受ける (param ブロックを置くと、runner の
+  `-h` などを PowerShell が自分の引数として読む。`Invoke-DotfilesRunner.Tests.ps1` が見る)。`Invoke-DotfilesSelfUpdate.ps1` も
   5.1 で動かす (同じ Tests が、7 にしか無い書き方を見る)
 - 関数の引数をほかの script に渡すときは、配列を変数に入れてから `@変数` で広げる (`& $script @(…)` は配列を 1 つの引数で渡し、script の側で空白で
   つながった 1 つの字になる)
