@@ -8,7 +8,7 @@
 //! - herdr-app に見送っていない新しい版があれば、続きの行の末尾に keys.json の注意を 2 行。herdr-core だけ・herdr-app は見送った版だけ・windowsHerdr が
 //!   false なら添えない
 //! - 新しい版が無い・見送った版だけなら「無い」の 1 行で ✔
-//! - 名前の on/off: windowsNtn・windowsClaudeCode・windowsHerdr (herdr・herdr-app・herdr-core)・windowsTailscale (既定は off) と、bootstrap の 4 つと
+//! - 名前の on/off: windowsNtn・windowsClaudeCode・windowsHerdr (herdr・herdr-app・herdr-core)・windowsTailscale・windowsCodex (既定は off) と、bootstrap の 4 つと
 //!   ghq・fzf・starship は Windows の ghq に dotfiles の clone があるときだけ。同じものを入れる手順と同じ switch (ghq・fzf・starship を入れる手順は
 //!   いつも on の Windows にしか無い手順で、bootstrap の clone の runner が流す)
 //! - 確かめられない名前はわけを添えて 1 行出して failed (ほかの名前の新しい版は知らせる。わけは最初の名前のもの): API の失敗 (gh の stderr)・404・一覧で
@@ -57,6 +57,7 @@ fn pinned_of(name: &str) -> &'static str {
         "ghq" => "1.12.0",
         "fzf" => "0.75.0",
         "starship" => "1.27.0",
+        "codex" => "0.170.0",
         "git" => "2.56.0.4",
         "gh" => "2.103.3",
         "pwsh" => "7.6.10.0",
@@ -79,6 +80,7 @@ fn id_of(name: &str) -> &'static str {
         "ghq" => "x-motemen.ghq",
         "fzf" => "junegunn.fzf",
         "starship" => "Starship.Starship",
+        "codex" => "OpenAI.Codex",
         "git" => "Git.Git",
         "gh" => "GitHub.cli",
         "pwsh" => "Microsoft.PowerShell",
@@ -691,7 +693,7 @@ fn nothing_newer_is_ok() {
 
 // ------------------------------------------------------------------ 名前の on/off
 
-/// ntn・Claude Code は windowsNtn・windowsClaudeCode が false なら確かめない。tailscale は windowsTailscale が true のときだけ。bootstrap の 4 つと
+/// ntn・Claude Code は windowsNtn・windowsClaudeCode が false なら確かめない。tailscale・codex は windowsTailscale・windowsCodex が true のときだけ。bootstrap の 4 つと
 /// ghq・fzf・starship は Windows の ghq に dotfiles の clone があるときだけ
 #[test]
 fn names_follow_the_host_switches() {
@@ -713,7 +715,7 @@ fn names_follow_the_host_switches() {
             contents_call("google-japanese-input"),
         ]
     );
-    w.host = "[tools]\nwindowsTailscale = true\nwindowsClaudeCode = true\nwindowsHerdr = true\nwindowsNtn = true\n"
+    w.host = "[tools]\nwindowsTailscale = true\nwindowsCodex = true\nwindowsClaudeCode = true\nwindowsHerdr = true\nwindowsNtn = true\n"
         .to_string();
     w.bootstrapped();
     assert_eq!(
@@ -759,6 +761,7 @@ fn name_switches_match_the_install_steps() {
         ("ntn", "ntn"),
         ("claude-code", "claude-code"),
         ("tailscale", "tailscale"),
+        ("codex", "codex"),
         ("herdr-app", "herdr-app"),
         ("herdr-core", "herdr-app"),
     ] {
@@ -1642,7 +1645,7 @@ fn reads_the_real_repo_files() {
             roots: Roots::from_home(t.path()),
             state_dir: t.path().join("state"),
             host: parse(
-                "[tools]\nwindowsTailscale = true\nwindowsClaudeCode = true\nwindowsHerdr = true\nwindowsNtn = true\n",
+                "[tools]\nwindowsTailscale = true\nwindowsCodex = true\nwindowsClaudeCode = true\nwindowsHerdr = true\nwindowsNtn = true\n",
                 Path::new("h.toml"),
                 groups,
             )
@@ -1889,8 +1892,9 @@ exit "${rc}"
             }
         }
 
-        /// WSL の記録 (windows-files.json・group.json) と、Windows の bootstrap の clone
-        fn state(&self, ntn: bool, claude: bool, herdr: bool, tailscale: bool, boot: bool) {
+        /// WSL の記録 (windows-files.json・group.json) と、Windows の bootstrap の clone。`opt_in` は tailscale と codex の switch (どちらも
+        /// minimum では off の道具で、同じ値にして流す)
+        fn state(&self, ntn: bool, claude: bool, herdr: bool, opt_in: bool, boot: bool) {
             let d = self.wsl_home.join(".local/state/dotfiles");
             std::fs::create_dir_all(&d).unwrap();
             std::fs::write(
@@ -1902,7 +1906,7 @@ exit "${rc}"
             .unwrap();
             std::fs::write(
                 d.join("group.json"),
-                json!({"group": "minimum", "tools": {"windowsHerdr": herdr, "windowsTailscale": tailscale}, "version": 2})
+                json!({"group": "minimum", "tools": {"windowsHerdr": herdr, "windowsTailscale": opt_in, "windowsCodex": opt_in}, "version": 2})
                     .to_string(),
             )
             .unwrap();
@@ -1914,10 +1918,10 @@ exit "${rc}"
             }
         }
 
-        /// 同じ状態の、runner のホストの値
-        fn host(ntn: bool, claude: bool, herdr: bool, tailscale: bool) -> String {
+        /// 同じ状態の、runner のホストの値 (`opt_in` は tailscale と codex の switch)
+        fn host(ntn: bool, claude: bool, herdr: bool, opt_in: bool) -> String {
             format!(
-                "[tools]\nwindowsNtn = {ntn}\nwindowsClaudeCode = {claude}\nwindowsHerdr = {herdr}\nwindowsTailscale = {tailscale}\n"
+                "[tools]\nwindowsNtn = {ntn}\nwindowsClaudeCode = {claude}\nwindowsHerdr = {herdr}\nwindowsTailscale = {opt_in}\nwindowsCodex = {opt_in}\n"
             )
         }
 
@@ -2145,14 +2149,14 @@ exit "${rc}"
             ntn: bool,
             claude: bool,
             herdr: bool,
-            tailscale: bool,
+            opt_in: bool,
             boot: bool,
             gh: bool,
         ) -> Vec<String> {
-            self.state(ntn, claude, herdr, tailscale, boot);
+            self.state(ntn, claude, herdr, opt_in, boot);
             self.reset_logs();
             let wsl = self.wsl_setup(gh);
-            let (outcomes, rn) = self.runner_setup(&Self::host(ntn, claude, herdr, tailscale), gh);
+            let (outcomes, rn) = self.runner_setup(&Self::host(ntn, claude, herdr, opt_in), gh);
             // runner が変えたのは、確かめられなかったときの「setup は続けます。」と、gh が無いときの直し方だけ
             let wsl: Vec<String> = wsl
                 .into_iter()
@@ -2437,6 +2441,7 @@ exit "${rc}"
             &["0.23.28", "0.23.29", "0.23.30", "0.23.31", "0.23.32"],
         );
         p.contents("openssh", &["10.1.0.0", "10.1.0.1", "10.1.0.2", "10.1.0.3"]);
+        p.contents("codex", &["0.169.1", "0.170.0", "0.171.0", "0.172.0"]);
         p.write(
             "win/bootstrap/skipped-versions/gh.txt",
             "2.104.0 速すぎた\n",

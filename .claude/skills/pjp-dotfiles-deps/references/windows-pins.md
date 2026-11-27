@@ -1,14 +1,14 @@
 # Windows に固定した版 (pins の `windows`)
 
 dotfiles は Windows のアプリを版を固定して入れる (`win/README.md` の「固定した版より新しい版の知らせ」)。対象は OpenSSH・herdr・
-Google 日本語入力・ntn・Claude Code・Tailscale・ghq・fzf・starship・herdr-app・herdr-core と、新しい Windows で最初に流す bootstrap (`win/bootstrap/Install-Bootstrap.ps1`) が
+Google 日本語入力・ntn・Claude Code・Tailscale・ghq・fzf・starship・Codex CLI (`codex`)・herdr-app・herdr-core と、新しい Windows で最初に流す bootstrap (`win/bootstrap/Install-Bootstrap.ps1`) が
 入れる Git for Windows (`git`)・GitHub CLI (`gh`)・PowerShell 7 (`pwsh`)・Visual Studio Build Tools 2022 (`vs-buildtools`)・rustup (`rustup`)。新しい版の候補と猶予ごとの上げ先は、依存の更新の skill が repo の口
 (`deps.toml` の `[[pins]]` の `windows`。`nix/scripts/bootstrap-windows-pin-updates.sh --candidates --json`) から出す。どの版を
 入れるか (上げないかも) はユーザーが決めること。候補を出して推奨を添えるまでが Claude で、黙って猶予より新しい版にしない。
 
 - 人が読んで確かめるなら、同じ候補を文で出せる: `nix/scripts/bootstrap-windows-pin-updates.sh --candidates [--grace 1,3,7] [<名前>…]`
   (gh のログインが要る。見送った版の理由・上げ方の README の節・見送りの一覧の場所も出る)
-- 出た日は、OpenSSH・herdr・Claude Code・git・gh が GitHub の release、Google 日本語入力・ntn・Tailscale・ghq・fzf・starship・pwsh・vs-buildtools・rustup が winget-pkgs に
+- 出た日は、OpenSSH・herdr・Claude Code・git・gh が GitHub の release、Google 日本語入力・ntn・Tailscale・ghq・fzf・starship・codex・pwsh・vs-buildtools・rustup が winget-pkgs に
   載った日、herdr-app・herdr-core が成果物の Last-Modified。winget の版だけを数える (GitHub にあって winget にまだ無い版は上げ先にならない)
 - 口の JSON で `error` のある名前は確かめられていない。その名前は上げず、わけを報告と PR の本文に書く
 
@@ -43,6 +43,7 @@ Google 日本語入力・ntn・Claude Code・Tailscale・ghq・fzf・starship・
 | `tailscale` | `win/tailscale/Install-Tailscale.ps1` の同じ所 | 「Tailscale」の「今は」 | 「Tailscale の新しい版が出たとき」(固定した版は新しく入れるときの版。入っている Tailscale は自動更新で上がるので、上げ遅れても困るのは新しいマシンだけ) |
 | `ghq`・`fzf` | `win/ghq/Install-Ghq.ps1`・`win/fzf/Install-Fzf.ps1` の同じ所 | 「ghq・fzf」の道具の表の版 | 「ghq・fzf の新しい版が出たとき」(cdrepo が使う `ghq list`・`ghq root` の出力と、`fzf -1 +m` の振る舞いが変わっていないか。fzf は winget の manifest に portable の zip が残っているか (`--installer-type portable`)) |
 | `starship` | `win/starship/Install-Starship.ps1` の同じ所 | 「starship」の今の版 | 「starship の新しい版が出たとき」(上げる版は Linux の home-manager が入れる starship (`nix/flake.lock` の nixpkgs。`nix eval --raw --inputs-from ./nix nixpkgs#starship.version`) と揃える方向で選び、違う版を選ぶならわけを PR の本文に書く。PowerShell の init (`src/init/starship.ps1`) が ViModeChangeHandler を包む形が変わっていないか (`dotfiles.ps1` の Vi モードが前提にする)・`nix/files/starship.toml` が警告なしで読めるか・winget の manifest に portable の zip が残っているか) |
+| `codex` | `win/codex/Install-Codex.ps1` の同じ所 | 「Codex CLI」の道具の表の版 | 「Codex CLI の新しい版が出たとき」(winget の manifest が x64 の `NestedInstallerFiles` に `PortableCommandAlias: codex` と helper の exe (`codex-command-runner.exe`・`codex-windows-sandbox-setup.exe`) を持ち続けているか・exe が VC++ のランタイムを使わないままか (依存を入れないので)・zip の `codex-package.json` の `entrypoint` が置き場所の exe の名前のままか。Linux の nixpkgs の codex とは揃えなくてよい) |
 | `herdr-app`・`herdr-core` | `nix/pkgs/herdr-core/releases.json` の版と sha256 (core は 3 つの target と generation) | 「herdr-app を入れる」の「今は」。app を上げるなら、Windows で効く新しい既定のキーを `win/herdr-app/keys.json` に (dotfiles のキーと重なる既定のキーは、その既定の値を `win/herdr-app/keys.defaults.json` に) | 「固定した版を上げる」(sha256・core_min・generation・ソースが取得元の変数を読むか・既定のキーの増えを確かめる) |
 | `git`・`gh`・`pwsh`・`vs-buildtools`・`rustup` | `win/bootstrap/Install-Bootstrap.ps1` の名前ごとの param (`-GitVersion`・`-GhVersion`・`-PwshVersion`・`-VsBuildToolsVersion`・`-RustupVersion`) の既定値 | 「bootstrap (新しい Windows で最初に流す)」の道具の表の版 | 「bootstrap の固定した版の新しい版が出たとき」(Build Tools はワークロードと部品の ID が残っているか、rustup は `--default-host x86_64-pc-windows-msvc --default-toolchain none` と自己更新の止めが効くかも見る。pwsh は 7.6 の線 (MSI がある。普段のアカウントが管理者でない PC には MSI で入れる) の版だけが候補に出る。線を移すなら、MSIX の package の名前と MSI があるかを確かめて `check-winget-version.sh` の `series_re` と runner の `series` も直す) |
 
@@ -82,6 +83,7 @@ Google 日本語入力・ntn・Claude Code・Tailscale・ghq・fzf・starship・
 | `tailscale` | 入っている版の方が新しければ揃っている扱い (※ だけ)。古ければ差が ⚠ で出るので、Tailscale の自動更新を待つか `Install-Tailscale` (UAC の確認が出て、上げる間 Tailscale の接続が少しの間切れる)。新しいマシンは setup が固定した版で入れる |
 | `ghq`・`fzf` | WSL の setup は入れない (Windows の runner の手順 `ghq`・`fzf` だけが入れる)。受け持ちによらず、Windows で `dotfiles --self-update apply` (clone を進めてから流す。`--steps ghq,fzf` で絞れる) を流すと揃える。exe が動いていると (別の端末の cdrepo の選ぶ画面など) ⚠ で止まるので、閉じてから `Install-Ghq`・`Install-Fzf` |
 | `starship` | ghq・fzf と同じ (Windows の runner の手順 `starship` だけが入れる。`--steps starship` で絞れる)。starship.exe はプロンプトを描く間だけ動くので、ふつうは止まらない。止まったら描き終わらないプロンプトを閉じてから `Install-Starship` |
+| `codex` | WSL の setup は入れない (Windows の runner の手順 `codex` だけが入れる。ホストの値の `[tools] windowsCodex` が on のマシンだけ)。Windows で `dotfiles --self-update apply` (`--steps codex` で絞れる) を流すと、外してから入れ直す (開発者モードが off の PC では UAC の確認が 1 回出る。SSH の会話では出せないので、デスクトップの端末で流す)。codex が動いていると ⚠ で止まるので、会話を終えてから `Install-Codex` |
 | `herdr-app`・`herdr-core` | setup がフィードを書き直して揃える (Linux のホストは switch で新しい herdr-core が入る)。`win/herdr-app/keys.json` にキーを足したなら、Windows で `dotfiles --self-update apply --steps herdr-app-keys` (clone を進めてから流す) を流す (受け持ちが WSL のホストでも流す) |
 | `git`・`gh`・`pwsh`・`vs-buildtools`・`rustup` | setup は揃えない (WSL の setup は Windows のこの 5 つを入れない)。新しい Windows は、bootstrap が新しい版で入れる。入っている Windows では bootstrap の `-Check` が版のずれを ⚠ で出すので、`win/README.md` の「版のずれを手で揃える」の手順 (名指しの `winget upgrade --id <ID> --exact --version <版> --include-pinned`。`--include-pinned` が無いと bootstrap が足した pin に止められる) で手で揃える (runner の `bootstrap` の手順も `-Check` で確かめるだけで、揃えない)。`pwsh` は版を揃えない (入れ方を問わず 7.6.0 より古くなければよい。普段のアカウントが管理者でない PC は MSIX でない PowerShell 7 も要る。上げた版は、PowerShell 7 の入っていない Windows に bootstrap が入れる版で、管理者の PC は MSIX、管理者でない PC は MSI で入る) |
 

@@ -11,7 +11,7 @@
 #
 # ## 確かめること
 #
-#   - 名前 (openssh・herdr・google-japanese-input・ntn・claude-code・tailscale・ghq・fzf・starship・git・gh・pwsh・vs-buildtools・rustup) を最初の引数に取る。名前が無い・知らない名前は、gh を
+#   - 名前 (openssh・herdr・google-japanese-input・ntn・claude-code・tailscale・ghq・fzf・starship・codex・git・gh・pwsh・vs-buildtools・rustup) を最初の引数に取る。名前が無い・知らない名前は、gh を
 #     呼ばずに exit 2。名前だけ渡すと、repo の win/<ディレクトリ>/ の ps1 と見送りの一覧を読む
 #
 #   OpenSSH (出た日は GitHub の release):
@@ -69,12 +69,13 @@
 #   - --json --offline は、パッケージ ID Tailscale.Tailscale と出た日の取り方 winget を出す
 #   - 固定した版は X.Y.Z だけを受ける (Install-Tailscale.ps1 の読める形。4 つ区切りなら gh を呼ばずに exit 2)
 #
-#   ghq・fzf・starship (出た日は winget-pkgs に載った日):
-#   - Install-Ghq.ps1・Install-Fzf.ps1・Install-Starship.ps1 の形から読み、winget-pkgs の manifests/x/x-motemen/ghq・manifests/j/junegunn/fzf・
-#     manifests/s/Starship/Starship を見る。GitHub の release は引かない (どれも winget に載らない GitHub の release を出すので、比べない)
+#   ghq・fzf・starship・codex (出た日は winget-pkgs に載った日):
+#   - Install-Ghq.ps1・Install-Fzf.ps1・Install-Starship.ps1・Install-Codex.ps1 の形から読み、winget-pkgs の manifests/x/x-motemen/ghq・
+#     manifests/j/junegunn/fzf・manifests/s/Starship/Starship・manifests/o/OpenAI/Codex を見る。GitHub の release は引かない (どれも winget に
+#     載らない GitHub の release を出すので、比べない)
 #   - 新しい版が載って 29 日なら exit 0 で待ち、30 日たったら exit 1 で manifest の URL と手順の節 (ghq・fzf の新しい版が出たとき・starship の
-#     新しい版が出たとき) を添える
-#   - --json --offline は、パッケージ ID (x-motemen.ghq・junegunn.fzf・Starship.Starship) と出た日の取り方 winget を出す
+#     新しい版が出たとき・Codex CLI の新しい版が出たとき) を添える
+#   - --json --offline は、パッケージ ID (x-motemen.ghq・junegunn.fzf・Starship.Starship・OpenAI.Codex) と出た日の取り方 winget と題を出す
 #
 #   bootstrap の 5 つ (git・gh・pwsh・vs-buildtools・rustup。win/bootstrap/Install-Bootstrap.ps1 の 1 つで持つ):
 #   - 名前ごとの param (-GitVersion・-GhVersion・-PwshVersion・-VsBuildToolsVersion・-RustupVersion) と、関数の中の ID の変数 ($gitPackageId など)
@@ -192,6 +193,7 @@ manifest_dir_of() {
     ghq) echo manifests/x/x-motemen/ghq ;;
     fzf) echo manifests/j/junegunn/fzf ;;
     starship) echo manifests/s/Starship/Starship ;;
+    codex) echo manifests/o/OpenAI/Codex ;;
     git) echo manifests/g/Git/Git ;;
     gh) echo manifests/g/GitHub/cli ;;
     vs-buildtools) echo manifests/m/Microsoft/VisualStudio/2022/BuildTools ;;
@@ -210,6 +212,7 @@ ps1_of() {
     ghq) echo Install-Ghq.ps1 ;;
     fzf) echo Install-Fzf.ps1 ;;
     starship) echo Install-Starship.ps1 ;;
+    codex) echo Install-Codex.ps1 ;;
     git | gh | pwsh | vs-buildtools | rustup) echo Install-Bootstrap.ps1 ;;
   esac
 }
@@ -633,6 +636,7 @@ new_case() {
     ghq) write_portable_ps1 "${d}/Install-Ghq.ps1" "$2" "${id:-x-motemen.ghq}" Ghq ;;
     fzf) write_portable_ps1 "${d}/Install-Fzf.ps1" "$2" "${id:-junegunn.fzf}" Fzf ;;
     starship) write_portable_ps1 "${d}/Install-Starship.ps1" "$2" "${id:-Starship.Starship}" Starship ;;
+    codex) write_portable_ps1 "${d}/Install-Codex.ps1" "$2" "${id:-OpenAI.Codex}" Codex ;;
     git) write_bootstrap_ps1 "${d}/Install-Bootstrap.ps1" "$2" "${id:-Git.Git}" ;;
     gh) write_bootstrap_ps1 "${d}/Install-Bootstrap.ps1" "$2" "${id:-GitHub.cli}" ;;
     vs-buildtools) write_bootstrap_ps1 "${d}/Install-Bootstrap.ps1" "$2" "${id:-Microsoft.VisualStudio.2022.BuildTools}" ;;
@@ -1528,16 +1532,17 @@ else
   ng "tailscale: 4 つ区切りの固定した版" "rc=$(rc "${d}") calls=$(calls "${d}") $(outerr "${d}")"
 fi
 
-echo "-- ghq・fzf・starship"
+echo "-- ghq・fzf・starship・codex"
 
-# 名前|固定した版|新しい版|manifest のディレクトリ (manifests/ の後ろ)|パッケージ ID|固定した版より古い版 (空白区切り)|手順の節。2026-11-23 の
+# 名前|固定した版|新しい版|manifest のディレクトリ (manifests/ の後ろ)|パッケージ ID|固定した版より古い版 (空白区切り)|手順の節|題。2026-11-23 の
 # winget-pkgs の manifests/x/x-motemen/ghq (1.9.x・1.10.0・1.11.x は無い) と manifests/j/junegunn/fzf の新しい方、2026-11-25 の
-# manifests/s/Starship/Starship の新しい方
+# manifests/s/Starship/Starship の新しい方、2026-11-27 の manifests/o/OpenAI/Codex の新しい方
 for spec in \
-  'ghq|1.12.0|1.12.1|x/x-motemen/ghq|x-motemen.ghq|1.7.1 1.8.0 1.10.1|ghq・fzf の新しい版が出たとき' \
-  'fzf|0.75.0|0.76.0|j/junegunn/fzf|junegunn.fzf|0.74.3 0.74.4 0.74.5|ghq・fzf の新しい版が出たとき' \
-  'starship|1.27.0|1.28.0|s/Starship/Starship|Starship.Starship|1.25.0 1.25.1 1.26.0|starship の新しい版が出たとき'; do
-  IFS='|' read -r pkg p_pin p_next p_dir p_id p_old p_section <<<"${spec}"
+  'ghq|1.12.0|1.12.1|x/x-motemen/ghq|x-motemen.ghq|1.7.1 1.8.0 1.10.1|ghq・fzf の新しい版が出たとき|Windows の ghq' \
+  'fzf|0.75.0|0.76.0|j/junegunn/fzf|junegunn.fzf|0.74.3 0.74.4 0.74.5|ghq・fzf の新しい版が出たとき|Windows の fzf' \
+  'starship|1.27.0|1.28.0|s/Starship/Starship|Starship.Starship|1.25.0 1.25.1 1.26.0|starship の新しい版が出たとき|Windows の starship' \
+  'codex|0.170.0|0.171.0|o/OpenAI/Codex|OpenAI.Codex|0.169.0 0.169.1|Codex CLI の新しい版が出たとき|Windows の Codex CLI'; do
+  IFS='|' read -r pkg p_pin p_next p_dir p_id p_old p_section p_title <<<"${spec}"
   read -r -a p_olds <<<"${p_old}"
   p_winget_now=$(contents_json "${p_olds[@]}" "${p_pin}")
   p_winget_next=$(contents_json "${p_olds[@]}" "${p_pin}" "${p_next}")
@@ -1546,7 +1551,7 @@ for spec in \
   #      (どちらも winget に載らない GitHub の release を出すので、比べない)
   d=$(new_case "pf1-${pkg}" "${p_pin}" -)
   FAKE_GH_CONTENTS="${p_winget_now}" run "${d}" 0
-  if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" -F "Windows の ${pkg} (winget の ${p_id})" \
+  if [[ $(rc "${d}") == 0 ]] && ! seen "${d}" '⚠' && seen "${d}" -F "${p_title} (winget の ${p_id})" \
     && called "${d}" -xF "api repos/microsoft/winget-pkgs/contents/manifests/${p_dir}" && ! called "${d}" -F 'releases'; then
     ok "${pkg}: 固定した版が最新なら exit 0 (manifests/${p_dir} を見て、GitHub の release は引かない)"
   else
@@ -1580,8 +1585,8 @@ for spec in \
   d=$(new_case "pf4-${pkg}" "${p_pin}" -)
   run_args "${d}" 1 --json --offline "${pkg}" "${d}/$(ps1_of "${pkg}")" "${d}/skipped-versions.txt"
   if [[ $(rc "${d}") == 0 ]] && ! gh_called "${d}" \
-    && jq -e --arg name "${pkg}" --arg id "${p_id}" --arg pin "${p_pin}" --arg section "${p_section}" \
-      '.name == $name and .title == "Windows の \($name)" and .packageId == $id and .pinned == $pin
+    && jq -e --arg name "${pkg}" --arg id "${p_id}" --arg pin "${p_pin}" --arg section "${p_section}" --arg title "${p_title}" \
+      '.name == $name and .title == $title and .packageId == $id and .pinned == $pin
       and .datesFrom == "winget" and .readmeSection == $section' "${d}/out" >/dev/null; then
     ok "${pkg}: --json --offline は gh を呼ばずに、ID・固定した版・出た日の取り方 (winget)・手順の節を出す"
   else
@@ -1930,6 +1935,7 @@ for spec in \
   'ghq|win/ghq|1.12.0|1.12.1' \
   'fzf|win/fzf|0.75.0|0.76.0' \
   'starship|win/starship|1.27.0|1.28.0' \
+  'codex|win/codex|0.170.0|0.171.0' \
   'git|win/bootstrap|2.56.0.4|2.56.1' \
   'gh|win/bootstrap|2.103.3|2.104.0' \
   'pwsh|win/bootstrap|7.6.10.0|7.6.11.0' \
