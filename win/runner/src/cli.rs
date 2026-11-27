@@ -48,6 +48,7 @@ dotfiles の Windows 側の runner (win/README.md の「runner」)。
                                                           (token のアカウントは token のファイルの token を渡す)
   claude-account.exe <add|set-token|list|check|remove|help> …
                                                           同じ写し。アカウントを足す・消す・確かめる (claude-account.exe --help)
+  dotfiles-win version                                    この exe の版と、作った key・commit (Release の exe か手元の build か) を出す
 
   --dry-run         apply がすることを出すだけ (何も書かない。runner.enable によらない)
   --force           衝突 (Windows 側で変わっていた・置いた記録が無い) も上書きする (files・ssh-config・port-forward・terminal・fancyzones・
@@ -66,7 +67,8 @@ dotfiles の Windows 側の runner (win/README.md の「runner」)。
   --host-file <path> ホストの値のファイル (既定は %USERPROFILE%\\.config\\dotfiles\\host.toml、無ければ dotfiles-private の
                     win/hosts/<ユーザー>@<PC>.toml。両方あれば check は ⚠ を出し、apply は止まる)
   --windows-home <path> manifest の置き先を、この Windows のホストの下として解く (既定は環境変数)
-  --repo <path>     dotfiles の clone (既定は runner を build した clone。試すとき)
+  --repo <path>     dotfiles の clone (既定は、Release の exe なら %USERPROFILE%\\ghq\\github.com\\pollenjp\\dotfiles、手元の build なら
+                    build した clone。PowerShell の dotfiles 関数はいつも渡す)
 
 終了コード: 0 直すことが無い・3 入っていない・無いものだけ (apply で揃う)・1 ほかに直すことがある・2 runner が動けない";
 
@@ -78,6 +80,8 @@ pub enum Command {
     Manifest,
     Import,
     Help,
+    /// この exe の版と、作った key・commit (`build_info`)
+    Version,
 }
 
 /// 取り込める手順 (WSL の script の `--import` を写したもの)
@@ -137,6 +141,8 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
         "manifest" => Command::Manifest,
         "import" => Command::Import,
         "help" | "-h" | "--help" => return Ok(Args::new(Command::Help)),
+        // 後ろの引数は読まない (launcher は runner の引数の 1 つ目の後ろに --repo を差し込む)
+        "version" | "--version" => return Ok(Args::new(Command::Version)),
         // --self-update は PowerShell の dotfiles 関数 (win/powershell/dotfiles.ps1) が受け持ち、runner には渡さない。ここに来たのは、開いている
         // PowerShell の dotfiles 関数が --self-update を知らない古いもの
         "--self-update" => return Err(SELF_UPDATE_OLD_FUNCTION.to_string()),
@@ -279,6 +285,7 @@ fn command_name(c: Command) -> &'static str {
         Command::Manifest => "manifest",
         Command::Import => "import",
         Command::Help => "help",
+        Command::Version => "version",
     }
 }
 
@@ -360,13 +367,69 @@ pub fn claude_entry(
     }
 }
 
-/// runner を build した clone (`win/runner` の 2 つ上)。
-fn default_repo() -> PathBuf {
+/// `--repo` が無いときの clone。Release の exe (`release_key` がある。`build_info::KEY`) は bootstrap が clone する所
+/// (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles`。build した場所は CI のパスなので使えない)、手元の build は build した clone
+/// (`win/runner` の 2 つ上)。
+pub fn default_repo(release_key: Option<&str>, sys: &dyn Sys) -> Result<PathBuf, String> {
+    if release_key.is_some() {
+        let home = sys
+            .env("USERPROFILE")
+            .filter(|s| !s.is_empty())
+            .ok_or("環境変数 USERPROFILE がありません (dotfiles の clone の場所を決められない。--repo で渡す)")?;
+        return Ok(["ghq", "github.com", "pollenjp", "dotfiles"]
+            .iter()
+            .fold(PathBuf::from(home), |p, s| p.join(s)));
+    }
     let dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    dir.parent()
+    Ok(dir
+        .parent()
         .and_then(Path::parent)
         .unwrap_or(dir)
-        .to_path_buf()
+        .to_path_buf())
+}
+
+/// Release の exe (`expected` がある) なら、clone の HEAD の `win/runner` の tree が自分を作った key と同じかを確かめる (違う中身の runner が
+/// clone の manifest・ps1 を読まないように。直に打った・選び間違えたときの守り)。手元の build (`expected` が None) は何もしない。
+pub fn check_runner_key(expected: Option<&str>, repo: &Path, sys: &dyn Sys) -> Result<(), String> {
+    let Some(expected) = expected else {
+        return Ok(());
+    };
+    let short = |k: &str| k.chars().take(12).collect::<String>();
+    let shown = repo.display();
+    let git = sys.which("git").ok_or(format!(
+        "git が見つからない (この runner の exe は、clone ({shown}) の HEAD の win/runner が自分と同じかを git で確かめてから流す。git は bootstrap が入れる)"
+    ))?;
+    let r = sys.run(
+        &CommandSpec::new(git)
+            .arg("-C")
+            .arg(repo.as_os_str())
+            .arg("rev-parse")
+            .arg("HEAD:win/runner")
+            .stdout_only()
+            .timeout(Duration::from_secs(30)),
+        &mut |_| {},
+    );
+    let got = r
+        .output
+        .iter()
+        .map(|l| l.trim())
+        .find(|l| !l.is_empty())
+        .unwrap_or_default()
+        .to_string();
+    if r.code() != Some(0) || !crate::build_info::is_object_name(&got) {
+        return Err(format!(
+            "clone ({shown}) の HEAD の win/runner を読めない (git -C '{shown}' rev-parse HEAD:win/runner。{:?})。この runner の exe は、clone に合うかを確かめてから流す → PowerShell の dotfiles 関数から打つ",
+            r.exit
+        ));
+    }
+    if got != expected {
+        return Err(format!(
+            "この runner の exe は win/runner {} から作ったもの。clone ({shown}) の HEAD の win/runner は {} → PowerShell の dotfiles 関数から打つ (clone に合う exe を落とす)。手元で build するなら $env:DOTFILES_RUNNER = 'cargo'",
+            short(expected),
+            short(&got)
+        ));
+    }
+    Ok(())
 }
 
 /// PC の名前 (`hostname` の出力を小文字に。読めなければ `%COMPUTERNAME%` を小文字に)。
@@ -399,16 +462,36 @@ pub fn run(args: &[String], sys: &dyn Sys, out: &mut dyn Write, err: &mut dyn Wr
             return 2;
         }
     };
-    // 相対パスの --repo は絶対パスにする (隣の clone・控え (claude-skills-dir)・cargo install --path が、cwd を移した後に別の場所を指さない)
-    let repo = match a.repo.clone() {
-        Some(p) => std::path::absolute(&p).unwrap_or(p),
-        None => default_repo(),
-    };
     match a.command {
         Command::Help => {
             let _ = writeln!(out, "{USAGE}");
-            0
+            return 0;
         }
+        Command::Version => {
+            for l in crate::build_info::lines(crate::build_info::KEY, crate::build_info::COMMIT) {
+                let _ = writeln!(out, "{l}");
+            }
+            return 0;
+        }
+        _ => {}
+    }
+    // 相対パスの --repo は絶対パスにする (隣の clone・控え (claude-skills-dir)・cargo install --path が、cwd を移した後に別の場所を指さない)
+    let repo = match a.repo.clone() {
+        Some(p) => std::path::absolute(&p).unwrap_or(p),
+        None => match default_repo(crate::build_info::KEY, sys) {
+            Ok(r) => r,
+            Err(e) => {
+                let _ = writeln!(err, "{}", error_line(sys, e));
+                return 2;
+            }
+        },
+    };
+    if let Err(e) = check_runner_key(crate::build_info::KEY, &repo, sys) {
+        let _ = writeln!(err, "{}", error_line(sys, e));
+        return 2;
+    }
+    match a.command {
+        Command::Help | Command::Version => 0,
         Command::Manifest => manifest_command(&a, &repo, sys, out, err),
         Command::Check | Command::Apply | Command::List | Command::Import => {
             match steps_command(&a, repo, sys, out) {
@@ -728,6 +811,117 @@ mod tests {
         }
         assert_eq!(call(&["check"], false, "").0, None);
         assert_eq!(call(&[], false, "").0, None);
+    }
+
+    mod release {
+        //! ## 確かめること (Release の exe の口。dotfiles-private の docs/adr/117_win_runner_exe_release_*)
+        //!
+        //! - `version`・`--version` は後ろの引数を読まず、外のコマンドを打たずに版と build の情報を出す (終了コード 0)
+        //! - 既定の clone は、Release の exe なら `%USERPROFILE%\ghq\github.com\pollenjp\dotfiles` (USERPROFILE が無ければ誤り)、手元の build なら
+        //!   build した clone
+        //! - key の守りは、手元の build では git を打たない。Release の exe は clone の HEAD の win/runner と比べ、違う・読めない・git が無いなら誤り
+
+        use super::super::*;
+        use crate::process::{Exit, RunResult};
+        use crate::testutil::FakeSys;
+
+        const K: &str = "261aff1f714694bfe0c0199428617dfc448336a4";
+        const OTHER: &str = "0123456789abcdef0123456789abcdef01234567";
+
+        fn answer(code: i32, lines: &[&str]) -> RunResult {
+            RunResult {
+                exit: Exit::Code(code),
+                output: lines.iter().map(|s| s.to_string()).collect(),
+            }
+        }
+
+        #[test]
+        fn reads_version() {
+            let p = |args: &[&str]| parse(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+            assert_eq!(p(&["version"]).unwrap().command, Command::Version);
+            assert_eq!(
+                p(&["--version", "--repo", "x"]).unwrap().command,
+                Command::Version
+            );
+        }
+
+        #[test]
+        fn version_prints_build_info_without_commands() {
+            let sys = FakeSys::new(|_| answer(0, &[]));
+            let (mut out, mut err) = (Vec::new(), Vec::new());
+            let code = run(
+                &["version".to_string(), "--repo".to_string(), "x".to_string()],
+                &sys,
+                &mut out,
+                &mut err,
+            );
+            let out = String::from_utf8(out).unwrap();
+            assert_eq!(code, 0, "{out}");
+            assert!(out.starts_with("dotfiles-win "), "{out}");
+            assert!(out.contains("\nkey="), "{out}");
+            assert!(out.contains("\nbuild="), "{out}");
+            assert!(sys.calls.borrow().is_empty());
+            assert!(err.is_empty());
+        }
+
+        #[test]
+        fn default_repo_for_release_and_local() {
+            let sys = FakeSys::new(|_| answer(0, &[])).with_env("USERPROFILE", "C:/Users/a");
+            assert_eq!(
+                default_repo(Some(K), &sys).unwrap(),
+                Path::new("C:/Users/a")
+                    .join("ghq")
+                    .join("github.com")
+                    .join("pollenjp")
+                    .join("dotfiles")
+            );
+            let none = FakeSys::new(|_| answer(0, &[]));
+            assert!(
+                default_repo(Some(K), &none)
+                    .unwrap_err()
+                    .contains("--repo で渡す")
+            );
+            let built = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .and_then(Path::parent)
+                .unwrap()
+                .to_path_buf();
+            assert_eq!(default_repo(None, &none).unwrap(), built);
+        }
+
+        #[test]
+        fn local_build_skips_the_key_check() {
+            let sys = FakeSys::new(|_| answer(0, &[OTHER])).with_program("git", "/fake/git");
+            assert!(check_runner_key(None, Path::new("/r"), &sys).is_ok());
+            assert!(sys.calls.borrow().is_empty());
+        }
+
+        #[test]
+        fn release_build_compares_the_clone_key() {
+            let same = FakeSys::new(|_| answer(0, &[K])).with_program("git", "/fake/git");
+            assert!(check_runner_key(Some(K), Path::new("/r"), &same).is_ok());
+            assert_eq!(same.call_args(), vec!["-C /r rev-parse HEAD:win/runner"]);
+
+            let other = FakeSys::new(|_| answer(0, &[OTHER])).with_program("git", "/fake/git");
+            let e = check_runner_key(Some(K), Path::new("/r"), &other).unwrap_err();
+            assert!(e.contains(&K[..12]) && e.contains(&OTHER[..12]), "{e}");
+            assert!(e.contains("dotfiles 関数から打つ"), "{e}");
+
+            let broken = FakeSys::new(|_| answer(128, &["fatal: not a git repository"]))
+                .with_program("git", "/fake/git");
+            assert!(
+                check_runner_key(Some(K), Path::new("/r"), &broken)
+                    .unwrap_err()
+                    .contains("読めない")
+            );
+
+            let no_git = FakeSys::new(|_| answer(0, &[K]));
+            assert!(
+                check_runner_key(Some(K), Path::new("/r"), &no_git)
+                    .unwrap_err()
+                    .contains("git が見つからない")
+            );
+        }
     }
 
     mod flow {

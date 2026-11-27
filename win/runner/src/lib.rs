@@ -6,6 +6,7 @@
 
 pub mod account_cli;
 pub mod accounts;
+pub mod build_info;
 pub mod cli;
 pub mod color;
 pub mod context;
