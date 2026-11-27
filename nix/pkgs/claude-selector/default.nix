@@ -1,6 +1,6 @@
 # claude-selector (略語 cs): 組み立てるコマンド行をいつも見せ、その項目 (claude のアカウントと option) を矢印キーで選んで Claude Code を
 # 起こす。使い方は nix/README.md・win/README.md の「claude-selector (cs)」。設計は dotfiles-private の docs/adr/087_claude_selector_* (画面と
-# 引数の並びは docs/adr/116_claude_selector_command_line_*)。
+# 引数の並びは docs/adr/116_claude_selector_command_line_ui_*)。
 #
 # 項目はコマンド行の区切りで、左から (起こす引数もこの並び):
 #

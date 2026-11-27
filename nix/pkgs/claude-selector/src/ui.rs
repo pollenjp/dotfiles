@@ -20,14 +20,15 @@
 //!
 //! | キー | 一覧 | 字を打つ間 (モデルを手で打つ・Remote Control の名前) |
 //! | --- | --- | --- |
-//! | ←→・h l・Tab・Shift+Tab | 項目を移る (端で止まる) | ← は字が空なら一覧へ戻る。h・l は字 |
-//! | ↑↓・k j・Ctrl+P・Ctrl+N・Home・End | 値を選ぶ (選べない行は飛ばす。Home・End は一覧の端) | - |
+//! | ←→・h l・Tab・Shift+Tab | 項目を移る (端で止まる) | ←・Shift+Tab は字が空なら一覧へ戻る (字があれば何もしない)。→・Tab は何もしない。h・l は字 |
+//! | ↑↓・k j・Ctrl+P・Ctrl+N・Home・End | 値を選ぶ (選べない行は飛ばす。Home・End は一覧の端) | k・j は字。ほかは何もしない |
 //! | Enter | 今のコマンド行のまま起こす。字を打つ行では打ち始める (打ち終えた直後は起こす) | 決めて一覧へ戻る |
-//! | Backspace (Ctrl+H)・Ctrl+U | - | 1 字消す (字が空なら一覧へ戻る)・全部消す |
+//! | Backspace (Ctrl+H)・Ctrl+U | 何もしない | 1 字消す (字が空なら一覧へ戻る)・全部消す |
 //! | Esc・Ctrl+C | やめる (起こさない) | やめる |
 //!
-//! 打つ値がまだ無い (コマンド行に名前の形 `<モデル名>`・`<名前>` を出している) まま Enter を押すと、起こさずにその項目へ移って打ち始める。
-//! 選べないアカウントのまま Enter を押すと、知らせてアカウントの項目へ移る。
+//! 「打ち終えた直後」は、字を Enter で決めてから、値か項目が替わるまで (端で動かなかったキーでは外れない)。打つ値がまだ無い (コマンド行に
+//! 名前の形 `<モデル名>`・`<名前>` を出している) まま Enter を押すと、起こさずにその項目へ移って打ち始める。選べないアカウントのまま
+//! Enter を押すと、知らせてアカウントの項目へ移る。キーの案内は、Enter で打ち始めるときは「Enter 名前を打つ」にする。
 
 use crate::accounts::{Found, Mode};
 use crate::choice::{self, EFFORTS, MODELS, Part, Permission, RemoteControl, Selection, Target};
@@ -174,6 +175,32 @@ enum Kind {
     Account,
     /// claude に渡す引数の組
     Part(Part),
+}
+
+/// 一覧で Enter を押したら何をするか。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum EnterDoes {
+    /// 選んでいる項目の字を打ち始める (字を打つ行で、打ち終えた直後でない)
+    Type,
+    /// 選べるアカウントが無い (知らせてアカウントの項目へ移る)
+    Refuse,
+    /// 名前の形のままの組の項目へ移って打ち始める
+    TypeAt(Part),
+    /// 起こす
+    Launch,
+}
+
+/// 字を打つ値の組 (モデル・Remote Control) の今の値。
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Typed {
+    /// カーソルが字を打つ行に無い (選択肢の値)
+    Listed,
+    /// 打っている字か、決めた字 (前後の空白を外したもの)
+    Text(String),
+    /// 打っている間で、字が空
+    TypingEmpty,
+    /// 打つ値がまだ無い (名前の形を見せる。起こさない)
+    Placeholder,
 }
 
 /// アカウントの項目の位置 (一番左)
@@ -414,6 +441,7 @@ impl Ui {
             return Outcome::Continue;
         }
         let at = self.at;
+        let before = (at, self.fields[at].cursor);
         match key {
             Key::Up | Key::Char('k') => self.fields[at].step(false),
             Key::Down | Key::Char('j') => self.fields[at].step(true),
@@ -422,10 +450,12 @@ impl Ui {
             Key::Left | Key::Char('h') => self.at = at.saturating_sub(1),
             Key::Right | Key::Char('l') => self.at = (at + 1).min(self.fields.len() - 1),
             Key::Enter => return self.enter(),
-            _ => return Outcome::Continue,
+            _ => {}
         }
-        // 値を選んだ・項目を移った
-        self.just_typed = false;
+        // 値か項目が替わったら、打ち終えた直後ではない (端で動かなかったキーでは外さない)
+        if (self.at, self.fields[self.at].cursor) != before {
+            self.just_typed = false;
+        }
         Outcome::Continue
     }
 
@@ -446,33 +476,49 @@ impl Ui {
         }
     }
 
-    /// 一覧で Enter: 字を打つ行なら打ち始める (打ち終えた直後は起こす)。ほかは今のコマンド行のまま起こす
-    fn enter(&mut self) -> Outcome {
-        let just_typed = std::mem::take(&mut self.just_typed);
-        if self.fields[self.at].asks() && !just_typed {
-            self.begin_input();
-            return Outcome::Continue;
+    /// 一覧で Enter を押したら何をするか (Enter の動きとキーの案内が同じ決め方を使う)
+    fn enter_does(&self) -> EnterDoes {
+        // 字を打つ行なら打ち始める (打ち終えた直後は起こす)
+        if self.fields[self.at].asks() && !self.just_typed {
+            return EnterDoes::Type;
         }
         let account = &self.fields[ACCOUNT];
-        let item = &account.items[account.cursor];
-        if !item.enabled {
-            self.notice = Some(format!("{} は選べません ({})", item.label, item.note));
-            self.at = ACCOUNT;
-            return Outcome::Continue;
+        if !account.items[account.cursor].enabled {
+            return EnterDoes::Refuse;
         }
         // 打つ値がまだ無ければ (名前の形を見せている)、起こさずにその項目で打ち始める
-        for (part, what) in [
-            (Part::Model, "モデルの名前"),
-            (Part::RemoteControl, "Remote Control の名前"),
-        ] {
+        for part in [Part::Model, Part::RemoteControl] {
             if self.placeholder(part) {
+                return EnterDoes::TypeAt(part);
+            }
+        }
+        EnterDoes::Launch
+    }
+
+    /// 一覧で Enter
+    fn enter(&mut self) -> Outcome {
+        let does = self.enter_does();
+        self.just_typed = false;
+        match does {
+            EnterDoes::Type => self.begin_input(),
+            EnterDoes::Refuse => {
+                let account = &self.fields[ACCOUNT];
+                let item = &account.items[account.cursor];
+                self.notice = Some(format!("{} は選べません ({})", item.label, item.note));
+                self.at = ACCOUNT;
+            }
+            EnterDoes::TypeAt(part) => {
+                let what = match part {
+                    Part::RemoteControl => "Remote Control の名前",
+                    _ => "モデルの名前",
+                };
                 self.at = index(part);
                 self.notice = Some(format!("{what}を入れてから起こします"));
                 self.begin_input();
-                return Outcome::Continue;
             }
+            EnterDoes::Launch => return Outcome::Launch(self.plan()),
         }
-        Outcome::Launch(self.plan())
+        Outcome::Continue
     }
 
     /// 選んでいる項目の字を打ち始める (決めた字があれば、そこから)
@@ -526,52 +572,48 @@ impl Ui {
         self.input.is_some() && self.at == index(part)
     }
 
-    /// 組 `part` が、打つ値がまだ無くて名前の形 (`<モデル名>`・`<名前>`) を見せているか (この形では起こさない。Remote Control の
-    /// 名前を打っている間に字が空なら、Enter で決まる名前なしを見せるので当たらない)
-    fn placeholder(&self, part: Part) -> bool {
-        match part {
-            Part::Model => self.fields[index(part)].asks() && self.typed(part, "").is_empty(),
-            Part::RemoteControl => {
-                self.fields[index(part)].asks()
-                    && self.typed(part, "").is_empty()
-                    && !self.typing(part)
-            }
-            Part::Effort | Part::Permission => false,
+    /// 字を打つ値の組 (モデル・Remote Control) の今の値。コマンド行に出すもの・起こさない名前の形かを、この 1 つで決める
+    fn typed(&self, part: Part) -> Typed {
+        if !self.fields[index(part)].asks() {
+            return Typed::Listed;
+        }
+        let text = if self.typing(part) {
+            self.input.as_deref()
+        } else {
+            self.decided(part).map(String::as_str)
+        };
+        match text.map(str::trim) {
+            Some(t) if !t.is_empty() => Typed::Text(t.to_string()),
+            _ if self.typing(part) => Typed::TypingEmpty,
+            _ => Typed::Placeholder,
         }
     }
 
-    /// 組 `part` の打つ値 (打っている間はその字、ほかは決めた字。どちらも無ければ `placeholder`)
-    fn typed(&self, part: Part, placeholder: &str) -> String {
-        let current = if self.typing(part) {
-            self.input.as_deref()
-        } else {
-            None
-        };
-        match current
-            .or(self.decided(part).map(String::as_str))
-            .map(str::trim)
-        {
-            Some(t) if !t.is_empty() => t.to_string(),
-            _ => placeholder.to_string(),
+    /// 組 `part` が名前の形 (`<モデル名>`・`<名前>`) を見せているか (この形では起こさない。引用せずに出す)
+    fn placeholder(&self, part: Part) -> bool {
+        match self.typed(part) {
+            Typed::Placeholder => true,
+            // モデルは打っている間に字が空でも名前の形を見せる (Remote Control は Enter で決まる名前なしを見せる)
+            Typed::TypingEmpty => part == Part::Model,
+            Typed::Listed | Typed::Text(_) => false,
         }
     }
 
     /// 今のコマンド行で選んでいるもの (打っている間は打っている字。打つ値がまだ無ければ名前の形)
-    pub fn selection(&self) -> Selection {
+    fn selection(&self) -> Selection {
         let cursor = |part: Part| self.fields[index(part)].cursor;
-        let model = match cursor(Part::Model) {
-            i if i < MODEL_TYPED => MODELS[i].to_string(),
-            _ => self.typed(Part::Model, "<モデル名>"),
+        let model = match (cursor(Part::Model), self.typed(Part::Model)) {
+            (i, _) if i < MODEL_TYPED => MODELS[i].to_string(),
+            (_, Typed::Text(t)) => t,
+            _ => "<モデル名>".to_string(),
         };
-        let remote_control = match cursor(Part::RemoteControl) {
-            RC_OFF => RemoteControl::Off,
-            RC_UNNAMED => RemoteControl::Unnamed,
-            // 名前を打っている間に字が空なら、Enter で決まる名前なしを見せる (打つ前は名前の形を見せる)
-            _ => match self.typed(Part::RemoteControl, "") {
-                n if n.is_empty() && self.typing(Part::RemoteControl) => RemoteControl::Unnamed,
-                n if n.is_empty() => RemoteControl::Named("<名前>".to_string()),
-                n => RemoteControl::Named(n),
-            },
+        let remote_control = match (cursor(Part::RemoteControl), self.typed(Part::RemoteControl)) {
+            (RC_OFF, _) => RemoteControl::Off,
+            (RC_UNNAMED, _) => RemoteControl::Unnamed,
+            (_, Typed::Text(n)) => RemoteControl::Named(n),
+            // 名前を打っている間に字が空なら、Enter で決まる名前なしを見せる
+            (_, Typed::TypingEmpty) => RemoteControl::Unnamed,
+            _ => RemoteControl::Named("<名前>".to_string()),
         };
         Selection {
             target: self.targets[self.fields[ACCOUNT].cursor].0.clone(),
@@ -597,14 +639,14 @@ impl Ui {
         }
     }
 
-    /// キーの案内
+    /// キーの案内 (Enter で打ち始めるなら、そう出す)
     fn help(&self) -> &'static str {
         if self.input.is_some() {
-            HELP_INPUT
-        } else if self.fields[self.at].asks() && !self.just_typed {
-            HELP_ASKS
-        } else {
-            HELP
+            return HELP_INPUT;
+        }
+        match self.enter_does() {
+            EnterDoes::Type | EnterDoes::TypeAt(_) => HELP_ASKS,
+            EnterDoes::Refuse | EnterDoes::Launch => HELP,
         }
     }
 
@@ -662,17 +704,17 @@ impl Ui {
             .collect()
     }
 
-    /// 選択肢 `i` に添える説明 (打つ値を決めてあれば、その値)
+    /// 選択肢 `i` に添える説明 (字を打つ行で、打つ値を決めてあれば、その値)
     fn note(&self, field: &Field, i: usize) -> String {
         let item = &field.items[i];
-        match (item.asks, field.kind) {
-            (true, Kind::Part(Part::Model)) if self.model_text.is_some() => {
-                self.typed(Part::Model, "")
-            }
-            (true, Kind::Part(Part::RemoteControl)) if self.rc_name.is_some() => {
-                format!("--remote-control={}", self.typed(Part::RemoteControl, ""))
-            }
-            _ => item.note.clone(),
+        let decided = match (item.asks, field.kind) {
+            (true, Kind::Part(part)) => self.decided(part),
+            _ => None,
+        };
+        match (decided, field.kind) {
+            (Some(name), Kind::Part(Part::RemoteControl)) => format!("--remote-control={name}"),
+            (Some(name), _) => name.clone(),
+            (None, _) => item.note.clone(),
         }
     }
 
@@ -756,8 +798,9 @@ impl Ui {
     }
 
     /// 描く中身。`cols` は 1 行に書ける桁 (コマンド行はこの幅で折り返す。ほかの行は term が切る)、`rows` は端末の行の数。
-    /// 収まらなければ、一覧の下の空行・項目の名前と上の空行 (一覧が全部収まるときだけ出す)・一覧が読めない知らせを外し、一覧は
-    /// カーソルの行が見える所だけにする (見出し・コマンド行・1 回だけの知らせ・カーソルの行 (字を打つ間は打つ行) は残す)
+    /// 収まらなければ、一覧の下の空行・項目の名前と上の空行 (一番長い一覧が全部収まるときだけ出す)・一覧が読めない知らせを外し、
+    /// 一覧はカーソルの行が見える所だけにする (見出し・コマンド行・1 回だけの知らせ・カーソルの行 (字を打つ間は打つ行) は残す)。
+    /// どの項目でも同じ決め方なので、項目を移っても枠の行の数は変わらない
     pub fn frame(&self, cols: usize, rows: usize) -> Frame {
         let cols = cols.max(4);
         let rows = rows.max(1);
@@ -804,9 +847,11 @@ impl Ui {
         if show_warnings {
             room -= warnings.len();
         }
-        // 間の空行 (知らせがあれば知らせの行) と項目の名前は、一覧が全部収まるときだけ
+        // 間の空行 (知らせがあれば知らせの行) と項目の名前は、一番長い一覧が全部収まるときだけ (項目ごとに決めると、項目を移った
+        // ときに枠の高さが変わる)
+        let tallest = self.tallest();
         let deco_rows = usize::from(notice.is_none()) + 1;
-        let deco = room >= deco_rows + body.len();
+        let deco = room >= deco_rows + tallest;
         if deco {
             room -= deco_rows;
         }
@@ -816,13 +861,8 @@ impl Ui {
             .saturating_sub(shown)
             .min(body.len().saturating_sub(shown));
         let body: Vec<Line> = body.into_iter().skip(start).take(shown).collect();
-        let pad = if deco {
-            self.tallest()
-                .saturating_sub(body.len())
-                .min(room.saturating_sub(body.len()))
-        } else {
-            0
-        };
+        // 項目を移っても枠の行の数が変わらないように、一番長い一覧の行の数 (入らなければ入るだけ) まで空行で埋める
+        let pad = tallest.min(room).saturating_sub(body.len());
         let mut lines = vec![title];
         if show_warnings {
             lines.extend(warnings);

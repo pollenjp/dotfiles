@@ -14,18 +14,24 @@
 //! - 付けない値 (権限の「付けない」・Remote Control を付けない) は、灰色の括弧 (Style::Absent) で `[--permission-mode]`・`[--remote-control]`
 //!   と出し、claude には渡さない。起こしたときに見せる行は、画面のコマンド行から括弧を外したもの
 //! - 字を打つ値 (モデルの「手で打つ」・Remote Control の「名前を付ける」): その行の Enter は起こさずに打ち始める。打つ間はカーソルを出し、
-//!   打った字はすぐコマンド行に出る。Enter で決めて一覧へ戻り、もう一度 Enter で起こす (動いて戻ったら、Enter は決めた字から打ち直す)。
-//!   だめなモデルの名前は知らせて打ち直し。空で Backspace は一覧へ。Remote Control の名前は空のまま決めると名前なし
-//! - 打つ値が空のまま (名前の形 `<モデル名>`・`<名前>` を見せている) なら、別の項目で Enter を押しても起こさず、その項目で打ち始める
+//!   打った字はすぐコマンド行に出る。Enter で決めて一覧へ戻り、もう一度 Enter で起こす (動いて戻ったら、Enter は決めた字から打ち直す。
+//!   端で動かなかったキーでは打ち直しに戻らない)。だめなモデルの名前は知らせて打ち直し。空で Backspace は一覧へ。Remote Control の名前は
+//!   空のまま決めると名前なし
+//! - 打つ値が空のまま (名前の形 `<モデル名>`・`<名前>` を見せている) なら、別の項目で Enter を押しても起こさず、その項目で打ち始める。
+//!   キーの案内は Enter の動きに合わせる (打ち始めるなら「Enter 名前を打つ」)
 //! - Esc・Ctrl+C はどこでもやめる (起こさない)
 //! - cs の後ろの引数は最後にそのまま付き、見せる行では引用する
 //! - 描く中身: 既定の印「(既定)」・カーソルの行の「> 」・説明のそろえ・一覧が読めなかった知らせ。項目を移っても枠の行の数は変わらない
+//!   (狭い端末でも)
 //! - コマンド行は端末の幅で折り返し、字を落とさず、折り返した先でも選んでいる項目の見せ方を保つ。引数の制御文字は `\n` などの形で見せ、
 //!   起こすのは argv のまま
 //! - 端末の行が足りなければ、一覧はカーソルの行が見える所だけを出す (見出し・コマンド行・カーソルの行は残す)
+//! - 決まった種の乱数でキーを並べて流しても、起こすのは Enter だけ・打つ間は起こさない・名前の形とだめなモデルの名前は起こさない・
+//!   起こす行は直前の画面のコマンド行から括弧と印を外したもの・枠は端末に収まる (見出し・コマンド行・知らせ・カーソルの行の分は除く)
 
 use claude_selector::accounts::{Account, Found, Mode};
 use claude_selector::app::claude_note;
+use claude_selector::choice;
 use claude_selector::launch::Plan;
 use claude_selector::ui::{Frame, Key, Line, Outcome, Style, Ui};
 use std::ffi::OsString;
@@ -918,4 +924,157 @@ fn small_terminal_keeps_the_title_command_and_cursor_row() {
         "{}",
         f.text()
     );
+}
+
+#[test]
+fn keys_that_move_nothing_keep_enter_launching_after_typing() {
+    // モデル: 最後の行で ↓・End は動かない。打ち終えた直後のまま、Enter で起こす
+    let mut u = ui();
+    press(&mut u, &TO_MODEL);
+    press(&mut u, &[Key::End, Key::Enter]);
+    typed(&mut u, "opus");
+    press(&mut u, &[Key::Enter, Key::Down, Key::End]);
+    assert!(
+        u.frame(COLS, ROWS).lines[0].text().contains("Enter 起こす"),
+        "{}",
+        u.frame(COLS, ROWS).text()
+    );
+    let plan = launched(press(&mut u, &[Key::Enter]));
+    assert_eq!(strs(&plan.args)[2..4], ["--model", "opus"]);
+    // Remote Control は最後の項目: → (l) は動かない
+    let mut u = ui();
+    press(&mut u, &TO_RC);
+    press(&mut u, &[Key::End, Key::Enter]);
+    typed(&mut u, "x");
+    press(&mut u, &[Key::Enter, Key::Right, Key::Char('l')]);
+    let plan = launched(press(&mut u, &[Key::Enter]));
+    assert_eq!(strs(&plan.args).last().unwrap(), "--remote-control=x");
+}
+
+#[test]
+fn help_says_what_enter_does() {
+    let title = |u: &Ui| u.frame(COLS, ROWS).lines[0].text();
+    let mut u = ui();
+    assert!(title(&u).contains("Enter 起こす"), "{}", title(&u));
+    // 手で打つ行: Enter は打ち始める
+    press(&mut u, &TO_MODEL);
+    press(&mut u, &[Key::End]);
+    assert!(title(&u).contains("Enter 名前を打つ"), "{}", title(&u));
+    // 名前の形のまま別の項目へ移っても、Enter はモデルの名前を打ち始めるので、案内もそう出す
+    press(&mut u, &[Key::Right]);
+    assert!(title(&u).contains("Enter 名前を打つ"), "{}", title(&u));
+    // 選択肢のモデルに戻せば起こす
+    press(&mut u, &[Key::Left, Key::Up, Key::Right]);
+    assert!(title(&u).contains("Enter 起こす"), "{}", title(&u));
+}
+
+#[test]
+fn frame_height_stays_in_short_terminals() {
+    // 80 桁 (使えるのは 79 桁) の端末。コマンド行は 2 行に折り返す
+    for rows in 4..16 {
+        let mut u = ui();
+        let height = u.frame(79, rows).lines.len();
+        assert!(height <= rows, "{rows}: {}", u.frame(79, rows).text());
+        for i in 0..4 {
+            press(&mut u, &[Key::Right]);
+            let f = u.frame(79, rows);
+            assert_eq!(f.lines.len(), height, "{rows} 行・{i}: {}", f.text());
+        }
+        // 字を打つ間も
+        press(&mut u, &[Key::End, Key::Enter]);
+        let f = u.frame(79, rows);
+        assert_eq!(f.lines.len(), height, "{rows} 行・打つ間: {}", f.text());
+    }
+}
+
+/// 試験の中だけの決まった乱数 (線形合同法。種が同じなら同じ並び)
+struct Lcg(u64);
+
+impl Lcg {
+    fn below(&mut self, n: usize) -> usize {
+        self.0 = self
+            .0
+            .wrapping_mul(6364136223846793005)
+            .wrapping_add(1442695040888963407);
+        ((self.0 >> 33) % n as u64) as usize
+    }
+}
+
+#[test]
+fn random_key_walks_launch_only_what_the_screen_shows() {
+    let keys = [
+        Key::Up,
+        Key::Down,
+        Key::Left,
+        Key::Right,
+        Key::Home,
+        Key::End,
+        Key::Enter,
+        Key::Enter,
+        Key::Backspace,
+        Key::ClearLine,
+        Key::Char('h'),
+        Key::Char('j'),
+        Key::Char('k'),
+        Key::Char('l'),
+        Key::Char('x'),
+        Key::Char(' '),
+        Key::Char('-'),
+    ];
+    let mut rng = Lcg(0x5eed);
+    let mut launches = 0;
+    for walk in 0..1500 {
+        let extra: Vec<OsString> = if rng.below(2) == 0 {
+            Vec::new()
+        } else {
+            vec!["-c".into()]
+        };
+        let color = rng.below(2) == 0;
+        let mut u = Ui::new(&found(), "~/.claude", extra).with_color(color);
+        let mut pressed = Vec::new();
+        for _ in 0..1 + rng.below(40) {
+            let before = u.frame(COLS, ROWS);
+            // 狭い端末でも、見出し・コマンド行・カーソルの行 (打つ間は打つ行) を残し、端末の行に収める
+            let (cols, rows) = (4 + rng.below(116), 1 + rng.below(30));
+            let small = u.frame(cols, rows);
+            let kept = 1 + command_lines(&small).len() + 2;
+            assert!(
+                small.lines.len() <= rows.max(kept),
+                "{walk} {pressed:?} {cols}x{rows}\n{}",
+                small.text()
+            );
+            match small.cursor {
+                Some((row, _)) => assert!(small.lines[row].text().contains("の名前: ")),
+                None => {
+                    cursor_line(&small);
+                }
+            }
+            let key = keys[rng.below(keys.len())];
+            pressed.push(key);
+            let typing = before.cursor.is_some();
+            match u.handle(key) {
+                Outcome::Continue => {}
+                Outcome::Cancel => panic!("Esc を押していない: {pressed:?}"),
+                Outcome::Launch(plan) => {
+                    launches += 1;
+                    assert_eq!(key, Key::Enter, "{pressed:?}");
+                    assert!(!typing, "打つ間に起こした: {pressed:?}");
+                    let args = strs(&plan.args);
+                    assert!(
+                        !args.iter().any(|a| a.contains('<')),
+                        "名前の形を起こした: {pressed:?} {args:?}"
+                    );
+                    assert!(choice::model_ok(&args[3]).is_ok(), "{pressed:?} {args:?}");
+                    // 起こす直前の画面のコマンド行から、灰色の括弧と NO_COLOR の印を外したもの
+                    let screen = command_text(&before)
+                        .replace(['{', '}'], "")
+                        .replace(" [--permission-mode]", "")
+                        .replace(" [--remote-control]", "");
+                    assert_eq!(plan.shown, screen, "{walk} {pressed:?}");
+                    break;
+                }
+            }
+        }
+    }
+    assert!(launches > 300, "{launches}");
 }
