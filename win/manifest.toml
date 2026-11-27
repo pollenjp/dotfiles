@@ -73,7 +73,7 @@ base = "nix"
 src = "pkgs/herdr-core/releases.json"
 dst = "%USERPROFILE%/.config/powershell/herdr-releases.json"
 hint = "Install-HerdrApp.ps1 が読む固定した版。setup --update なら続く bootstrap-windows-herdr-app.sh が、その版とフィードに揃える (手で配ったなら PowerShell で Install-HerdrApp)"
-runnerHint = "手で打つ Install-HerdrApp が読む固定した版 (dotfiles apply の手順 herdr-app は、clone の nix/pkgs/herdr-core/releases.json を渡して、その版とフィードに揃える)"
+runnerHint = "手で打つ Install-HerdrApp が読む固定した版 (ホストの値の [tools] windowsHerdr が on なら、dotfiles apply の手順 herdr-app が clone の nix/pkgs/herdr-core/releases.json を渡して、その版とフィードに揃える)"
 
 [[files]]
 src = "powertoys/keyboard-manager/default.json"

@@ -724,8 +724,8 @@ item = "op://<vault の ID>/<項目の ID>/<欄の ID>"   # 元の値の 1Passwo
 
 手順の順は WSL の `# order:` にそろえるので、前の手順が書く中身が、後ろの手順の入れるもので変わることがある (`git-config` (50) の `core.sshCommand` と、
 OpenSSH を入れる `openssh` (96))。そのときは前の手順に trait `Step` の `rerun_after` を書く: apply で後ろの手順が流れた直後に runner が聞き、true なら
-その場でもう一度流す (行は前の手順の行の後ろに「<後ろの手順> の後に流し直した: 」で足す。check と dry-run では聞かない)。書き直すものが無ければ
-false を返す (毎回流し直さない)
+その場でもう一度流す (締めの表では、前の手順の行を「<後ろの手順> の後に流し直した: 」の行に置き換える。1 回目の出力は見出しの上に残る。check と
+dry-run では聞かない)。書き直すものが無ければ false を返す (毎回流し直さない)。相手の手順の id と順は、前の手順の試験で確かめる (変わると黙って効かなくなる)
 
 WSL の側に Windows の手順 (`nix/scripts/bootstrap-windows-<id>.sh`) を足したときは、runner に写すまで `runner/src/steps/pending.rs` の `PENDING`
 に足し (gate は script の `# tool:` と同じにする)、`order_matches_wsl_setup` の並びと上の表にも足す。WSL の script が一覧に無い・`# tool:` と
@@ -1209,7 +1209,7 @@ WSL と違うもの:
   `~/.gitconfig` が勝ち、`~/.gitconfig` があれば `git config --global` もそこへ書く。`~/.gitconfig` がある間は、締めの表の ※ にそう添える
 - 入れたての Windows 11 には Windows の機能の版 (`System32\OpenSSH`) が既定で入っていて、winget の版は同じ apply の手順 `openssh` (order 96) が後から
   入れる。そこで apply は、`openssh` の後に、置いた `config` (記録どおりのもの) の `core.sshCommand` が今選ぶ `ssh.exe` と違えば `git-config` をもう一度
-  流す (見出しに「(openssh の後に流し直す)」、締めの表の行に「openssh の後に流し直した: 」と出る)。受け持ちが runner のホストなら、入れたての Windows でも
+  流す (見出しに「(openssh の後に流し直す)」と出て、締めの表の git-config の行は「openssh の後に流し直した: 」の行に置き換わる)。受け持ちが runner のホストなら、入れたての Windows でも
   1 回の apply で揃う。順は 50 のまま (ハブを作る `hc-hub` (60) の `pjp hub init` の commit を、ここで書く名前とメールにする。ADR 066)。check と dry-run は
   流し直さないので、Windows の機能の版を選んだときは、その行に「apply の手順 openssh (96) が winget の版を入れた後に書き直す」と添える
 - `core.sshCommand` を書くようになる前に置いた `config` も、中身が記録どおりなら次の `dotfiles apply` で書き換わる (衝突にならない)。`OpenSSH` を後から入れた・
@@ -2971,8 +2971,10 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
   ([winget の pin](#winget-の-pin)。試験が確かめる)
 - `Invoke-Winget` は、コンソールの文字コードが UTF-8 でなければ、winget を打つ間だけ UTF-8 にして読む (winget は管へ UTF-8 で書く)。UAC で昇格し直した
   子 (`-LogPath`) の窓と手で打った窓は CP932 で、そのまま読むと進み具合の帯 (█▒) が「笆遺毎」に化けて除けず、昇格した側の行 (`[管理者]`) に残った。
-  runner と WSL の wrapper は UTF-8 にしてから流すので替えない。winget を打つほかの ps1 (`Install-Sshd.ps1`・`Install-Herdr.ps1` など) の
-  `Invoke-Winget` も同じ本文にそろえてあり、`Install-OpenSSH.Tests.ps1` が突き合わせる (直すときは全部を直す)
+  runner と WSL の wrapper は UTF-8 にしてから流すので替えない。winget を打つほかの ps1 (`Install-Sshd.ps1`・`Install-Herdr.ps1` など 13 本) の
+  `Invoke-Winget` も同じ本文にそろえてあり、`Install-OpenSSH.Tests.ps1` が突き合わせ、持つ ps1 の数 (bootstrap と合わせて 14 本) も数える (直すときは
+  全部を直す。winget を打つ ps1 を足したら、この本文を写して試験の数を直す)。昇格した側で winget が見つからないときの `Format-WingetMissingNote` も、
+  bootstrap・`Install-OpenSSH.ps1`・`Install-Sshd.ps1` で同じ本文にそろえてあり、同じ試験が突き合わせる
 - `-Check` の終了コードと締めの文 (`Get-OpenSshExitCode`・`Get-OpenSshCheckMessage`) は、96 が読む。変えるときは
   `nix/scripts/bootstrap-windows-openssh.sh` とそのテストも直す
 - winget やサービスに触る部分は、実機で `-Check` と本番を打って確かめる

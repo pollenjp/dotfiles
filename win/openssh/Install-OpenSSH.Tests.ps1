@@ -462,23 +462,38 @@ Test-Case 'もう UTF-8 の窓 (runner・WSL の wrapper の BOM 付きの UTF-8
     Invoke-RealWinget -Console ([Text.Encoding]::UTF8)
 }
 
+# 写しの関数の本文 (`{ … }`)。改行は LF にそろえて比べる (Windows の core.autocrlf の clone では、.gitattributes で -text の
+# Install-PowerToys.ps1 だけが LF のまま残る)。関数が無ければ $null
+function Get-FunctionBody {
+    param([string]$Path, [string]$Name)
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$null, [ref]$null)
+    $fn = @($ast.FindAll({ param($n) ($n -is [System.Management.Automation.Language.FunctionDefinitionAst]) -and ($n.Name -eq $Name) }, $true))
+    if ($fn.Count -eq 0) { return $null }
+    $fn[0].Body.Extent.Text -replace "`r`n", "`n"
+}
+$winScripts = @(Get-ChildItem -Path (Join-Path (Split-Path -Parent $PSScriptRoot) '*\*.ps1') -File | Where-Object { $_.Name -notlike '*.Tests.ps1' } | Sort-Object FullName)
+function Get-ScriptLabel { param($File) "$($File.Directory.Name)/$($File.Name)" }
+
 # winget の出力を取り込むほかの ps1 (Install-Sshd.ps1・Install-Herdr.ps1 など) の Invoke-Winget は、上で確かめたこの ps1 の Invoke-Winget と
-# 同じ本文 (どの窓から打っても UTF-8 で読む。写しをそろえる)。winget を直に打たない形 (bootstrap は Invoke-Native -Utf8 を通し、自分の試験で
-# 確かめる) は比べない
-Test-Case 'winget を打つほかの ps1 の Invoke-Winget は、この ps1 と同じ本文' '' {
-    $bodyOf = {
-        param([string]$Path)
-        $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$null, [ref]$null)
-        $fn = @($ast.FindAll({ param($n) ($n -is [System.Management.Automation.Language.FunctionDefinitionAst]) -and ($n.Name -eq 'Invoke-Winget') }, $true))
-        if ($fn.Count -eq 0) { return $null }
-        $fn[0].Body.Extent.Text
-    }
-    $want = & $bodyOf (Join-Path $PSScriptRoot 'Install-OpenSSH.ps1')
-    $win = Split-Path -Parent $PSScriptRoot
-    @(Get-ChildItem -Path (Join-Path $win '*\*.ps1') -File | Where-Object { $_.Name -notlike '*.Tests.ps1' } | ForEach-Object {
-            $body = & $bodyOf $_.FullName
-            if (($null -ne $body) -and $body.Contains('& winget') -and ($body -cne $want)) { "$($_.Directory.Name)/$($_.Name)" }
+# 同じ本文 (どの窓から打っても UTF-8 で読む。写しをそろえる)。bootstrap だけは Invoke-Native -Utf8 を通す別の形で、自分の試験で確かめる
+Test-Case 'winget を打つほかの ps1 の Invoke-Winget は、この ps1 と同じ本文 (bootstrap を除く)' '' {
+    $want = Get-FunctionBody -Path (Join-Path $PSScriptRoot 'Install-OpenSSH.ps1') -Name 'Invoke-Winget'
+    @($winScripts | Where-Object { (Get-ScriptLabel $_) -ne 'bootstrap/Install-Bootstrap.ps1' } | ForEach-Object {
+            $body = Get-FunctionBody -Path $_.FullName -Name 'Invoke-Winget'
+            if (($null -ne $body) -and ($body -cne $want)) { Get-ScriptLabel $_ }
         }) -join ' '
+}
+# Invoke-Winget を持つ ps1 の数 (増えた・減ったら、ここと win/README.md の「Install-OpenSSH.ps1 を書くときの注意」を直す)
+Test-Case 'Invoke-Winget を持つ ps1 は 14 本 (bootstrap と、同じ本文の 13 本)' 14 {
+    @($winScripts | Where-Object { $null -ne (Get-FunctionBody -Path $_.FullName -Name 'Invoke-Winget') }).Count
+}
+
+# Format-WingetMissingNote (昇格した側で winget が見つからないときの行) は、bootstrap・Install-OpenSSH・Install-Sshd で同じ本文
+Test-Case 'Format-WingetMissingNote は bootstrap・Install-OpenSSH・Install-Sshd にあり、同じ本文' 'bootstrap/Install-Bootstrap.ps1 openssh/Install-OpenSSH.ps1 openssh/Install-Sshd.ps1|' {
+    $want = Get-FunctionBody -Path (Join-Path $PSScriptRoot 'Install-OpenSSH.ps1') -Name 'Format-WingetMissingNote'
+    $have = @($winScripts | Where-Object { $null -ne (Get-FunctionBody -Path $_.FullName -Name 'Format-WingetMissingNote') })
+    $differ = @($have | Where-Object { (Get-FunctionBody -Path $_.FullName -Name 'Format-WingetMissingNote') -cne $want } | ForEach-Object { Get-ScriptLabel $_ })
+    "$(@($have | ForEach-Object { Get-ScriptLabel $_ }) -join ' ')|$($differ -join ' ')"
 }
 
 # 揃えた・入れた後の ssh-add -l の行。1Password の SSH agent を使わないホスト (-NoOnePassword) は出さない

@@ -300,6 +300,16 @@ Test-Case '0x80070005 (Access is denied) は、昇格していない winget が 
 Test-Case '「Failed to open the predefined source」の行があれば、終了コードが違っても同じ' 'True' { Test-WingetAccessDenied -ExitCode -1 -Lines @('Failed to open the predefined source; please report to winget maintainers.') }
 Test-Case 'ほかの落ち方 (インストーラーの 1603)・0 は違う' 'False False' { "$(Test-WingetAccessDenied -ExitCode -1978335226 -Lines @('Installer failed with exit code: 1603')) $(Test-WingetAccessDenied -ExitCode 0 -Lines @())" }
 
+# Get-ElevationFailureCode: 昇格した winget を起こせなかったときの終了コード。UAC で断った (Win32Exception の 1223。Start-Process は
+# InvalidOperationException に包む) なら 1223 (取り消し)、ほか (UAC を出せない SSH の会話など) は -1 (取り消しとは言わない。流し直しても直らない)
+Test-Case '昇格を UAC で断ったら 1223 (包まれていても)、ほかの理由で起こせなければ -1' '1223 1223 -1 -1' {
+    $declined = New-Object -TypeName System.ComponentModel.Win32Exception -ArgumentList 1223
+    $wrapped = New-Object -TypeName System.InvalidOperationException -ArgumentList @('This command cannot be run due to the error: The operation was canceled by the user.', $declined)
+    $other = New-Object -TypeName System.ComponentModel.Win32Exception -ArgumentList 1326
+    $plain = New-Object -TypeName System.InvalidOperationException -ArgumentList 'x'
+    "$(Get-ElevationFailureCode -Exception $declined) $(Get-ElevationFailureCode -Exception $wrapped) $(Get-ElevationFailureCode -Exception $other) $(Get-ElevationFailureCode -Exception $plain)"
+}
+
 # Select-WingetOutputLines: winget の出力の行から、進み具合の表示 (回る棒・帯) を除く。日本語の行は残す
 Test-Case 'winget の出力から回る棒と帯 (█▒) の行を除き、ほかの行 (日本語も) は残す' 'Successfully installed|インストールが完了しました' {
     @(Select-WingetOutputLines -Lines @('  - ', '  \ ', '', "  $([char]0x2588)$([char]0x2588)$([char]0x2592)  1 MB / 2 MB", 'Successfully installed', 'インストールが完了しました')) -join '|'

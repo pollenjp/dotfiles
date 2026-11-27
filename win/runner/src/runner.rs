@@ -95,7 +95,7 @@ pub fn host_rows(host: &HostValues) -> Vec<Row> {
 
 /// 手順を順に流して行を返す。off の手順は流さずに ↷ の行、まだ無い手順は見出しを出さずに行だけ。受け持ちが WSL のホストの apply は、
 /// WSL の setup と同じ手順を流さずに · の行 (Windows にしか無い手順だけを流す)。apply では、手順を流すたびに、前に流した手順に
-/// もう一度流すか (`Step::rerun_after`) を聞き、流すならその場で流し直す (`rerun`)。
+/// もう一度流すか (`Step::rerun_after`) を聞き、流すならその場で流し直して、その手順の行を流し直した行に置き換える (`rerun`)。
 pub fn execute(ctx: &mut Ctx, mode: Mode, steps: &[Box<dyn Step>]) -> Vec<Row> {
     let mut rows = host_rows(&ctx.host);
     // apply で流した手順 (後ろの手順の後に流し直すかを聞く)
@@ -140,8 +140,9 @@ pub fn execute(ctx: &mut Ctx, mode: Mode, steps: &[Box<dyn Step>]) -> Vec<Row> {
     rows
 }
 
-/// 前に流した手順 `step` を、後ろの手順 `after` の直後にもう一度流す。見出しにわけを添え、行は `step` の前の行の後ろに足す (文の頭に
-/// 「<after> の後に流し直した: 」。1 回目の行は残す)
+/// 前に流した手順 `step` を、後ろの手順 `after` の直後にもう一度流す。見出しにわけを添え、`step` の前の行を流し直した行に置き換える (文の頭に
+/// 「<after> の後に流し直した: 」)。締めの表には後の結果だけを残す (1 回目の行も残すと、同じ注記や直すことがある行が二重に出る。1 回目の出力は
+/// 見出しの上に残っている)
 fn rerun(ctx: &mut Ctx, mode: Mode, step: &dyn Step, after: &str, rows: &mut Vec<Row>) {
     let info = step.info();
     ctx.say("");
@@ -164,8 +165,9 @@ fn rerun(ctx: &mut Ctx, mode: Mode, step: &dyn Step, after: &str, rows: &mut Vec
         .collect();
     let at = rows
         .iter()
-        .rposition(|r| r.id == info.id)
-        .map_or(rows.len(), |i| i + 1);
+        .position(|r| r.id == info.id)
+        .unwrap_or(rows.len());
+    rows.retain(|r| r.id != info.id);
     rows.splice(at..at, again);
 }
 
@@ -328,7 +330,7 @@ mod tests {
     //! ## 確かめること
     //!
     //! - off の手順は流さずに ↷、まだ無い手順は受け持ちで info と manual、ホストの値が無ければ host の行
-    //! - apply では、前に流した手順が頼めば (rerun_after) 後ろの手順の直後に流し直し、行を前の手順の行の後ろに足す。check・dry-run と、
+    //! - apply では、前に流した手順が頼めば (rerun_after) 後ろの手順の直後に流し直し、前の手順の行を流し直した行に置き換える。check・dry-run と、
     //!   後ろの手順が流れなかったときは流し直さない
     //! - apply は、ホストの値が無い・runner.enable が true でないなら止める
     //! - 出力が端末なら、見出しは太字、締めの表と締めの行は行の種類の色。色を落とすと端末でないときと同じ字
@@ -428,15 +430,22 @@ mod tests {
         fn run(&self, ctx: &mut Ctx, _mode: Mode) -> Vec<Outcome> {
             self.runs.set(self.runs.get() + 1);
             ctx.say("ran-early");
-            vec![Outcome::new(Kind::Ok, format!("{} 回目", self.runs.get())).note("n")]
+            let mut out =
+                vec![Outcome::new(Kind::Ok, format!("{} 回目", self.runs.get())).note("n")];
+            // 1 回目だけの行 (流し直すと消えるはずの行。git-config の ~/.gitconfig の注記・git が別の場所を読む行に当たる)
+            if self.runs.get() == 1 {
+                out.push(Outcome::new(Kind::Manual, "1 回目だけ"));
+            }
+            out
         }
         fn rerun_after(&self, _ctx: &Ctx, after: &str) -> bool {
             after == self.after && self.runs.get() == 1
         }
     }
 
-    /// apply で、前の手順が後ろの手順の後に流し直してほしいと言えば (rerun_after)、後ろの手順の直後にもう一度流し、行を前の手順の行の
-    /// 後ろに足す (文の頭に「<後ろの手順> の後に流し直した: 」)。check・dry-run と、後ろの手順が流れなかった (受け持ちが WSL) ときは流し直さない
+    /// apply で、前の手順が後ろの手順の後に流し直してほしいと言えば (rerun_after)、後ろの手順の直後にもう一度流し、前の手順の行を流し直した
+    /// 行に置き換える (文の頭に「<後ろの手順> の後に流し直した: 」。1 回目の行は残さないので、同じ注記や直すことがある行が二重に出ない)。
+    /// check・dry-run と、後ろの手順が流れなかった (受け持ちが WSL) ときは流し直さない
     #[test]
     fn apply_reruns_an_earlier_step_after_the_step_it_waits_for() {
         let runner_host = Some("[runner]\nenable = true\n");
@@ -456,7 +465,6 @@ mod tests {
         assert_eq!(
             ids,
             vec![
-                ("early", "1 回目"),
                 ("early", "late の後に流し直した: 2 回目"),
                 ("middle", "t"),
                 ("late", "t"),
@@ -464,8 +472,9 @@ mod tests {
             ],
             "{out}"
         );
-        assert_eq!(rows[1].order, Some(50));
-        assert_eq!(rows[1].notes, vec!["n".to_string()]);
+        assert_eq!(rows[0].order, Some(50));
+        assert_eq!(rows[0].notes, vec!["n".to_string()]);
+        assert_eq!(report::exit_code(&rows), 0, "1 回目だけの ⚠ は残らない");
         assert_eq!(out.matches("ran-early").count(), 2, "{out}");
         // 流し直しは後ろの手順の出力の直後 (締めの前) に、わけを添えた見出しで出す
         let heading = "━━ [50] early: x (late の後に流し直す) ━━";
@@ -477,12 +486,12 @@ mod tests {
         for mode in [Mode::Check, Mode::DryRun { force: false }] {
             let (rows, out) = run_steps(runner_host, mode, &steps());
             assert_eq!(out.matches("ran-early").count(), 1, "{mode:?}: {out}");
-            assert_eq!(rows.len(), 4, "{mode:?}");
+            assert_eq!(rows.len(), 5, "{mode:?}");
         }
         // 受け持ちが WSL のホストの apply は、後ろの手順 (WSL と同じ手順) を流さないので、流し直さない
         let (rows, out) = run_steps(Some(""), Mode::Apply { force: false }, &steps());
         assert_eq!(out.matches("ran-early").count(), 1, "{out}");
-        assert_eq!(rows.len(), 4);
+        assert_eq!(rows.len(), 5);
     }
 
     /// 受け持ちが WSL のホストの apply は、Windows にしか無い手順だけを流し、WSL と同じ手順は流さずに · の行を出す (ADR 064)

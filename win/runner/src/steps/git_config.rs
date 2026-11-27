@@ -48,6 +48,8 @@ pub const GHQ_ROOT: &str = "~/ghq";
 /// git.toml の `[settings]` に書かない節 (名前とメールは `[identity]`・道具 `gitIdentity` で、署名は WSL だけ、include は owner ごとに
 /// 切り替えるので、`[settings]` にあると切り替えの外で書き出される。git.nix の assertion と同じ)
 const RESERVED: [&str; 4] = ["user", "gpg", "include", "includeif"];
+/// apply でこの手順の後に流れ、流れた直後にこの手順を流し直すかを聞く手順 (OpenSSH を入れる ps1 の手順。`Step::rerun_after`)
+pub const RERUN_AFTER: &str = "openssh";
 /// Windows の OpenSSH の ssh.exe の置き場 (見る順。環境変数・その下の相対パス)。前が `Install-OpenSSH.ps1` の入れる winget の版、後ろが Windows の機能の版
 pub const SSH_EXES: [(&str, &str); 2] = [
     ("ProgramFiles", "OpenSSH/ssh.exe"),
@@ -496,7 +498,7 @@ impl Step for GitConfig {
     /// この手順 (50) が Windows の機能の版を書いた後で openssh (96) が winget の版を入れるので、流し直さないと 1 回の apply で揃わない
     /// (順は 50 のまま: ハブの pjp hub init (hc-hub。60) の commit を個人の名前にする。dotfiles-private の ADR 066)
     fn rerun_after(&self, ctx: &Ctx, after: &str) -> bool {
-        after == "openssh" && ssh_outdated(ctx)
+        after == RERUN_AFTER && ssh_outdated(ctx)
     }
 }
 
@@ -1237,14 +1239,16 @@ postBuffer = 524288000
             .iter()
             .map(|r| (r.id.as_str(), r.text.as_str()))
             .collect();
-        assert_eq!(texts.len(), 3, "{texts:?}\n{out}");
+        // 締めの表の git-config の行は、流し直した行に置き換わる (1 回目の「追加 2」は残らない)
+        assert_eq!(texts.len(), 2, "{texts:?}\n{out}");
         assert_eq!(texts[0].0, "git-config");
         assert!(
-            texts[1]
+            texts[0]
                 .1
                 .starts_with("openssh の後に流し直した: 追加 0 / 更新 1"),
             "{texts:?}"
         );
+        assert_eq!(texts[1], ("openssh", "入れた"));
         assert!(
             out.contains("━━ [50] git-config: ") && out.contains("(openssh の後に流し直す) ━━"),
             "{out}"
@@ -1302,6 +1306,19 @@ postBuffer = 524288000
                 .1
                 .contains(&format!("\tsshCommand = \"{SAMPLE_SSH}\"\n"))
         );
+    }
+
+    /// 流し直しの相手 (RERUN_AFTER) の手順が本物の一覧にあり、git-config より後ろで流れる (id か順が変わると、流し直しが黙って効かなくなる)
+    #[test]
+    fn the_step_to_rerun_after_runs_later() {
+        let all = super::super::all();
+        let at = |id: &str| {
+            all.iter()
+                .position(|s| s.info().id == id)
+                .unwrap_or_else(|| panic!("{id} が手順の一覧に無い"))
+        };
+        assert_eq!(RERUN_AFTER, "openssh");
+        assert!(at(RERUN_AFTER) > at("git-config"));
     }
 
     #[test]

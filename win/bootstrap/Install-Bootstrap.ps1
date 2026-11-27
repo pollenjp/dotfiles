@@ -370,7 +370,7 @@ function Test-WingetPinned {
 # (0x8A15010C。MSI の 1602 は winget がこれにする) か、出力のインストーラーの終了コードが 1602 (取り消し)・1223 (UAC を断った) か。
 # exe の installer の終了コードは、winget が 0x8A150006 にして「Installer failed with exit code: 1602」(日本語なら
 # 「インストーラーが終了コードで失敗しました: 1602」) と出す。コロンの直後の数だけを見る (URL の中の数を拾わない)。昇格した winget
-# (Invoke-ElevatedWinget) を UAC で断った・出せなかったときは、ERROR_CANCELLED (1223) を終了コードにする
+# (Invoke-ElevatedWinget) を UAC で断ったときは、ERROR_CANCELLED (1223) を終了コードにする (Get-ElevationFailureCode)
 function Test-WingetCancelled {
     param([int]$ExitCode, [string[]]$Lines)
     if ($ExitCode -eq 0) { return $false }
@@ -392,6 +392,19 @@ function Test-WingetAccessDenied {
         if ("$line" -match 'Failed to open the predefined source') { return $true }
     }
     $false
+}
+
+# 昇格した winget を起こせなかったとき (Start-Process -Verb RunAs の例外) の終了コード。UAC で断った (Win32Exception の ERROR_CANCELLED。
+# Start-Process は InvalidOperationException に包む) なら 1223 (Test-WingetCancelled が取り消しと読む)、ほか (UAC を出せない SSH の会話など。
+# 流し直しても直らない) は -1
+function Get-ElevationFailureCode {
+    param([Exception]$Exception)
+    $e = $Exception
+    while ($null -ne $e) {
+        if (($e -is [System.ComponentModel.Win32Exception]) -and ($e.NativeErrorCode -eq 1223)) { return 1223 }
+        $e = $e.InnerException
+    }
+    -1
 }
 
 # winget の出力の行から、進み具合の表示 (回る棒・帯 █▒) を除く。帯の字は UTF-8 で読んだときだけ除ける (CP932 で読むと「笆遺毎」に化ける。
@@ -839,7 +852,8 @@ function Invoke-Winget {
 # 昇格した winget で打つ (UAC の確認が 1 回出る。確認なしで昇格する設定の PC では出ない)。System32 の Windows PowerShell (同じユーザーが
 # 差し替えられないもの) を Start-Process -Verb RunAs で昇格させ、Get-ElevatedWingetScript の本文を -EncodedCommand で渡す。昇格した側は
 # 出力を一時ファイルに書き、winget の終了コードで終わる。こちらはその終了コードと、ファイルの行 (進み具合の表示は除く) を返す。UAC を断った・
-# 出せなかった (SSH の会話など) ときは、終了コードを 1223 (ERROR_CANCELLED) にする (Install-ClaudeDesktop.ps1 の Invoke-ElevatedWinget と同じ形)。
+# 起こせなかったときは、UAC で断ったなら終了コードを 1223 (ERROR_CANCELLED。取り消し)、ほか (UAC を出せない SSH の会話など) なら -1 にする
+# (Get-ElevationFailureCode。Install-ClaudeDesktop.ps1 の Invoke-ElevatedWinget と同じ形で、取り消しと言うのは断ったときだけにした)。
 # 待つのは昇格した PowerShell だけ (-Wait は付けず、handle を掴んで WaitForExit。5.1 の -Wait は子孫のプロセスまで待つ。Invoke-VsModify と同じ)
 function Invoke-ElevatedWinget {
     param([string[]]$Arguments)
@@ -851,7 +865,7 @@ function Invoke-ElevatedWinget {
         $null = $p.Handle
         $p.WaitForExit()
     } catch {
-        return [pscustomobject]@{ ExitCode = 1223; Lines = @("UAC: $($_.Exception.Message)") }
+        return [pscustomobject]@{ ExitCode = (Get-ElevationFailureCode -Exception $_.Exception); Lines = @("UAC: $($_.Exception.Message)") }
     }
     $lines = @()
     if (Test-Path -LiteralPath $log) {
@@ -1327,7 +1341,7 @@ function Invoke-InstallBootstrap {
         # (machine の scope) だけ、同じ引数を昇格した winget で打ち直す。今動いている PC (新しい winget) は普通に入るので、昇格しない
         if ($p.RetryElevated -and (Test-WingetAccessDenied -ExitCode $result.ExitCode -Lines $result.Lines)) {
             Write-Tail -Lines $result.Lines
-            Write-Host ('昇格していない winget が machine の scope を読めなかった (終了コード 0x{0:X8})。昇格した winget で入れ直す (UAC の確認が 1 回出る。出たら「はい」を押す)' -f $result.ExitCode)
+            Write-Host ('昇格していない winget が machine の scope を読めなかった (終了コード 0x{0:X8})。昇格した winget で入れ直す (UAC の確認が 1 回出る。出たら「はい」を押す。昇格した側の進み具合は出ず、終わるまで数分かかることがある)' -f $result.ExitCode)
             $result = Invoke-ElevatedWinget -Arguments $arguments
             # UAC で別の管理者のアカウントに昇格し、そのアカウントに winget が無かった: そのアカウントと登録の手を出す
             $missing = @($result.Lines | Where-Object { "$_" -match '^winget が見つからない \(昇格した側のアカウント: (.*)\)$' })
