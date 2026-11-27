@@ -473,7 +473,7 @@ function New-Repo {
     param([string]$Name, [hashtable]$Change = @{})
     $r = [ordered]@{
         Name = $Name; Url = "git@github.com:pollenjp/$Name.git"; Directory = "$Ghq\$Name"; State = 'ok'
-        Origin = "git@github.com:pollenjp/$Name.git"; AutoCrlf = 'false'
+        Origin = "git@github.com:pollenjp/$Name.git"; AutoCrlf = 'false'; Stale = ''; SelfUpdate = $true
     }
     foreach ($k in $Change.Keys) { $r[$k] = $Change[$k] }
     [pscustomobject]$r
@@ -735,6 +735,32 @@ Test-Case '-Private は dotfiles-private のホストの値を出し、手元の
 }
 Test-Case '置き場の一重引用符は重ねる (空白と一緒に、PowerShell にそのまま打てる形)' "  . 'C:\Users\o''brien x\ghq\github.com\pollenjp\dotfiles\win\powershell\dotfiles.ps1'" {
     @(Format-BootstrapNextSteps -DotfilesDir "C:\Users\o'brien x\ghq\github.com\pollenjp\dotfiles" -HostFile $HostFilePath -HostFileExists $true)[2]
+}
+
+# 古い clone (bootstrap は既にある clone を進めない): launcher が無い・origin の既定の branch の先頭を HEAD が含まないなら知らせる。終了コードは変えず、
+# 次に打つコマンドの頭に進める 1 行を足す
+Test-Case 'launcher が無い clone は、先頭を読まなくても no-launcher' 'no-launcher' { Get-CloneStaleness -LauncherExists $false -RemoteHead '' -HasRemoteHead $null }
+Test-Case 'origin の既定の branch の先頭を HEAD が含まなければ behind' 'behind' { Get-CloneStaleness -LauncherExists $true -RemoteHead ('a' * 40) -HasRemoteHead $false }
+Test-Case '含めば、また先頭を読めなければ (つながらない) 古くない' '|' { "$(Get-CloneStaleness -LauncherExists $true -RemoteHead ('a' * 40) -HasRemoteHead $true)|$(Get-CloneStaleness -LauncherExists $true -RemoteHead '' -HasRemoteHead $null)" }
+Test-Case '古い dotfiles の clone の行は notice で、終了コードと締めの行に数えない (揃っていれば 0)' "dotfiles=notice|0||$Ghq\dotfiles (runner の launcher (win\powershell\Invoke-DotfilesRunner.ps1) が無い古い clone)" {
+    $s = New-State -Dotfiles @{ Stale = 'no-launcher' }
+    $rows = @(Get-BootstrapRows -State $s)
+    $row = @($rows | Where-Object { $_.Label -eq 'dotfiles' })[0]
+    "$(Get-Kinds $s)|$(Get-BootstrapExitCode -Rows $rows)|$(@(Format-BootstrapVerdict -Rows $rows) -join '')|$($row.Text)"
+}
+Test-Case '古い clone の行には ⚠ を付ける' "⚠ dotfiles : $Ghq\dotfiles (origin の既定の branch より古い clone)" {
+    @(Format-BootstrapRows -Rows @(Get-BootstrapRows -State (New-State -Dotfiles @{ Stale = 'behind' })) | Where-Object { "$_" -like '*dotfiles :*' })[0]
+}
+Test-Case '進めるコマンドは、clone に --self-update の script があればそれ、無ければ git pull --ff-only (一重引用符は重ねる)' "& 'C:\Users\o''b\ghq\github.com\pollenjp\dotfiles\win\powershell\Invoke-DotfilesSelfUpdate.ps1'|git -C 'C:\Users\o''b\ghq\github.com\pollenjp\dotfiles' pull --ff-only" {
+    $d = "C:\Users\o'b\ghq\github.com\pollenjp\dotfiles\"
+    "$(Format-ClonePullCommand -DotfilesDir $d -SelfUpdateExists $true)|$(Format-ClonePullCommand -DotfilesDir $d -SelfUpdateExists $false)"
+}
+Test-Case '古い clone なら、次に打つコマンドの頭 (dotfiles.ps1 を読み込む前) に進める 1 行と、わけの ※ を足す' "  git -C '$nextDir' pull --ff-only|  . '$nextDir\win\powershell\dotfiles.ps1'|※ dotfiles の clone が古い (runner の launcher (win\powershell\Invoke-DotfilesRunner.ps1) が無い古い clone)。bootstrap は既にある clone を進めないので、頭の 1 行で進めてから読み込む" {
+    $lines = @(Format-BootstrapNextSteps -DotfilesDir $nextDir -HostFile $HostFilePath -HostFileExists $true -Stale 'no-launcher' -PullCommand "git -C '$nextDir' pull --ff-only")
+    "$($lines[2])|$($lines[3])|$($lines[-1])"
+}
+Test-Case '古くなければ進める行を足さない' 'False' {
+    [bool](@(Format-BootstrapNextSteps -DotfilesDir $nextDir -HostFile $HostFilePath -HostFileExists $true -Stale '' -PullCommand 'x') | Where-Object { "$_" -like '*pull*' -or "$_" -like '※ dotfiles の clone が古い*' })
 }
 
 # Format-SacWarning: 最初に出す SAC の警告 (オフでなければ出し、bootstrap は続ける)
@@ -1226,6 +1252,10 @@ Test-Case '昇格の UAC で断ったら (1223)、Git のインストーラー�
 Test-Case '揃え終えたら、PowerShell 7 の新しい窓で dotfiles.ps1 を読み込んで dotfiles apply と出す (既定の形は runner の exe を落とすことと手元のホストの値)' 'True True True True' {
     $r = Invoke-Flow -Public $true -States @((New-PublicState))
     "$($r.Text -like '*次に打つ (PowerShell 7 の新しい窓で。この窓は PATH が古い):*') $($r.Text -like "*  . 'C:\Users\u\ghq\github.com\pollenjp\dotfiles\win\powershell\dotfiles.ps1'*") $($r.Text.Contains($runnerExeLine)) $($r.Text -like "*ホストの値は $HostFilePath (minimum の雛形を写したもの)*")"
+}
+Test-Case '古い dotfiles の clone なら、揃っていても終了コード 0 のまま、次に打つコマンドの頭に --self-update の script で進める 1 行を出す' "0 True True" {
+    $r = Invoke-Flow -Public $true -States @((New-PublicState -Dotfiles @{ Stale = 'behind'; SelfUpdate = $true }))
+    "$($r.Code) $($r.Text -like "*  & 'C:\Users\u\ghq\github.com\pollenjp\dotfiles\win\powershell\Invoke-DotfilesSelfUpdate.ps1'*") $($r.Text -like '*⚠ dotfiles : *(origin の既定の branch より古い clone)*')"
 }
 Test-Case '-Rust で揃え終えたときも、初めての dotfiles apply が runner の exe を GitHub の Release から落とすことと手元のホストの値を出す' 'True True' {
     $r = Invoke-Flow -Public $true -Rust $true -States @((New-PublicState -Rust))

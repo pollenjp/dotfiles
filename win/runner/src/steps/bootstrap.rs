@@ -22,6 +22,11 @@ use std::time::Duration;
 pub const SCRIPT: &str = "win/bootstrap/Install-Bootstrap.ps1";
 /// 状態の表の見出し (bootstrap の行の形は「<題> : <文>」)
 const HEADER: &str = "Git for Windows : ";
+/// dotfiles の clone が origin の既定の branch より古いときの、bootstrap の行の印 (Install-Bootstrap.ps1 の Format-CloneStaleness の behind)。
+/// bootstrap は終了コードに数えないので、0 でも見る
+const BEHIND_MARK: &str = "(origin の既定の branch より古い clone)";
+/// そのときの行 (· 知らせるだけ。終了コードに数えない)
+const BEHIND_TEXT: &str = "dotfiles の clone が origin の既定の branch より古い → dotfiles --self-update で進める (runner は clone を進めない)";
 const CHECK_SECS: u64 = 120;
 
 pub struct Bootstrap;
@@ -72,6 +77,9 @@ impl Step for Bootstrap {
         let r = run_streaming(ctx, &spec);
         let header = r.output.iter().any(|l| l.contains(HEADER));
         match (&r.exit, header) {
+            (Exit::Code(0), _) if r.output.iter().any(|l| l.contains(BEHIND_MARK)) => {
+                vec![Outcome::new(Kind::Info, BEHIND_TEXT)]
+            }
             (Exit::Code(0), _) => vec![Outcome::new(Kind::Ok, "揃っている")],
             (Exit::Code(1 | 3), true) => vec![
                 Outcome::new(Kind::Manual, "bootstrap の差がある → Install-Bootstrap.ps1 を引数なしで流す (runner は流さない)")
@@ -94,6 +102,7 @@ mod tests {
     //! ## 確かめること
     //!
     //! - -Check だけを打ち (apply でも)、0 は揃っている、1・3 は人が bootstrap を流す差、見出しが無い・2 は確かめられなかった
+    //! - 0 でも、dotfiles の clone が origin の既定の branch より古いという行があれば、--self-update で進めるよう · で知らせる
     //! - どのホストでも on (ホストの値が無いときも)。privateRepos のホスト (all の既定と、[tools] に書いた minimum) は -Check -Private を打ち、
     //!   ※ の流し直しのコマンドにも -Private を付ける。ほかは -Check だけ
 
@@ -152,6 +161,20 @@ mod tests {
         assert_eq!(o[0].kind, Kind::Ok);
         assert_eq!(calls.len(), 1);
         assert!(calls[0].contains("Install-Bootstrap.ps1' -Check;"));
+    }
+
+    /// dotfiles の clone が origin の既定の branch より古ければ、0 でも · で知らせる (終了コードに数えない)
+    #[test]
+    fn a_behind_clone_is_noted_without_failing() {
+        let (o, _) = run(
+            0,
+            &[
+                "  Git for Windows : 2.56.0.4",
+                "⚠ dotfiles : C:\\Users\\u\\ghq\\github.com\\pollenjp\\dotfiles (origin の既定の branch より古い clone)",
+            ],
+            Mode::Check,
+        );
+        assert_eq!(o, vec![Outcome::new(Kind::Info, BEHIND_TEXT)]);
     }
 
     #[test]

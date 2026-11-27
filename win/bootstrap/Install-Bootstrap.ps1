@@ -597,6 +597,43 @@ function Get-GitCloneArguments {
         'clone', '-c', 'core.autocrlf=false', $Url, $Directory)
 }
 
+# dotfiles の clone の中の launcher (win/README.md の「runner の exe (Release)」)。これが無い clone は launcher より前のもので、その clone の
+# dotfiles 関数は runner を cargo run で build して起こす (既定の形の PC には Build Tools が無いので、link.exe が無くて落ちる)
+$script:DotfilesLauncher = 'win\powershell\Invoke-DotfilesRunner.ps1'
+# 3 つの clone を進める script (dotfiles --self-update の中身。gh があれば gh の資格情報、無ければ資格情報なしの HTTPS で取る)
+$script:DotfilesSelfUpdate = 'win\powershell\Invoke-DotfilesSelfUpdate.ps1'
+# origin の既定の branch の先頭を読む先 (dotfiles は public なので、どの形でも資格情報なしの HTTPS で読める)
+$script:DotfilesPublicUrl = 'https://github.com/pollenjp/dotfiles.git'
+
+# dotfiles の clone が古いか。bootstrap は既にある clone を進めないので、前に bootstrap を流した PC には古い clone が残る。no-launcher は launcher が
+# 無い (古い dotfiles 関数が cargo run を打つ)、behind は origin の既定の branch の先頭 (RemoteHead) を HEAD が含まない (HasRemoteHead が $false。
+# 遅れているか、分かれている)。どちらでもない・先頭を読めなかった (RemoteHead が空) なら空
+function Get-CloneStaleness {
+    param([bool]$LauncherExists, [string]$RemoteHead, $HasRemoteHead)
+    if (-not $LauncherExists) { return 'no-launcher' }
+    if ($RemoteHead -and ($HasRemoteHead -eq $false)) { return 'behind' }
+    ''
+}
+
+# 古い clone の行の文 (状態の表の dotfiles の行に添える)
+function Format-CloneStaleness {
+    param([string]$Stale)
+    switch ($Stale) {
+        'no-launcher' { 'runner の launcher (win\powershell\Invoke-DotfilesRunner.ps1) が無い古い clone' }
+        'behind' { 'origin の既定の branch より古い clone' }
+        default { '' }
+    }
+}
+
+# 古い clone を進めるコマンド。clone に --self-update の script があればそれ (既定の形も -Private も、clone の作り方に合う資格情報で取る)、
+# 無ければ git pull --ff-only
+function Format-ClonePullCommand {
+    param([string]$DotfilesDir, [bool]$SelfUpdateExists)
+    $dir = $DotfilesDir.TrimEnd('\')
+    if ($SelfUpdateExists) { return "& '$("$dir\$script:DotfilesSelfUpdate" -replace "'", "''")'" }
+    "git -C '$($dir -replace "'", "''")' pull --ff-only"
+}
+
 # 既定の形の clone の git の引数。github.com の credential helper を空にし (Git Credential Manager を呼ばない。public な repo は資格情報を
 # 求められない)、HTTPS の URL のまま clone する。clone -c core.autocrlf=false は、その repo の設定に残る
 function Get-GitAnonymousCloneArguments {
@@ -609,11 +646,15 @@ function Get-GitAnonymousCloneArguments {
 # ホストの値の置き場、HostFileExists はそれがあるか。既定の形 (と -Rust) は、初めての dotfiles apply が runner の exe を GitHub の Release から
 # 落とすことも添える (届かない PC (プロキシの内側など) で、先に分かるように)
 function Format-BootstrapNextSteps {
-    param([string]$DotfilesDir, [switch]$Private, [string]$HostFile, [bool]$HostFileExists)
+    param([string]$DotfilesDir, [switch]$Private, [string]$HostFile, [bool]$HostFileExists, [string]$Stale, [string]$PullCommand)
     # Windows のパスは字でつなぐ (Join-Path は、テストを流す Linux の pwsh で C: のドライブを探しに行く)
     $ps1 = "$($DotfilesDir.TrimEnd('\'))\win\powershell\dotfiles.ps1" -replace "'", "''"
     ''
     '次に打つ (PowerShell 7 の新しい窓で。この窓は PATH が古い):'
+    # 古い clone は先に進める (dotfiles.ps1 を読み込む前に。古い dotfiles 関数を読むと、launcher の無い clone では cargo run を打つ)
+    if ($Stale -and $PullCommand) {
+        "  $PullCommand"
+    }
     "  . '$ps1'"
     '  dotfiles apply'
     if ($Private) {
@@ -625,6 +666,9 @@ function Format-BootstrapNextSteps {
         '初めての dotfiles apply は、runner の exe を GitHub の Release から落とす (github.com と release-assets.githubusercontent.com に届くこと)'
         "ホストの値は $HostFile (minimum の雛形を写したもの)。使う道具は [tools] に 1 行ずつ足す (書き方は dotfiles の win\README.md の「ホストの値」)"
     }
+    if ($Stale -and $PullCommand) {
+        "※ dotfiles の clone が古い ($(Format-CloneStaleness -Stale $Stale))。bootstrap は既にある clone を進めないので、頭の 1 行で進めてから読み込む"
+    }
 }
 
 # gh auth login の引数。ブラウザーで認める。--git-protocol ssh は、gh に ~/.gitconfig の credential helper を書かせないため
@@ -635,7 +679,8 @@ function Get-GhLoginArguments {
 }
 
 # 状態の表の 1 行。Kind は直すことの種類 ('' = 直すことが無い、missing = 入っていない・無い (流せば入れる・作る)、fix = 足りない
-# (流せば足す)、manual = bootstrap では直らない、blocker = 止める理由)。Note は表の後ろに出す ※ の行
+# (流せば足す)、manual = bootstrap では直らない、blocker = 止める理由、notice = 知らせるだけ (⚠ を付けるが、終了コードと締めの行に数えない。
+# 古い clone))。Note は表の後ろに出す ※ の行
 function New-BootstrapRow {
     param([string]$Label, [string]$Text, [string]$Kind, [string]$Note)
     [pscustomobject]@{ Label = $Label; Text = $Text; Kind = $Kind; Note = $Note }
@@ -752,7 +797,15 @@ function Get-BootstrapRows {
             'not-git' { New-BootstrapRow $r.Name "$($r.Directory) は git の repo ではない" 'manual' "※ $($r.Directory) を退けて (名前を変えるか消して) 流し直すと clone する" }
             'other-origin' { New-BootstrapRow $r.Name "origin が $($r.Origin) ($($r.Url) ではない)" 'manual' "※ $($r.Directory) は別の repo の clone。退けて流し直すと clone する" }
             'autocrlf' { New-BootstrapRow $r.Name "core.autocrlf が $($r.AutoCrlf) (false でないと、WSL が配ったものとバイト列がずれる)" 'manual' "※ $($r.Directory) を退けて流し直すと、core.autocrlf=false で clone し直す" }
-            default { New-BootstrapRow $r.Name $r.Directory '' '' }
+            default {
+                $stale = ''
+                if ($r.PSObject.Properties['Stale']) { $stale = "$($r.Stale)" }
+                if ($stale) {
+                    New-BootstrapRow $r.Name "$($r.Directory) ($(Format-CloneStaleness -Stale $stale))" 'notice' "※ $($r.Name) の clone が古い。bootstrap は既にある clone を進めない (前に bootstrap を流した PC に残る)。dotfiles apply の前に進める (揃ったときに出す、次に打つコマンドの頭の 1 行)"
+                } else {
+                    New-BootstrapRow $r.Name $r.Directory '' ''
+                }
+            }
         }
     }
     # 手元のホストの値 (既定の形だけ。-Private はホストの値を dotfiles-private から引く)
@@ -786,7 +839,8 @@ function Format-SacWarning {
 # 終了コード。直すことが無ければ 0、入っていない・無いものだけなら 3 (流せば揃う)、ほかは 1
 function Get-BootstrapExitCode {
     param([object[]]$Rows)
-    $kinds = @($Rows | Where-Object { $_.Kind } | ForEach-Object { $_.Kind })
+    # notice (知らせるだけ。古い clone) は数えない
+    $kinds = @($Rows | Where-Object { $_.Kind -and ($_.Kind -ne 'notice') } | ForEach-Object { $_.Kind })
     if ($kinds.Count -eq 0) { return 0 }
     if (@($kinds | Where-Object { $_ -ne 'missing' }).Count -eq 0) { return 3 }
     1
@@ -1139,7 +1193,35 @@ function Get-GitConfigValue {
     "$(@($r.Lines)[0])".Trim()
 }
 
-# clone の置き場の状態 (missing・unknown・not-git・other-origin・autocrlf・ok)。あるものには触らない
+# origin の既定の branch の先頭の commit を、取得せずに読む (git ls-remote。clone の ref も作業ツリーも変えない)。dotfiles は public なので、
+# github.com の credential helper を空にした資格情報なしの HTTPS で読み、プロンプトも出させない。遅い・つながらないときは 20 秒ほどで諦める
+# (http.lowSpeedTime)。読めなければ空
+function Get-RemoteHead {
+    param([string]$GitPath, [string]$Url)
+    $savedPrompt = $env:GIT_TERMINAL_PROMPT
+    $savedGcm = $env:GCM_INTERACTIVE
+    $env:GIT_TERMINAL_PROMPT = '0'
+    $env:GCM_INTERACTIVE = 'never'
+    try {
+        $r = Invoke-Native -FilePath $GitPath -Arguments @('-c', 'credential.https://github.com.helper=', '-c', 'http.lowSpeedLimit=1', '-c', 'http.lowSpeedTime=20', 'ls-remote', $Url, 'HEAD')
+    } finally {
+        $env:GIT_TERMINAL_PROMPT = $savedPrompt
+        $env:GCM_INTERACTIVE = $savedGcm
+    }
+    if ($r.ExitCode -ne 0) { return '' }
+    $line = @($r.Lines | Where-Object { "$_" -match '^[0-9a-f]{40}\s+HEAD$' })
+    if ($line.Count -eq 0) { return '' }
+    ("$($line[0])" -split '\s+')[0]
+}
+
+# clone の HEAD がその commit を含むか (git merge-base --is-ancestor。commit が手元に無い・含まないなら $false)
+function Test-HeadContains {
+    param([string]$GitPath, [string]$Directory, [string]$Commit)
+    (Invoke-Native -FilePath $GitPath -Arguments @('-C', $Directory, 'merge-base', '--is-ancestor', $Commit, 'HEAD')).ExitCode -eq 0
+}
+
+# clone の置き場の状態 (missing・unknown・not-git・other-origin・autocrlf・ok)。あるものには触らない。dotfiles の clone が ok なら、古いか
+# (Stale。Get-CloneStaleness) も読む
 function Get-RepoState {
     param($Target, [string]$GitPath, [bool]$HaveGit)
     $dir = $Target.Directory
@@ -1163,7 +1245,20 @@ function Get-RepoState {
             $state = 'autocrlf'
         }
     }
-    [pscustomobject]@{ Name = $Target.Name; Url = $Target.Url; Directory = $dir; State = $state; Origin = $origin; AutoCrlf = $crlf }
+    $stale = ''
+    $selfUpdate = $false
+    if (($state -eq 'ok') -and ($Target.Name -eq 'dotfiles')) {
+        $launcher = Test-Path -LiteralPath (Join-Path $dir $script:DotfilesLauncher) -PathType Leaf
+        $selfUpdate = Test-Path -LiteralPath (Join-Path $dir $script:DotfilesSelfUpdate) -PathType Leaf
+        $remote = ''
+        $has = $null
+        if ($launcher) {
+            $remote = Get-RemoteHead -GitPath $GitPath -Url $script:DotfilesPublicUrl
+            if ($remote) { $has = Test-HeadContains -GitPath $GitPath -Directory $dir -Commit $remote }
+        }
+        $stale = Get-CloneStaleness -LauncherExists $launcher -RemoteHead $remote -HasRemoteHead $has
+    }
+    [pscustomobject]@{ Name = $Target.Name; Url = $Target.Url; Directory = $dir; State = $state; Origin = $origin; AutoCrlf = $crlf; Stale = $stale; SelfUpdate = $selfUpdate }
 }
 
 # 今の状態を読む (何も変えない。管理者は要らない)。-Private なら gh のログインを、既定の形なら手元のホストの値を読む。読む道具は Packages の
@@ -1297,7 +1392,9 @@ function Write-Tail {
 function Write-BootstrapNextSteps {
     param($State)
     $dotfiles = @($State.Repos | Where-Object { $_.Name -eq 'dotfiles' })[0]
-    foreach ($line in @(Format-BootstrapNextSteps -DotfilesDir $dotfiles.Directory -Private:$State.Private -HostFile $State.HostFile.Path -HostFileExists $State.HostFile.Exists)) {
+    $pull = ''
+    if ($dotfiles.Stale) { $pull = Format-ClonePullCommand -DotfilesDir $dotfiles.Directory -SelfUpdateExists $dotfiles.SelfUpdate }
+    foreach ($line in @(Format-BootstrapNextSteps -DotfilesDir $dotfiles.Directory -Private:$State.Private -HostFile $State.HostFile.Path -HostFileExists $State.HostFile.Exists -Stale $dotfiles.Stale -PullCommand $pull)) {
         Write-Host $line
     }
 }
