@@ -40,8 +40,18 @@ use crate::report::Kind;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// settings.json に合わせる値 (Linux の home/modules/t3-code.nix も読む 1 か所)
-const MANAGED: &str = include_str!("../../../../nix/files/t3-code/managed-settings.json");
+/// settings.json に合わせる値 (Linux の home/modules/t3-code.nix も読む 1 か所)。exe に埋めず、動くときに clone から読む (Release の exe の
+/// key を win/runner の tree だけで決めるため。dotfiles-private の docs/adr/117_win_runner_exe_release_*)
+pub const MANAGED_REL: &str = "nix/files/t3-code/managed-settings.json";
+
+/// managed-settings.json に無いと合わせられないキー (`managed_at` で引くもの)
+const MANAGED_KEYS: [&[&str]; 5] = [
+    &["claudeAgent", "driver"],
+    &["claudeAgent", "homePath"],
+    &["entrypointEnvironment"],
+    &["defaultModelSelection"],
+    &["defaultThreadEnvMode"],
+];
 
 /// テレメトリを切るユーザー環境変数と値
 pub const TELEMETRY_VAR: &str = "T3CODE_TELEMETRY_ENABLED";
@@ -237,8 +247,17 @@ fn settings_row(ctx: &mut Ctx, mode: Mode) -> Outcome {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => (OValue::Object(Vec::new()), false),
         Err(e) => return Outcome::new(Kind::Failed, format!("{shown} が読めない ({e})")),
     };
+    let managed = match load_managed(&ctx.repo) {
+        Ok(m) => m,
+        Err(why) => return Outcome::new(Kind::Failed, why),
+    };
     let launch = launch_args_plan(ctx, mode);
-    let after = match merged(&before, ctx.host.t3_clear_claude_entrypoint, launch.value()) {
+    let after = match merged(
+        &managed,
+        &before,
+        ctx.host.t3_clear_claude_entrypoint,
+        launch.value(),
+    ) {
         Ok(v) => v,
         Err(why) => return Outcome::new(Kind::Failed, format!("{shown}: {why} → 手で直す")),
     };
@@ -378,9 +397,22 @@ fn write_settings(
     }
 }
 
-/// 合わせる値 (`managed-settings.json`)。
-fn managed() -> OValue {
-    OValue::parse(MANAGED).expect("nix/files/t3-code/managed-settings.json は JSON")
+/// 合わせる値 (clone の `managed-settings.json`)。読めない・JSON の object でない・合わせるキーが無ければ、わけ。
+pub fn load_managed(repo: &Path) -> Result<OValue, String> {
+    let path = crate::context::join_segments(repo, MANAGED_REL);
+    let text = std::fs::read_to_string(&path)
+        .map_err(|e| format!("{} が読めない ({e})", path.display()))?;
+    let m = match OValue::parse(&text) {
+        Ok(v @ OValue::Object(_)) => v,
+        Ok(_) => return Err(format!("{} が JSON の object でない", path.display())),
+        Err(e) => return Err(format!("{} が JSON として読めない ({e})", path.display())),
+    };
+    for keys in MANAGED_KEYS {
+        if keys.iter().try_fold(&m, |v, k| v.get(k)).is_none() {
+            return Err(format!("{} に {} が無い", path.display(), keys.join(".")));
+        }
+    }
+    Ok(m)
 }
 
 fn managed_at<'a>(m: &'a OValue, path: &[&str]) -> &'a OValue {
@@ -418,28 +450,31 @@ fn name_of(v: &OValue) -> Option<&str> {
     }
 }
 
-/// settings.json に決めたキーを合わせた値 (`before` は object)。`launch_args` が Some なら `config.launchArgs` もその値にする (None なら今の値を
-/// 残す)。合わせるキーの型が違えば誤り。
+/// settings.json に決めたキーを合わせた値 (`managed` は `load_managed` の値、`before` は object)。`launch_args` が Some なら `config.launchArgs` も
+/// その値にする (None なら今の値を残す)。合わせるキーの型が違えば誤り。
 pub fn merged(
+    managed: &OValue,
     before: &OValue,
     clear_entrypoint: bool,
     launch_args: Option<&str>,
 ) -> Result<OValue, String> {
-    let m = managed();
     let mut after = before.clone();
     {
         let providers = child_object(&mut after, "providerInstances", "providerInstances")?;
         let claude = child_object(providers, "claudeAgent", "providerInstances.claudeAgent")?;
-        claude.set("driver", managed_at(&m, &["claudeAgent", "driver"]).clone());
+        claude.set(
+            "driver",
+            managed_at(managed, &["claudeAgent", "driver"]).clone(),
+        );
         let config = child_object(claude, "config", "providerInstances.claudeAgent.config")?;
         config.set(
             "homePath",
-            managed_at(&m, &["claudeAgent", "homePath"]).clone(),
+            managed_at(managed, &["claudeAgent", "homePath"]).clone(),
         );
         if let Some(args) = launch_args {
             config.set("launchArgs", OValue::String(args.to_string()));
         }
-        let entry = managed_at(&m, &["entrypointEnvironment"]).clone();
+        let entry = managed_at(managed, &["entrypointEnvironment"]).clone();
         let entry_name = name_of(&entry)
             .expect("entrypointEnvironment の name")
             .to_string();
@@ -476,11 +511,11 @@ pub fn merged(
     }
     after.set(
         "defaultModelSelection",
-        managed_at(&m, &["defaultModelSelection"]).clone(),
+        managed_at(managed, &["defaultModelSelection"]).clone(),
     );
     after.set(
         "defaultThreadEnvMode",
-        managed_at(&m, &["defaultThreadEnvMode"]).clone(),
+        managed_at(managed, &["defaultThreadEnvMode"]).clone(),
     );
     Ok(after)
 }
@@ -515,6 +550,16 @@ mod tests {
         serde_json::to_string(v).unwrap()
     }
 
+    /// dotfiles の clone (cargo test の cwd は win/runner)
+    fn repo_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..")
+    }
+
+    /// repo の managed-settings.json
+    fn managed() -> OValue {
+        load_managed(&repo_root()).unwrap()
+    }
+
     const ENTRY: &str = r#"{"name":"CLAUDE_CODE_ENTRYPOINT","value":"","sensitive":false}"#;
     const DMS: &str = r#"{"instanceId":"claudeAgent","model":"claude-opus-5-5","options":[{"id":"effort","value":"high"}]}"#;
 
@@ -533,16 +578,58 @@ mod tests {
         );
     }
 
+    /// managed-settings.json は動くときに clone から読む。無い・object でない・合わせるキーが無ければ、わけを返す
+    #[test]
+    fn load_managed_reports_what_is_wrong() {
+        let t = TempDir::new("t3-managed");
+        let repo = t.path().join("dotfiles");
+        assert!(
+            load_managed(&repo)
+                .unwrap_err()
+                .contains("managed-settings.json が読めない")
+        );
+        t.write(&format!("dotfiles/{MANAGED_REL}"), "[]");
+        assert!(load_managed(&repo).unwrap_err().contains("object でない"));
+        t.write(&format!("dotfiles/{MANAGED_REL}"), "{");
+        assert!(
+            load_managed(&repo)
+                .unwrap_err()
+                .contains("JSON として読めない")
+        );
+        t.write(&format!("dotfiles/{MANAGED_REL}"), "{}");
+        assert!(
+            load_managed(&repo)
+                .unwrap_err()
+                .contains("claudeAgent.driver が無い")
+        );
+    }
+
+    /// clone に managed-settings.json が無ければ、手順は落ちて (Failed) settings.json を書かない
+    #[test]
+    fn step_fails_without_managed_settings() {
+        let t = TempDir::new("t3-no-managed");
+        let sys = pwsh(&["none"]);
+        let (outcomes, _) = run_step_in(&t, &sys, Mode::Apply { force: false }, ON, false);
+        assert!(
+            outcomes
+                .iter()
+                .any(|o| o.kind == Kind::Failed
+                    && o.text.contains("managed-settings.json が読めない")),
+            "{outcomes:?}"
+        );
+        assert!(!settings_file(&t).exists());
+    }
+
     #[test]
     fn merge_creates_only_the_managed_keys() {
-        let got = merged(&j("{}"), true, None).unwrap();
+        let got = merged(&managed(), &j("{}"), true, None).unwrap();
         assert_eq!(
             compact(&got),
             format!(
                 r#"{{"providerInstances":{{"claudeAgent":{{"driver":"claudeAgent","config":{{"homePath":"~/.claude-t3"}},"environment":[{ENTRY}]}}}},"defaultModelSelection":{DMS},"defaultThreadEnvMode":"worktree"}}"#
             )
         );
-        let got = merged(&j("{}"), false, None).unwrap();
+        let got = merged(&managed(), &j("{}"), false, None).unwrap();
         assert!(
             got.get("providerInstances")
                 .and_then(|p| p.get("claudeAgent"))
@@ -556,7 +643,7 @@ mod tests {
         let before = j(
             r#"{"idleCompaction":"onReturn","providerInstances":{"codex":{"driver":"codex"},"claudeAgent":{"driver":"old","config":{"launchArgs":"--x","homePath":"~/.claude"},"environment":[{"name":"A","value":"1","sensitive":false},{"name":"CLAUDE_CODE_ENTRYPOINT","value":"","sensitive":true,"secret":{"provider":"p","reference":"r"}},{"name":"B","value":"2","sensitive":false},{"name":"CLAUDE_CODE_ENTRYPOINT","value":"x","sensitive":false}]}},"defaultThreadEnvMode":"local","linkedEnvironmentsEnabled":true}"#,
         );
-        let got = merged(&before, true, None).unwrap();
+        let got = merged(&managed(), &before, true, None).unwrap();
         assert_eq!(
             compact(&got),
             format!(
@@ -564,7 +651,7 @@ mod tests {
             )
         );
         // off なら同じ名前の要素を全部外す
-        let got = merged(&before, false, None).unwrap();
+        let got = merged(&managed(), &before, false, None).unwrap();
         assert_eq!(
             compact(
                 got.get("providerInstances")
@@ -581,7 +668,7 @@ mod tests {
     #[test]
     fn merge_on_the_hand_written_settings() {
         let hand_written = r#"{"idleCompaction":"onReturn","linkedEnvironmentsEnabled":true,"providerInstances":{"claudeAgent":{"driver":"claudeAgent","config":{"homePath":"~/.claude-t3"},"environment":[{"name":"CLAUDE_CODE_ENTRYPOINT","value":""}]}}}"#;
-        let got = merged(&j(hand_written), true, None).unwrap();
+        let got = merged(&managed(), &j(hand_written), true, None).unwrap();
         assert_eq!(
             compact(&got),
             format!(
@@ -599,10 +686,10 @@ mod tests {
             r#"{"providerInstances":{"claudeAgent":{"environment":{"name":"x"}}}}"#,
             r#"{"providerInstances":{"claudeAgent":{"environment":["x"]}}}"#,
         ] {
-            assert!(merged(&j(bad), true, None).is_err(), "{bad}");
+            assert!(merged(&managed(), &j(bad), true, None).is_err(), "{bad}");
         }
         // null は無いのと同じ
-        assert!(merged(&j(r#"{"providerInstances":null}"#), true, None).is_ok());
+        assert!(merged(&managed(), &j(r#"{"providerInstances":null}"#), true, None).is_ok());
     }
 
     /// claudeAgent の config を compact に
@@ -623,7 +710,7 @@ mod tests {
         let before = j(
             r#"{"providerInstances":{"claudeAgent":{"config":{"launchArgs":"--x","homePath":"~/.claude","binaryPath":"claude"}}}}"#,
         );
-        let got = merged(&before, false, Some(ARGS)).unwrap();
+        let got = merged(&managed(), &before, false, Some(ARGS)).unwrap();
         let want_args = serde_json::to_string(ARGS).unwrap();
         assert_eq!(
             config_of(&got),
@@ -632,18 +719,18 @@ mod tests {
             )
         );
         // 無ければ homePath の後ろに足す
-        let got = merged(&j("{}"), false, Some(ARGS)).unwrap();
+        let got = merged(&managed(), &j("{}"), false, Some(ARGS)).unwrap();
         assert_eq!(
             config_of(&got),
             format!(r#"{{"homePath":"~/.claude-t3","launchArgs":{want_args}}}"#)
         );
         // 渡さなければ今の値を残し、無ければ作らない
-        let got = merged(&before, false, None).unwrap();
+        let got = merged(&managed(), &before, false, None).unwrap();
         assert_eq!(
             config_of(&got),
             r#"{"launchArgs":"--x","homePath":"~/.claude-t3","binaryPath":"claude"}"#
         );
-        let got = merged(&j("{}"), false, None).unwrap();
+        let got = merged(&managed(), &j("{}"), false, None).unwrap();
         assert_eq!(config_of(&got), r#"{"homePath":"~/.claude-t3"}"#);
     }
 
@@ -667,6 +754,21 @@ mod tests {
     }
 
     fn run_step(t: &TempDir, sys: &FakeSys, mode: Mode, host: &str) -> (Vec<Outcome>, String) {
+        run_step_in(t, sys, mode, host, true)
+    }
+
+    /// `with_managed` なら、一時の clone に repo の managed-settings.json を写してから流す (動くときに clone から読むので)
+    fn run_step_in(
+        t: &TempDir,
+        sys: &FakeSys,
+        mode: Mode,
+        host: &str,
+        with_managed: bool,
+    ) -> (Vec<Outcome>, String) {
+        if with_managed {
+            let text = std::fs::read_to_string(repo_root().join(MANAGED_REL)).unwrap();
+            t.write(&format!("dotfiles/{MANAGED_REL}"), &text);
+        }
         let mut out = Vec::new();
         let host =
             crate::host::parse(host, Path::new("h.toml"), Groups::embedded().unwrap()).unwrap();
@@ -722,7 +824,7 @@ mod tests {
         let written = j(&std::fs::read_to_string(&p).unwrap());
         assert_eq!(
             compact(&written),
-            compact(&merged(&j("{}"), true, None).unwrap())
+            compact(&merged(&managed(), &j("{}"), true, None).unwrap())
         );
         assert!(!t.path().join("state").join("t3-code-settings").exists());
         // そろっていれば書かない
