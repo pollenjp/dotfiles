@@ -412,6 +412,12 @@ pub fn load_managed(repo: &Path) -> Result<OValue, String> {
             return Err(format!("{} に {} が無い", path.display(), keys.join(".")));
         }
     }
+    if m.get("entrypointEnvironment").and_then(name_of).is_none() {
+        return Err(format!(
+            "{} の entrypointEnvironment に文字列の name が無い",
+            path.display()
+        ));
+    }
     Ok(m)
 }
 
@@ -601,6 +607,15 @@ mod tests {
             load_managed(&repo)
                 .unwrap_err()
                 .contains("claudeAgent.driver が無い")
+        );
+        t.write(
+            &format!("dotfiles/{MANAGED_REL}"),
+            r#"{"claudeAgent":{"driver":"d","homePath":"h"},"entrypointEnvironment":{},"defaultModelSelection":{},"defaultThreadEnvMode":"w"}"#,
+        );
+        assert!(
+            load_managed(&repo)
+                .unwrap_err()
+                .contains("文字列の name が無い")
         );
     }
 

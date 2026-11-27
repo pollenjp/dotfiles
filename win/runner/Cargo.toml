@@ -25,7 +25,8 @@ toml = { version = "1.2.1", default-features = false, features = ["std", "parse"
 # OS の API は外のコマンド (pwsh・git・cmd) で呼ぶ。unsafe を書く所を作らない
 unsafe_code = "deny"
 
-# dotfiles 関数 (win/powershell/dotfiles.ps1) は打つたびに cargo run --release を通す。速さより、pull の後の作り直しの短さを取る
+# 配る exe は CI (.github/workflows/win-runner-release.yml) がこの profile で作る。dotfiles 関数 (win/powershell/Invoke-DotfilesRunner.ps1) は、
+# 合う Release の exe が無いとき (手元で直している・merge の直後) だけ cargo run --release を通す。速さより、作り直しの短さを取る
 # (runner はほとんどの時間 pwsh を待っていて、最適化の差は出ない。claude-skills の Rust の道具と同じ)
 [profile.release]
 opt-level = 1

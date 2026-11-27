@@ -53,9 +53,12 @@ jobs:
     outputs:
       key: ${{ steps.key.outputs.key }}
     steps:
+      # PR は merge の結果でなく PR の head を build する (key を PR の branch の win/runner と同じにし、artifact の exe を、PR の branch を
+      # checkout した PC の置き場にそのまま置いて試せるように。merge の結果の確かめは win-runner.yml)
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
 
       - name: key (win/runner の git の tree の hash)
         id: key
@@ -75,7 +78,7 @@ jobs:
         working-directory: win/runner
         env:
           DOTFILES_WIN_RUNNER_KEY: ${{ steps.key.outputs.key }}
-          DOTFILES_WIN_RUNNER_COMMIT: ${{ github.sha }}
+          DOTFILES_WIN_RUNNER_COMMIT: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
         run: cargo build --release --locked
 
       # Visual C++ の再頒布可能パッケージの無い Windows (Build Tools を入れない minimum の PC) でも起きること
@@ -151,6 +154,10 @@ jobs:
       (github.event_name == 'workflow_dispatch' && inputs.publish))
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # 同じ key の公開を並べない (draft を消し合う・作るのがぶつかる)。待っている同じ key の公開は、後から来たものに取り消されてよい (同じ中身)
+    concurrency:
+      group: win-runner-publish-${{ needs.build.outputs.key }}
+      cancel-in-progress: false
     permissions:
       contents: write
       id-token: write

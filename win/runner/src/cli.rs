@@ -367,7 +367,7 @@ pub fn claude_entry(
     }
 }
 
-/// `--repo` が無いときの clone。Release の exe (`release_key` がある。`build_info::KEY`) は bootstrap が clone する所
+/// `--repo` が無いときの clone。Release の exe (`release_key` がある。`build_info::key()`) は bootstrap が clone する所
 /// (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles`。build した場所は CI のパスなので使えない)、手元の build は build した clone
 /// (`win/runner` の 2 つ上)。
 pub fn default_repo(release_key: Option<&str>, sys: &dyn Sys) -> Result<PathBuf, String> {
@@ -405,10 +405,10 @@ pub fn check_runner_key(expected: Option<&str>, repo: &Path, sys: &dyn Sys) -> R
             .arg(repo.as_os_str())
             .arg("rev-parse")
             .arg("HEAD:win/runner")
-            .stdout_only()
             .timeout(Duration::from_secs(30)),
         &mut |_| {},
     );
+    // 出力は stdout と stderr (落ちたときに git の文 (dubious ownership など) を添える)。うまくいけば hash の 1 行だけ
     let got = r
         .output
         .iter()
@@ -418,7 +418,7 @@ pub fn check_runner_key(expected: Option<&str>, repo: &Path, sys: &dyn Sys) -> R
         .to_string();
     if r.code() != Some(0) || !crate::build_info::is_object_name(&got) {
         return Err(format!(
-            "clone ({shown}) の HEAD の win/runner を読めない (git -C '{shown}' rev-parse HEAD:win/runner。{:?})。この runner の exe は、clone に合うかを確かめてから流す → PowerShell の dotfiles 関数から打つ",
+            "clone ({shown}) の HEAD の win/runner を読めない (git -C '{shown}' rev-parse HEAD:win/runner。{:?}。{got})。この runner の exe は、clone に合うかを確かめてから流す → PowerShell の dotfiles 関数から打つ",
             r.exit
         ));
     }
@@ -468,7 +468,8 @@ pub fn run(args: &[String], sys: &dyn Sys, out: &mut dyn Write, err: &mut dyn Wr
             return 0;
         }
         Command::Version => {
-            for l in crate::build_info::lines(crate::build_info::KEY, crate::build_info::COMMIT) {
+            for l in crate::build_info::lines(crate::build_info::key(), crate::build_info::commit())
+            {
                 let _ = writeln!(out, "{l}");
             }
             return 0;
@@ -478,7 +479,7 @@ pub fn run(args: &[String], sys: &dyn Sys, out: &mut dyn Write, err: &mut dyn Wr
     // 相対パスの --repo は絶対パスにする (隣の clone・控え (claude-skills-dir)・cargo install --path が、cwd を移した後に別の場所を指さない)
     let repo = match a.repo.clone() {
         Some(p) => std::path::absolute(&p).unwrap_or(p),
-        None => match default_repo(crate::build_info::KEY, sys) {
+        None => match default_repo(crate::build_info::key(), sys) {
             Ok(r) => r,
             Err(e) => {
                 let _ = writeln!(err, "{}", error_line(sys, e));
@@ -486,7 +487,7 @@ pub fn run(args: &[String], sys: &dyn Sys, out: &mut dyn Write, err: &mut dyn Wr
             }
         },
     };
-    if let Err(e) = check_runner_key(crate::build_info::KEY, &repo, sys) {
+    if let Err(e) = check_runner_key(crate::build_info::key(), &repo, sys) {
         let _ = writeln!(err, "{}", error_line(sys, e));
         return 2;
     }
@@ -909,10 +910,10 @@ mod tests {
 
             let broken = FakeSys::new(|_| answer(128, &["fatal: not a git repository"]))
                 .with_program("git", "/fake/git");
+            let e = check_runner_key(Some(K), Path::new("/r"), &broken).unwrap_err();
             assert!(
-                check_runner_key(Some(K), Path::new("/r"), &broken)
-                    .unwrap_err()
-                    .contains("読めない")
+                e.contains("読めない") && e.contains("fatal: not a git repository"),
+                "{e}"
             );
 
             let no_git = FakeSys::new(|_| answer(0, &[K]));

@@ -460,7 +460,8 @@ HEAD の runner に合う exe を落として起こす。minimum の PC に Visu
   `dotfiles-win.exe.sha256` (`<64 字の 16 進>  dotfiles-win.exe`)。URL は `https://github.com/pollenjp/dotfiles/releases/download/<tag>/<asset>` で、
   launcher は REST API を呼ばない
 - **置き場**: `%LOCALAPPDATA%\dotfiles\runner\<key>\` に exe と `.sha256` を置き、exe が `dotfiles-win.exe version` で名乗る key を確かめたら印
-  `verified` を置く。新しい方から 3 つの key のディレクトリを残し、ほかは消す
+  `verified` (頭は確かめた exe の sha256。exe を替えたら確かめ直す) を置く。新しい方から 3 つの key のディレクトリを残し、ほかは消す。片方だけが
+  残っている置き場 (exe だけを手で置いた・消しかけて止まった) は、落とした物で両方を置き換える
 - **確かめ方**: 落とした exe の sha256 を `.sha256` と比べ、合うときだけ置く。置いた後に 1 回だけ `version` を打って key を比べる (起こせなければ、
   ここで Smart App Control などに止められたと分かる)。key を埋めた exe は、clone の HEAD の `win/runner` が自分の key と違えば流さない (終了コード 2)
 - **来歴**: CI は exe に build の attestation を作る。gh のある PC で `gh attestation verify dotfiles-win.exe -R pollenjp/dotfiles` を打てば、どの
@@ -478,13 +479,17 @@ HEAD の runner に合う exe を落として起こす。minimum の PC に Visu
 | 置き場に無い | 落として確かめてから起こす | 同じ | 同じ |
 | `win/runner` に commit していない変更がある (手元で直している) | cargo があれば build する (1 行知らせる)。無ければ ⚠ を出して HEAD の exe で流す (変更は効かない) | ⚠ を出して HEAD の exe | 同じ |
 | 落とせない (Release が無い (404)・つながらない) | cargo があれば build する (1 行知らせる)。無ければ直し方を出して止まる (終了コード 2) | 止まる | 同じ |
+| exe を起こせない・`version` が 0 でなく終わった (Smart App Control・App Control・AppLocker に止められた・DLL が無い) | cargo があれば build する (1 行知らせる。`%LOCALAPPDATA%` の exe を止める決まりでも、clone の中で作った exe は通ることがある)。無ければわけを出して止まる | 止まる | 同じ |
 | sha256・key が合わない・置き場の中身が `.sha256` と合わない | cargo があっても build に戻らずに止まる (終了コード 2。置き場を消して打ち直すと落とし直す) | 同じ | 同じ |
 
 - Release が無いのは、merge の直後で CI がまだ作り終えていない (数分待つ)・clone が古く、その key の Release が消えた (`dotfiles --self-update` で
   進める)・`win/runner` を変えた commit が手元にある (push して merge するか、`Install-Bootstrap.ps1 -Rust` で build できるようにする) のどれか
+- 配った exe を使えずに cargo へ回り、cargo が終了コード 101 で終わったら (Build Tools が無く build できないなど)、上の直し方を出す。rustup だけが
+  入っていて Build Tools の無い PC (前の bootstrap が Build Tools で落ちた PC) は、rustup を外すと、cargo へ回らずに直し方がすぐ出る
 - github.com に届かない PC は、別の PC で落とした 2 つのファイル (`dotfiles-win.exe` と `dotfiles-win.exe.sha256`) を、置き場の key のディレクトリに
   置けば使う (sha256 と key は確かめる)。PR の exe を試すときも同じ手 (gh のある PC で PR の CI の artifact `dotfiles-win-<key>` を
-  `gh run download` で落として置く。key は PR の branch の `git rev-parse HEAD:win/runner`)
+  `gh run download` で落とし、試す PC の clone を PR の branch にして、artifact の名前の key のディレクトリに置く。PR の CI は PR の head を build
+  するので、artifact の key は PR の branch の `git rev-parse HEAD:win/runner` と同じ)
 
 公開 (CI):
 
@@ -2075,10 +2080,11 @@ Linux の pwsh で流すので Windows には触らない。CI の `lint` ([`.gi
 flake が固定している nixpkgs の pwsh で全部を流す (`Start-PortForward.Tests.ps1` は PATH の ssh を引くので、nixpkgs の
 openssh も渡す。`dotfiles.Tests.ps1` は PATH に ghq と fzf があれば cdrepo を本物でも流すので、nixpkgs の ghq と fzf も渡す。
 `Invoke-DotfilesSelfUpdate.Tests.ps1` は PATH の git で一時の repo と手元の remote を作って `dotfiles --self-update` を流す。git の設定は一時の空のファイルに
-し、git が無ければその試験を飛ばす)。手元で同じことをするには、repo の root で:
+し、git が無ければその試験を飛ばす。`Invoke-DotfilesRunner.Tests.ps1` は PATH の git で一時の repo を作って launcher を流し、python3 があれば手元の HTTP
+server から runner の exe を落とす組も流す (無ければその組を飛ばす))。手元で同じことをするには、repo の root で:
 
 ```sh
-nix shell --inputs-from ./nix nixpkgs#powershell nixpkgs#openssh nixpkgs#ghq nixpkgs#fzf --command bash -c '
+nix shell --inputs-from ./nix nixpkgs#powershell nixpkgs#openssh nixpkgs#ghq nixpkgs#fzf nixpkgs#python3 --command bash -c '
   rc=0; for t in win/*/*.Tests.ps1; do pwsh -NoProfile -NonInteractive -File "$t" || rc=1; done; exit "$rc"'
 ```
 

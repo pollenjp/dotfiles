@@ -15,7 +15,8 @@
 #   2. 無ければ、<commit> を親にして tree を同じにした Release 用の commit を git の API で作り、その commit に tag を付けて Release を作る
 #      (prerelease。asset は <dist> の dotfiles-win.exe と dotfiles-win.exe.sha256)。tag を main の外の commit に付けるのは、clone の
 #      git fetch に tag を拾わせないため
-#   3. win-runner- の Release のうち、30 日より古いものを、新しい方から 20 本を残して消す (tag も)
+#   3. win-runner- の Release のうち、30 日より古いものを、新しい方から 20 本を残して消す (tag も)。今の key の Release は消さない (30 日より前の
+#      中身に戻した push でも、main の HEAD に合う exe を残す)
 # --dry-run: 何も書かず、すること (作る・作らない・消す) を出す
 # --state: Release の様子 (none・draft・published) だけを 1 行で出す (公開の job が attestation を作るかを決める)
 #
@@ -89,7 +90,7 @@ verify_published() {
   (cd "${dir}" && sha256sum --check --strict dotfiles-win.exe.sha256) || return 1
 }
 
-# 消す Release の tag (30 日より古く、新しい方から 20 本に入らないもの)
+# 消す Release の tag (30 日より古く、新しい方から 20 本に入らないもの。今の key の tag は除く)
 stale_tags() {
   local cutoff
   local listed
@@ -99,7 +100,7 @@ stale_tags() {
   listed=$(gh release list --limit 1000 --json tagName,createdAt \
     --jq '.[] | select(.tagName | startswith("win-runner-")) | [.createdAt, .tagName] | @tsv' </dev/null) || return 1
   while IFS=$'\t' read -r created name; do
-    [[ -n ${name} ]] || continue
+    [[ -n ${name} && ${name} != "${tag}" ]] || continue
     i=$((i + 1))
     if ((i > keep_newest)) && [[ ${created} < ${cutoff} ]]; then
       printf '%s\n' "${name}"

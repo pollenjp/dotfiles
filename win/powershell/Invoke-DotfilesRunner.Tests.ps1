@@ -17,11 +17,15 @@
 #     git が無い・key を読めない → cargo があれば build・無ければ止める、cargo のモード → いつも build、exe のモード → cargo に戻らない
 #   - 落とせないとき: 自動で cargo があれば build (1 行知らせる)、無ければ直し方の 4 行で止める。sha256・key が合わない (Hard) なら、cargo が
 #     あっても止める
-#   - 起こせないわけ: 4551 (Application Control) は Smart App Control の直し方
+#   - 起こせないわけ: 4551 (Application Control)・1260 (グループ ポリシー・AppLocker) は Smart App Control・App Control の直し方。起こせない (launch) は
+#     自動で cargo があれば cargo に戻り、無ければわけと cargo の道の 1 行で止まる。key を読めないわけには git の文を添える
 #   - 通し (Linux): clone の key と、commit していない変更 (未追跡のファイルも) を git で読む。置き場に置いた exe と正しい .sha256 なら落とさずに
 #     起こし、--repo <clone> を渡し、終了コードは exe のもの、印 verified を置く。.sha256 を壊すと cargo があっても打たずに 2 で止まる。
 #     DOTFILES_RUNNER=cargo なら win/runner で cargo run --quiet --release --locked -- <引数> を打つ。落とせない (つながらない) と、cargo が
-#     あれば cargo を打ち、無ければ直し方を出して 2
+#     あれば cargo を打ち、無ければ直し方を出して 2。cargo へ回って 101 なら直し方を出す (明示の cargo のモードでは出さない)。置き場の exe を
+#     替えたら印を作り直す
+#   - 通し (Linux・python3 の HTTP server): exe だけが置き場に残っていれば起こさずに落とした物で置き換える・落とした物を起こせなければ (exe の
+#     モード) 2、自動で cargo があれば cargo・Release の sha256 が合わなければ cargo があっても 2 で置かない・404 は直し方を出して 2
 #
 # BOM 付きの UTF-8 で保存すること (win/README.md の「dotfiles.ps1 を書くときの注意」)。
 $ErrorActionPreference = 'Stop'
@@ -153,24 +157,32 @@ Test-Case '決まり: cargo のモードはいつも build' 'cargo|notes=1|warn=
 Test-Case '決まり: exe のモードは、変更があっても cargo に戻らず ⚠' 'cached|notes=0|warn=1|error=False' { Format-Decision -Mode 'exe' -Dirty $true -HaveCargo $true -Cached $true }
 Test-Case '決まり: exe のモードは、git が無ければ cargo があっても止める' 'error|notes=0|warn=0|error=True' { Format-Decision -Mode 'exe' -HaveGit $false -Key '' -HaveCargo $true }
 
-function Format-Fallback {
-    param([string]$Mode = 'auto', [bool]$HaveCargo = $false, [bool]$Hard = $false)
-    $f = Get-DotfilesRunnerFallback -Mode $Mode -HaveCargo $HaveCargo -Hard $Hard -Reason 'Release が無い (HTTP 404)' -CacheDir 'D'
-    "$($f.Action)|hints=$(@($f.Hints).Count)"
+Test-Case '決まり: key を読めないわけに git の文を添える' $true {
+    $d = Get-DotfilesRunnerDecision -Mode 'auto' -HaveGit $true -Key '' -Dirty $false -HaveCargo $false -Cached $false -GitMessage 'fatal: detected dubious ownership'
+    $d.Error -like '*git で読めない (fatal: detected dubious ownership)*'
 }
-Test-Case '落とせない: 自動で cargo があれば build' 'cargo|hints=0' { Format-Fallback -HaveCargo $true }
-Test-Case '落とせない: cargo が無ければ直し方の 4 行で止める' 'error|hints=4' { Format-Fallback }
+
+function Format-Fallback {
+    param([string]$Mode = 'auto', [bool]$HaveCargo = $false, [string]$Kind = 'download')
+    $f = Get-DotfilesRunnerFallback -Mode $Mode -HaveCargo $HaveCargo -Kind $Kind -Reason 'Release が無い (HTTP 404)' -CacheDir 'D'
+    "$($f.Action)|hints=$(@($f.Hints).Count)|error=$([bool]$f.Error)"
+}
+Test-Case '落とせない: 自動で cargo があれば build' 'cargo|hints=0|error=False' { Format-Fallback -HaveCargo $true }
+Test-Case '落とせない: cargo が無ければ直し方の 4 行で止める' 'error|hints=4|error=True' { Format-Fallback }
 Test-Case '落とせない: 直し方は数分待つ・--self-update・-Rust・手で置く' $true {
     $h = @(Get-DotfilesRunnerHints -CacheDir 'D')
     ($h[0] -like '*数分待って*') -and ($h[1] -like '*dotfiles --self-update*') -and ($h[2] -like '*-Rust*') -and ($h[3] -like '*D に置く*')
 }
-Test-Case '合わない (Hard): cargo があっても止める' 'error|hints=2' { Format-Fallback -HaveCargo $true -Hard $true }
-Test-Case '落とせない: exe のモードは cargo に戻らない' 'error|hints=4' { Format-Fallback -Mode 'exe' -HaveCargo $true }
+Test-Case '合わない (hard): cargo があっても止める' 'error|hints=2|error=True' { Format-Fallback -HaveCargo $true -Kind 'hard' }
+Test-Case '落とせない: exe のモードは cargo に戻らない' 'error|hints=4|error=True' { Format-Fallback -Mode 'exe' -HaveCargo $true }
+Test-Case '起こせない (launch): 自動で cargo があれば build (clone の中で作った exe は通ることがある)' 'cargo|hints=0|error=False' { Format-Fallback -HaveCargo $true -Kind 'launch' }
+Test-Case '起こせない (launch): cargo が無ければ、わけと cargo の道の 1 行で止める' 'error|hints=1|error=True' { Format-Fallback -Kind 'launch' }
 
 Test-Case '起こせない: 4551 は Smart App Control の直し方' $true { (Get-DotfilesRunnerLaunchHint -Message 'x' -NativeErrorCode 4551) -like '*Smart App Control*' }
 Test-Case '起こせない: Application Control の文も Smart App Control の直し方' $true {
     (Get-DotfilesRunnerLaunchHint -Message 'An Application Control policy has blocked this file' -NativeErrorCode 0) -like '*スマート アプリ コントロール*'
 }
+Test-Case '起こせない: 1260 (グループ ポリシー・AppLocker) も App Control の直し方' $true { (Get-DotfilesRunnerLaunchHint -Message 'x' -NativeErrorCode 1260) -like '*AppLocker*' }
 Test-Case '起こせない: ほかは元の文' 'boom' { Get-DotfilesRunnerLaunchHint -Message 'boom' -NativeErrorCode 5 }
 
 # ---------------------------------------------------------------------------
@@ -220,19 +232,19 @@ if (([IO.Path]::DirectorySeparatorChar -eq '\') -or (-not $git)) {
         }
 
         # 子の pwsh で launcher を流す。PATH は git の dir だけ (本物の cargo を見せない)、HOME・CARGO_HOME は一時ディレクトリ。-WithCargo なら
-        # cargo は、打たれた場所と引数を出して 7 で終わる偽物の関数
+        # cargo は、打たれた場所と引数を出して -CargoExit (既定 7) で終わる偽物の関数
         function Invoke-LauncherChild {
-            param([string]$LocalAppData, [string]$RunnerArgs, [switch]$WithCargo, [string]$Mode = '', [string]$BaseUrl = '')
+            param([string]$LocalAppData, [string]$RunnerArgs, [switch]$WithCargo, [string]$Mode = '', [string]$BaseUrl = '', [int]$CargoExit = 7)
             $child = Join-Path $root 'child.ps1'
             $body = @(
                 'param([string]$Launcher, [string]$Clone, [string]$RunnerArgs, [string]$WithCargo)'
-                'if ($WithCargo -eq ''1'') { function cargo { "cargo-cwd=$((Get-Location).Path)"; "cargo-args=$($args -join ''|'')"; $global:LASTEXITCODE = 7 } }'
+                'if ($WithCargo -eq ''1'') { function cargo { "cargo-cwd=$((Get-Location).Path)"; "cargo-args=$($args -join ''|'')"; $global:LASTEXITCODE = [int]$env:FAKE_CARGO_EXIT } }'
                 '$a = @($RunnerArgs -split ''\|'' | Where-Object { $_ })'
                 '& $Launcher $Clone @a'
                 '"code=$LASTEXITCODE"'
             ) -join "`n"
             Set-Content -LiteralPath $child -Value $body -Encoding utf8
-            $names = @('HOME', 'USERPROFILE', 'LOCALAPPDATA', 'PATH', 'CARGO_HOME', 'DOTFILES_RUNNER', 'DOTFILES_RUNNER_BASE_URL', 'NO_COLOR')
+            $names = @('HOME', 'USERPROFILE', 'LOCALAPPDATA', 'PATH', 'CARGO_HOME', 'DOTFILES_RUNNER', 'DOTFILES_RUNNER_BASE_URL', 'NO_COLOR', 'FAKE_CARGO_EXIT')
             $saved = @{}
             foreach ($n in $names) { $saved[$n] = [Environment]::GetEnvironmentVariable($n) }
             $ErrorActionPreference = 'Continue'
@@ -245,6 +257,7 @@ if (([IO.Path]::DirectorySeparatorChar -eq '\') -or (-not $git)) {
                 $env:DOTFILES_RUNNER = $Mode
                 $env:DOTFILES_RUNNER_BASE_URL = $BaseUrl
                 $env:NO_COLOR = '1'
+                $env:FAKE_CARGO_EXIT = "$CargoExit"
                 $flag = '0'
                 if ($WithCargo) { $flag = '1' }
                 $pwsh = (Get-Process -Id $PID).Path
@@ -298,6 +311,108 @@ if (([IO.Path]::DirectorySeparatorChar -eq '\') -or (-not $git)) {
         $out = @(Invoke-LauncherChild -LocalAppData $lad -RunnerArgs 'check' -WithCargo -BaseUrl 'http://127.0.0.1:9/')
         Test-Case '通し: 変更があり cargo があれば build する' '7 0' {
             "$(Get-ChildValue $out 'code') $(@($out | Where-Object { $_ -like 'fake-exe-args=*' }).Count)"
+        }
+
+        # 変更を戻す (ここから下は変更の無い clone)
+        $null = & $git -C $clone checkout --quiet -- win/runner 2>&1
+
+        $out = @(Invoke-LauncherChild -LocalAppData $lad -RunnerArgs 'check' -WithCargo -CargoExit 101 -BaseUrl 'http://127.0.0.1:9/' -Mode 'cargo')
+        Test-Case '通し: 明示の cargo のモードの 101 には、Release の直し方を出さない' '101 0' {
+            "$(Get-ChildValue $out 'code') $(@($out | Where-Object { $_ -like '!! cargo が終了コード 101*' }).Count)"
+        }
+        $out = @(Invoke-LauncherChild -LocalAppData (Join-Path $root 'lad7') -RunnerArgs 'check' -WithCargo -CargoExit 101 -BaseUrl 'http://127.0.0.1:9/')
+        Test-Case '通し: 落とせずに cargo へ回って 101 なら、合う exe を得る直し方を出す' '101 True True' {
+            "$(Get-ChildValue $out 'code') $([bool]($out | Where-Object { $_ -like '!! cargo が終了コード 101*' })) $([bool]($out | Where-Object { $_ -like '  → merge の直後なら*' }))"
+        }
+
+        # 置き場の exe を替えたら、印 verified を作り直す (印の頭は確かめた exe の sha256)
+        $lad = Join-Path $root 'lad8'
+        $dir = Set-FakeExe -LocalAppData $lad -Key $key
+        $null = Invoke-LauncherChild -LocalAppData $lad -RunnerArgs 'list' -BaseUrl 'http://127.0.0.1:9/'
+        $firstMark = @(([IO.File]::ReadAllText((Join-Path $dir 'verified'))).Trim() -split '\s+')[0]
+        Test-Case '通し: 印の頭は確かめた exe の sha256' $true { $firstMark -ceq (Get-DotfilesRunnerFileSha256 -Path (Join-Path $dir 'dotfiles-win.exe')) }
+        [IO.File]::AppendAllText((Join-Path $dir 'dotfiles-win.exe'), "# changed`n")
+        [IO.File]::WriteAllText((Join-Path $dir 'dotfiles-win.exe.sha256'), "$(Get-DotfilesRunnerFileSha256 -Path (Join-Path $dir 'dotfiles-win.exe'))  dotfiles-win.exe`n")
+        $out = @(Invoke-LauncherChild -LocalAppData $lad -RunnerArgs 'list' -BaseUrl 'http://127.0.0.1:9/')
+        Test-Case '通し: exe を替えたら version で確かめ直し、印を新しい exe のものにする' '5 True' {
+            $mark = @(([IO.File]::ReadAllText((Join-Path $dir 'verified'))).Trim() -split '\s+')[0]
+            "$(Get-ChildValue $out 'code') $($mark -ceq (Get-DotfilesRunnerFileSha256 -Path (Join-Path $dir 'dotfiles-win.exe')))"
+        }
+
+        # 手元の HTTP server (python3 -m http.server) から落とす。Linux では落とした物に実行の bit が無いので、version で起こせない (起こせないときの道を
+        # 確かめる。起こせる道は Windows の CI の .github/scripts/win-runner-e2e.ps1)
+        $python = Find-DotfilesRunnerApplication -Name 'python3'
+        if (-not $python) {
+            Write-Host 'skip 通し: 手元の HTTP server から落とす (python3 が要る)'
+        } else {
+            $serve = Join-Path $root 'serve'
+            $tag = Get-DotfilesRunnerTag -Key $key
+            $releaseBody = "release-exe-for-$key`n"
+            foreach ($kind in @('good', 'bad')) {
+                $rel = [IO.Path]::Combine($serve, $kind, $tag)
+                $null = New-Item -ItemType Directory -Force -Path $rel
+                [IO.File]::WriteAllText((Join-Path $rel 'dotfiles-win.exe'), $releaseBody)
+                $sha = Get-DotfilesRunnerFileSha256 -Path (Join-Path $rel 'dotfiles-win.exe')
+                if ($kind -eq 'bad') { $sha = '0' * 64 }
+                [IO.File]::WriteAllText((Join-Path $rel 'dotfiles-win.exe.sha256'), "$sha  dotfiles-win.exe`n")
+            }
+            $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+            $listener.Start()
+            $port = $listener.LocalEndpoint.Port
+            $listener.Stop()
+            $server = Start-Process -FilePath $python -ArgumentList @('-m', 'http.server', "$port", '--bind', '127.0.0.1', '--directory', $serve) -PassThru -RedirectStandardError (Join-Path $root 'server.err') -RedirectStandardOutput (Join-Path $root 'server.out')
+            try {
+                $base = "http://127.0.0.1:$port"
+                $ready = $false
+                for ($i = 0; ($i -lt 100) -and (-not $ready); $i++) {
+                    try {
+                        $null = Invoke-WebRequest -Uri "$base/good/$tag/dotfiles-win.exe.sha256" -UseBasicParsing -TimeoutSec 2
+                        $ready = $true
+                    } catch {
+                        Start-Sleep -Milliseconds 100
+                    }
+                }
+                Test-Case '通し (HTTP): 手元の HTTP server が答える' $true { $ready }
+                $releaseSha = Get-DotfilesRunnerFileSha256 -Path ([IO.Path]::Combine($serve, 'good', $tag, 'dotfiles-win.exe'))
+
+                # exe だけが置き場に残っている (.sha256 が無い): 残った exe を起こさず、落とした物で置き換える
+                $lad = Join-Path $root 'lad-h1'
+                $dir = Set-FakeExe -LocalAppData $lad -Key $key
+                Remove-Item -LiteralPath (Join-Path $dir 'dotfiles-win.exe.sha256')
+                $out = @(Invoke-LauncherChild -LocalAppData $lad -RunnerArgs 'list' -Mode 'exe' -BaseUrl "$base/good")
+                Test-Case '通し (HTTP): exe だけが残っていれば、それを起こさず落とした物で置き換える' "0 True" {
+                    "$(@($out | Where-Object { $_ -like 'fake-exe-args=*' }).Count) $((Get-DotfilesRunnerFileSha256 -Path (Join-Path $dir 'dotfiles-win.exe')) -ceq $releaseSha)"
+                }
+                Test-Case '通し (HTTP): 落とした物を起こせなければ (exe のモード) 2 で止まり、わけを出す' '2 True' {
+                    "$(Get-ChildValue $out 'code') $([bool]($out | Where-Object { $_ -like '!! *exe を起こせない*' }))"
+                }
+
+                # 落とした物を起こせない (自動・cargo あり): cargo に回り、そう知らせる
+                $lad = Join-Path $root 'lad-h2'
+                $out = @(Invoke-LauncherChild -LocalAppData $lad -RunnerArgs 'check' -WithCargo -BaseUrl "$base/good")
+                # 文字列の中の $( ) に、( の数の合わない引用符の字を書かない (PowerShell が $( ) の閉じを見失う)。先に変数に取る
+                $toldCargo = [bool]($out | Where-Object { $_ -like '· 配った runner の exe を使えない (exe を起こせない*手元で build する (cargo)' })
+                $downloaded = [bool]($out | Where-Object { $_ -like '==> runner の exe を落とす*' })
+                Test-Case '通し (HTTP): 落として sha256 は合ったが起こせなければ、自動で cargo があれば cargo を打つ' '7 True True' {
+                    "$(Get-ChildValue $out 'code') $toldCargo $downloaded"
+                }
+                Test-Case '通し (HTTP): 起こせなかった exe には印を置かない' $false { Test-Path -LiteralPath ([IO.Path]::Combine($lad, 'dotfiles', 'runner', $key, 'verified')) }
+
+                # sha256 が合わない Release: cargo があっても打たずに 2。置き場に置かない
+                $lad = Join-Path $root 'lad-h3'
+                $out = @(Invoke-LauncherChild -LocalAppData $lad -RunnerArgs 'check' -WithCargo -BaseUrl "$base/bad")
+                Test-Case '通し (HTTP): Release の sha256 が合わなければ、cargo があっても 2 で止まり、置かない' '2 0 False' {
+                    "$(Get-ChildValue $out 'code') $(@($out | Where-Object { $_ -like 'cargo-*' }).Count) $(Test-Path -LiteralPath ([IO.Path]::Combine($lad, 'dotfiles', 'runner', $key, 'dotfiles-win.exe')))"
+                }
+
+                # Release が無い (404): cargo が無ければ直し方を出して 2
+                $out = @(Invoke-LauncherChild -LocalAppData (Join-Path $root 'lad-h4') -RunnerArgs 'check' -BaseUrl "$base/none")
+                Test-Case '通し (HTTP): Release が無ければ (404)、cargo が無いと直し方を出して 2' '2 True True' {
+                    "$(Get-ChildValue $out 'code') $([bool]($out | Where-Object { $_ -like '*HTTP 404*' })) $([bool]($out | Where-Object { $_ -like '  → merge の直後なら*' }))"
+                }
+            } finally {
+                if (-not $server.HasExited) { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue }
+            }
         }
     } finally {
         $env:GIT_CONFIG_GLOBAL = $savedGit.GLOBAL

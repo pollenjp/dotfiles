@@ -12,12 +12,21 @@
 #   - 2 回目は落とさずに、置き場のものを使う
 #   - .sha256 が合わない Release からは置かずに、終了コード 2 で止まる
 #   - Release が無い (404) なら、直し方を出して終了コード 2 で止まる
+#
+# 判定は終了コード・置いたファイル・ASCII の字 (tag・HTTP 404・dotfiles --self-update) で見る (windows-latest のコンソールの既定の文字コードでは、
+# 子の pwsh が出す日本語が ? に化けることがある。読めるログのために、コンソールは UTF-8 にもしておく)
 param(
     [Parameter(Mandatory = $true)][string]$Dist,
     [Parameter(Mandatory = $true)][string]$Clone
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+try {
+    [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
+    $OutputEncoding = New-Object System.Text.UTF8Encoding $false
+} catch {
+    Write-Host "コンソールの文字コードを UTF-8 にできなかった ($($_.Exception.Message))"
+}
 
 $launcher = Join-Path $Clone 'win\powershell\Invoke-DotfilesRunner.ps1'
 $hostFile = Join-Path $Clone 'win\templates\host.minimum.toml'
@@ -89,21 +98,21 @@ try {
     $cache = [IO.Path]::Combine($lad, 'dotfiles', 'runner', $key)
     $r = Invoke-Launcher -LocalAppData $lad -BaseUrl "$base/good"
     Assert-That '置き場が空なら落として流す (list が 0)' ($r.Code -eq 0) $r.Lines
-    Assert-That '落とすことを出す' ([bool]($r.Lines | Where-Object { $_ -like "==> runner の exe を落とす: $tag*" })) $r.Lines
+    Assert-That '落とすことを出す (==> と tag の行)' ([bool]($r.Lines | Where-Object { ($_ -like '==> *') -and ($_ -like "*$tag*") })) $r.Lines
     $placed = @('dotfiles-win.exe', 'dotfiles-win.exe.sha256', 'verified' | Where-Object { Test-Path -LiteralPath (Join-Path $cache $_) -PathType Leaf })
     Assert-That '置き場に exe・.sha256・印 verified を置く' ($placed.Count -eq 3) @("placed: $($placed -join ', ')")
 
     $r = Invoke-Launcher -LocalAppData $lad -BaseUrl "$base/good"
-    Assert-That '2 回目は落とさず、置き場のものを使う' (($r.Code -eq 0) -and -not ($r.Lines | Where-Object { $_ -like '==> runner の exe を落とす*' })) $r.Lines
+    Assert-That '2 回目は落とさず、置き場のものを使う' (($r.Code -eq 0) -and -not ($r.Lines | Where-Object { ($_ -like '==> *') -and ($_ -like "*$tag*") })) $r.Lines
 
     $lad = Join-Path $root 'lad2'
     $r = Invoke-Launcher -LocalAppData $lad -BaseUrl "$base/bad"
     $badExe = [IO.Path]::Combine($lad, 'dotfiles', 'runner', $key, 'dotfiles-win.exe')
     Assert-That '.sha256 が合わなければ 2 で止まり、置かない' (($r.Code -eq 2) -and -not (Test-Path -LiteralPath $badExe)) $r.Lines
-    Assert-That '合わないことを出す' ([bool]($r.Lines | Where-Object { $_ -like '!! *合わない*' })) $r.Lines
+    Assert-That '止めた行を出す (!! の行)' ([bool]($r.Lines | Where-Object { $_ -like '!! *' })) $r.Lines
 
     $r = Invoke-Launcher -LocalAppData (Join-Path $root 'lad3') -BaseUrl "$base/none"
-    Assert-That 'Release が無ければ (404) 2 で止まり、直し方を出す' (($r.Code -eq 2) -and [bool]($r.Lines | Where-Object { $_ -like '*HTTP 404*' }) -and [bool]($r.Lines | Where-Object { $_ -like '  → merge の直後なら*' })) $r.Lines
+    Assert-That 'Release が無ければ (404) 2 で止まり、直し方を出す' (($r.Code -eq 2) -and [bool]($r.Lines | Where-Object { $_ -like '*HTTP 404*' }) -and [bool]($r.Lines | Where-Object { $_ -like '*dotfiles --self-update*' })) $r.Lines
 } finally {
     if (-not $server.HasExited) { Stop-Process -Id $server.Id -Force -ErrorAction SilentlyContinue }
     Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue

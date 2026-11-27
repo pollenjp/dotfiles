@@ -7,7 +7,10 @@
 //!
 //! ## 確かめること
 //!
-//! - `src` の下の `include_str!("…")`・`include_bytes!("…")` の字を拾い、その .rs の場所から解いたパスが win/runner の下にある
+//! - `src` の下の `include_str!("…")`・`include_bytes!("…")`・`include!("…")`・`#[path = "…"]` の字を拾い、その .rs の場所から解いたパスが
+//!   win/runner の下にある
+//! - build script (`build.rs`) を置かない (置くなら、それが読むファイルも key に入るかを確かめ直す)
+//! - `Cargo.toml` の依存に `path =` (win/runner の外の crate を読みうる) を書かない
 
 use std::path::{Component, Path, PathBuf};
 
@@ -27,10 +30,16 @@ fn rust_files(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// `include_str!("…")`・`include_bytes!("…")` の中の字 (文字列の literal で書いたものだけ。concat! などは使っていない)
+/// `include_str!("…")`・`include_bytes!("…")`・`include!("…")`・`#[path = "…"]` の中の字 (文字列の literal で書いたものだけ。concat! などは
+/// 使っていない)
 fn embedded(text: &str) -> Vec<String> {
     let mut found = Vec::new();
-    for mac in ["include_str!(\"", "include_bytes!(\""] {
+    for mac in [
+        "include_str!(\"",
+        "include_bytes!(\"",
+        "include!(\"",
+        "#[path = \"",
+    ] {
         let mut rest = text;
         while let Some(i) = rest.find(mac) {
             let after = &rest[i + mac.len()..];
@@ -85,6 +94,32 @@ fn embeds_only_files_under_win_runner() {
 
 #[test]
 fn finds_embedded_paths() {
-    let text = "const A: &str = include_str!(\"../a.json\");\nlet b = include_bytes!(\"b.bin\");";
-    assert_eq!(embedded(text), vec!["../a.json", "b.bin"]);
+    let text = "const A: &str = include_str!(\"../a.json\");\nlet b = include_bytes!(\"b.bin\");\ninclude!(\"c.rs\");\n#[path = \"d.rs\"]";
+    assert_eq!(embedded(text), vec!["../a.json", "b.bin", "c.rs", "d.rs"]);
+}
+
+/// build script は無い (置くなら、読むファイルが key (win/runner の tree) に入るかを確かめ直す)
+#[test]
+fn has_no_build_script() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    assert!(
+        !root.join("build.rs").exists(),
+        "build.rs を置くなら、それが読むファイルが win/runner の中にあるかを確かめ、この試験を直す"
+    );
+}
+
+/// 依存に path = を書かない (win/runner の外の crate の中身は key に入らない)
+#[test]
+fn has_no_path_dependencies() {
+    let text =
+        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.toml")).unwrap();
+    let bad: Vec<&str> = text
+        .lines()
+        .filter(|l| !l.trim_start().starts_with('#'))
+        .filter(|l| l.contains("path =") || l.contains("path="))
+        .collect();
+    assert!(
+        bad.is_empty(),
+        "Cargo.toml の path の依存は key に入らない: {bad:?}"
+    );
 }

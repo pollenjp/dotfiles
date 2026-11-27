@@ -11,11 +11,25 @@
 //! 既定の clone を bootstrap が clone する所にし (`cli::default_repo`)、clone の HEAD の `win/runner` が key と違えば流さない
 //! (`cli::check_runner_key`)。launcher (`win/powershell/Invoke-DotfilesRunner.ps1`) は `version` の行の key を読んで、落とした exe を確かめる。
 
-/// 埋めた key (CI の exe だけ)
-pub const KEY: Option<&str> = option_env!("DOTFILES_WIN_RUNNER_KEY");
+/// 埋めた key (CI の exe だけ。空の値は埋めていないのと同じ。`key()`)
+const KEY: Option<&str> = option_env!("DOTFILES_WIN_RUNNER_KEY");
 
-/// 埋めた commit (CI の exe だけ)
-pub const COMMIT: Option<&str> = option_env!("DOTFILES_WIN_RUNNER_COMMIT");
+/// 埋めた commit (CI の exe だけ。`commit()`)
+const COMMIT: Option<&str> = option_env!("DOTFILES_WIN_RUNNER_COMMIT");
+
+/// 埋めた key。無い・空なら None (手元の build)
+pub fn key() -> Option<&'static str> {
+    non_empty(KEY)
+}
+
+/// 埋めた commit。無い・空なら None
+pub fn commit() -> Option<&'static str> {
+    non_empty(COMMIT)
+}
+
+fn non_empty(v: Option<&'static str>) -> Option<&'static str> {
+    v.filter(|s| !s.is_empty())
+}
 
 /// `version` が出す行。1 行目は版、続く 3 行は `名前=値` (launcher が読む。無い値は空)。key があれば Release の exe (`build=release`)、
 /// 無ければ手元の build (`build=local`)
@@ -64,6 +78,13 @@ mod tests {
             lines(None, None)[1..],
             ["key=", "commit=", "build=local"].map(String::from)
         );
+    }
+
+    #[test]
+    fn empty_values_are_absent() {
+        assert_eq!(non_empty(Some("")), None);
+        assert_eq!(non_empty(None), None);
+        assert_eq!(non_empty(Some(K)), Some(K));
     }
 
     #[test]

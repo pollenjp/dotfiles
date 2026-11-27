@@ -15,7 +15,9 @@
 #   - exe: cargo を使わない (落とせなければ止まる)
 #   - cargo: いつも win\runner で cargo run --quiet --release --locked -- <引数> (今までの形。--repo は渡さない: 手元の build の既定の clone は
 #     その clone)
-# sha256 か key が合わないときは、cargo があっても黙って build に戻らずに止まる。URL の根は環境変数 DOTFILES_RUNNER_BASE_URL で替えられる (試験用)。
+# sha256 か key が合わないときは、cargo があっても黙って build に戻らずに止まる。exe を起こせない (Smart App Control・App Control・AppLocker に
+# 止められた・DLL が無い) ときは、自動で cargo があれば build に戻る (%LOCALAPPDATA% の exe を止める決まりでも、clone の中で作った exe は通ることがある)。
+# URL の根は環境変数 DOTFILES_RUNNER_BASE_URL で替えられる (試験用)。
 #
 # 終了コード: runner の終了コード。この script が runner を起こせないときは 2。Ctrl+C で止めたときは 1。
 #
@@ -103,9 +105,9 @@ function Select-DotfilesRunnerStaleDirs {
 }
 
 # 選び方の決まり (win/README.md の「runner の exe (Release)」の表)。Action は cached (置き場のものを使う)・download (落とす)・cargo (手元で
-# build する)・error (止まる)。Notes は · の行、Warn は ⚠ の行、Error は止めるわけ
+# build する)・error (止まる)。Notes は · の行、Warn は ⚠ の行、Error は止めるわけ。GitMessage は key を読めなかったときの git の文 (わけに添える)
 function Get-DotfilesRunnerDecision {
-    param([string]$Mode, [bool]$HaveGit, [string]$Key, [bool]$Dirty, [bool]$HaveCargo, [bool]$Cached)
+    param([string]$Mode, [bool]$HaveGit, [string]$Key, [bool]$Dirty, [bool]$HaveCargo, [bool]$Cached, [string]$GitMessage = '')
     $result = [pscustomobject]@{ Action = ''; Notes = @(); Warn = @(); Error = '' }
     if ($Mode -eq 'cargo') {
         $result.Action = 'cargo'
@@ -114,6 +116,7 @@ function Get-DotfilesRunnerDecision {
     }
     if ((-not $HaveGit) -or (-not (Test-DotfilesRunnerKey -Key $Key))) {
         $why = 'clone の HEAD の win/runner を git で読めない'
+        if ($GitMessage) { $why = "$why ($GitMessage)" }
         if (-not $HaveGit) { $why = 'git が見つからない' }
         if (($Mode -eq 'auto') -and $HaveCargo) {
             $result.Action = 'cargo'
@@ -138,27 +141,31 @@ function Get-DotfilesRunnerDecision {
     $result
 }
 
-# 合う exe が無い・落とせないときに止めるか cargo に戻るか。Hard (sha256・key が合わない・置き場の中身が壊れた) は、いつも止まる
+# 合う exe を使えないときに止めるか cargo に戻るか。Kind は download (落とせない)・launch (起こせない・version が 0 でなく終わった)・hard
+# (sha256・key が合わない・置き場の中身が壊れた)。hard はいつも止まり (差し替えの印を隠さない)、ほかは自動で cargo があれば cargo に戻る
+# (起こせないのが %LOCALAPPDATA% の exe を止める決まりなら、clone の中で作った exe は通ることがある)
 function Get-DotfilesRunnerFallback {
-    param([string]$Mode, [bool]$HaveCargo, [bool]$Hard, [string]$Reason, [string]$CacheDir)
-    if ((-not $Hard) -and ($Mode -eq 'auto') -and $HaveCargo) {
+    param([string]$Mode, [bool]$HaveCargo, [string]$Kind, [string]$Reason, [string]$CacheDir)
+    if (($Kind -ne 'hard') -and ($Mode -eq 'auto') -and $HaveCargo) {
         return [pscustomobject]@{
             Action = 'cargo'; Notes = @("· 配った runner の exe を使えない ($Reason) ので、手元で build する (cargo)"); Error = ''; Hints = @()
         }
     }
     $hints = @(Get-DotfilesRunnerHints -CacheDir $CacheDir)
-    if ($Hard) {
+    if ($Kind -eq 'hard') {
         $hints = @(
             '→ 中身が Release の sha256・key と合わない (Release か置き場のファイルが壊れているか、差し替えられている)。置いた物は使わない'
             "→ 置き場 ($CacheDir) を消して打ち直すと落とし直す。手元で build するなら `$env:DOTFILES_RUNNER = 'cargo' (Build Tools と rustup が要る)"
         )
+    } elseif ($Kind -eq 'launch') {
+        $hints = @("→ 手元で build するなら `$env:DOTFILES_RUNNER = 'cargo' (Build Tools と rustup が要る。Smart App Control に止められているなら、cargo の産物も止められる)")
     }
     [pscustomobject]@{
         Action = 'error'; Notes = @(); Error = "clone の HEAD の win/runner に合う runner の exe を使えない ($Reason)"; Hints = $hints
     }
 }
 
-# 合う exe が無く、cargo も無いときの直し方
+# 合う exe を落とせず、cargo も無い (cargo で作れない) ときの直し方
 function Get-DotfilesRunnerHints {
     param([string]$CacheDir)
     @(
@@ -169,11 +176,12 @@ function Get-DotfilesRunnerHints {
     )
 }
 
-# exe を起こせなかったわけ (例外の文と、Win32 の誤りの番号)
+# exe を起こせなかったわけ (例外の文と、Win32 の誤りの番号)。4551 は App Control (Smart App Control・WDAC)、1260 はグループ ポリシー (AppLocker・
+# ソフトウェアの制限のポリシー) が止めた
 function Get-DotfilesRunnerLaunchHint {
     param([string]$Message, [int]$NativeErrorCode)
-    if (($NativeErrorCode -eq 4551) -or ($Message -match 'Application Control|アプリケーション制御')) {
-        return 'Smart App Control か App Control (AppLocker など) に止められた → Smart App Control は、Windows セキュリティ → アプリとブラウザーの制御 → スマート アプリ コントロールの設定 でオフにする (会社の PC の App Control は管理者に聞く)'
+    if (($NativeErrorCode -eq 4551) -or ($NativeErrorCode -eq 1260) -or ($Message -match 'Application Control|アプリケーション制御|group policy|グループ ポリシー')) {
+        return 'Smart App Control か App Control・AppLocker に止められた → Smart App Control は、Windows セキュリティ → アプリとブラウザーの制御 → スマート アプリ コントロールの設定 でオフにする (会社の PC の App Control・AppLocker は管理者に聞く)'
     }
     if (($NativeErrorCode -eq 2) -or ($NativeErrorCode -eq 225)) {
         return "exe が無いか、ウイルス対策に止められた ($Message) → Windows セキュリティの「保護の履歴」を見る"
@@ -182,7 +190,7 @@ function Get-DotfilesRunnerLaunchHint {
 }
 
 # ---------------------------------------------------------------------------
-# Windows・git・ネットワークに触る関数 (通しの試験は CI の .github/scripts/win-runner-e2e.ps1)
+# Windows・git・ネットワークに触る関数 (通しの試験は Invoke-DotfilesRunner.Tests.ps1 (Linux) と CI の .github/scripts/win-runner-e2e.ps1)
 # ---------------------------------------------------------------------------
 
 # 1 行を出す。色は、環境変数 NO_COLOR が空のときだけ付ける (runner・Invoke-DotfilesSelfUpdate.ps1 と同じ)
@@ -216,7 +224,8 @@ function Find-DotfilesRunnerCargo {
     ''
 }
 
-# git を clone で打ち、出力の行 (stdout と stderr) と終了コードを返す。git にプロンプトを出させない
+# git を clone で打ち、出力の行 (stdout と stderr) と終了コードを返す。git にプロンプトを出させず、index.lock も取らせない (--no-optional-locks。
+# 並んで動いている git を止めない)
 function Invoke-DotfilesRunnerGit {
     param([string]$Git, [string]$Clone, [string[]]$Arguments)
     $ErrorActionPreference = 'Continue'
@@ -226,7 +235,7 @@ function Invoke-DotfilesRunnerGit {
     try {
         $env:GIT_TERMINAL_PROMPT = '0'
         try {
-            $lines = @(& $Git -C $Clone @Arguments 2>&1 | ForEach-Object { "$_" })
+            $lines = @(& $Git --no-optional-locks -C $Clone @Arguments 2>&1 | ForEach-Object { "$_" })
             $code = $LASTEXITCODE
         } catch {
             $lines = @("$($_.Exception.Message)")
@@ -238,16 +247,21 @@ function Invoke-DotfilesRunnerGit {
     [pscustomobject]@{ ExitCode = $code; Lines = $lines }
 }
 
+# clone の HEAD の win/runner の tree の hash (key)。読めなければ Key は空で、Message に git の出力の 1 行目
+function Read-DotfilesRunnerCloneKey {
+    param([string]$Git, [string]$Clone)
+    $r = Invoke-DotfilesRunnerGit -Git $Git -Clone $Clone -Arguments @('rev-parse', 'HEAD:win/runner')
+    $first = @($r.Lines | Where-Object { "$_".Trim() } | Select-Object -First 1)
+    $line = ''
+    if ($first.Count -gt 0) { $line = "$($first[0])".Trim() }
+    if (($r.ExitCode -eq 0) -and (Test-DotfilesRunnerKey -Key $line)) { return [pscustomobject]@{ Key = $line; Message = '' } }
+    [pscustomobject]@{ Key = ''; Message = $line }
+}
+
 # clone の HEAD の win/runner の tree の hash (key)。読めなければ空
 function Get-DotfilesRunnerCloneKey {
     param([string]$Git, [string]$Clone)
-    $r = Invoke-DotfilesRunnerGit -Git $Git -Clone $Clone -Arguments @('rev-parse', 'HEAD:win/runner')
-    if ($r.ExitCode -ne 0) { return '' }
-    $first = @($r.Lines | Where-Object { "$_".Trim() } | Select-Object -First 1)
-    if ($first.Count -eq 0) { return '' }
-    $key = "$($first[0])".Trim()
-    if (Test-DotfilesRunnerKey -Key $key) { return $key }
-    ''
+    (Read-DotfilesRunnerCloneKey -Git $Git -Clone $Clone).Key
 }
 
 # win/runner に commit していない変更 (作業ツリー・index・未追跡のファイル) があるか
@@ -288,7 +302,8 @@ function Get-DotfilesRunnerNativeErrorCode {
     0
 }
 
-# exe の version を打ち、名乗る key を読む。起こせなければ Error にわけ (Smart App Control など)
+# exe の version を打ち、名乗る key を読む。Error は起こせなかった・0 でなく終わったわけ (どちらも差し替えの印ではない: 止める決まり・DLL が
+# 無い (0xC0000135) など)
 function Read-DotfilesRunnerVersion {
     param([string]$ExePath)
     $ErrorActionPreference = 'Continue'
@@ -300,7 +315,7 @@ function Read-DotfilesRunnerVersion {
         return [pscustomobject]@{ Key = ''; Error = "exe を起こせない: $hint" }
     }
     if ($code -ne 0) {
-        return [pscustomobject]@{ Key = ''; Error = "exe の version が終了コード $code で終わった" }
+        return [pscustomobject]@{ Key = ''; Error = ('exe の version が終了コード {0} (0x{0:X8}) で終わった (DLL が無い・exe が壊れているなど)' -f $code) }
     }
     $keyLine = @($lines | Where-Object { $_ -like 'key=*' } | Select-Object -First 1)
     $key = ''
@@ -308,18 +323,28 @@ function Read-DotfilesRunnerVersion {
     [pscustomobject]@{ Key = $key; Error = '' }
 }
 
-# 置き場の key のディレクトリの様子: none (exe か .sha256 が無い)・ok (sha256 が合い、key を確かめた印がある)・unverified (sha256 は合うが、
-# まだ key を確かめていない。手で置いたもの)・bad (sha256 が合わない・.sha256 が読めない)
+# 置き場の key のディレクトリの様子。State は none (exe か .sha256 が無い)・ok (sha256 が合い、key を確かめた印がこの exe のもの)・unverified
+# (sha256 は合うが、まだ key を確かめていない。落とした直後・手で置いたもの)・bad (sha256 が合わない・.sha256 が読めない)。ExeSha は exe の sha256
 function Test-DotfilesRunnerCached {
     param([string]$Dir)
     $exe = Join-Path $Dir $script:DotfilesRunnerExeName
     $shaFile = Join-Path $Dir $script:DotfilesRunnerShaName
-    if (-not ((Test-Path -LiteralPath $exe -PathType Leaf) -and (Test-Path -LiteralPath $shaFile -PathType Leaf))) { return 'none' }
+    $result = [pscustomobject]@{ State = 'none'; ExeSha = '' }
+    if (-not ((Test-Path -LiteralPath $exe -PathType Leaf) -and (Test-Path -LiteralPath $shaFile -PathType Leaf))) { return $result }
+    $result.ExeSha = Get-DotfilesRunnerFileSha256 -Path $exe
     $expected = ConvertFrom-DotfilesRunnerSha256 -Text ([IO.File]::ReadAllText($shaFile))
-    if (-not $expected) { return 'bad' }
-    if ((Get-DotfilesRunnerFileSha256 -Path $exe) -cne $expected) { return 'bad' }
-    if (Test-Path -LiteralPath (Join-Path $Dir $script:DotfilesRunnerMarkName) -PathType Leaf) { return 'ok' }
-    'unverified'
+    if ((-not $expected) -or ($result.ExeSha -cne $expected)) {
+        $result.State = 'bad'
+        return $result
+    }
+    $mark = Join-Path $Dir $script:DotfilesRunnerMarkName
+    $result.State = 'unverified'
+    if (Test-Path -LiteralPath $mark -PathType Leaf) {
+        # 印の頭は、確かめた exe の sha256 (exe を替えたら確かめ直す)
+        $marked = @(([IO.File]::ReadAllText($mark)).Trim() -split '\s+')[0]
+        if ($marked -ceq $result.ExeSha) { $result.State = 'ok' }
+    }
+    $result
 }
 
 # URL の中身を OutFile に落とす。落とせなければ例外
@@ -350,7 +375,8 @@ function Get-DotfilesRunnerDownloadReason {
     "落とせない ($($ErrorRecord.Exception.Message))"
 }
 
-# key の Release から exe と .sha256 を置き場に落とし、sha256 が合うときだけ置く。結果は Ok・Hard (sha256 が合わない・.sha256 が読めない)・Reason
+# key の Release から exe と .sha256 を置き場に落とし、sha256 が合うときだけ置く (置き場に片方だけ残っていた物は、落とした物で置き換える)。
+# 結果は Ok・Kind (落とせない・置けないは download、.sha256 が読めない・sha256 が合わないは hard)・Reason
 function Install-DotfilesRunnerExe {
     param([string]$Dir, [string]$Key, [string]$BaseUrl)
     $null = New-Item -ItemType Directory -Force -Path $Dir
@@ -362,10 +388,11 @@ function Install-DotfilesRunnerExe {
     $shaFile = Join-Path $Dir $script:DotfilesRunnerShaName
     $tmpExe = "$exe.download-$PID"
     $tmpSha = "$shaFile.download-$PID"
-    $result = [pscustomobject]@{ Ok = $false; Hard = $false; Reason = '' }
+    $result = [pscustomobject]@{ Ok = $false; Kind = 'download'; Reason = '' }
     try {
         try {
-            Invoke-DotfilesRunnerDownload -Url (Get-DotfilesRunnerUrl -BaseUrl $BaseUrl -Key $Key -Name $script:DotfilesRunnerShaName) -OutFile $tmpSha -TimeoutSec 60
+            # .sha256 は小さいので、届かないネットワークで長く待たないよう短く切る
+            Invoke-DotfilesRunnerDownload -Url (Get-DotfilesRunnerUrl -BaseUrl $BaseUrl -Key $Key -Name $script:DotfilesRunnerShaName) -OutFile $tmpSha -TimeoutSec 20
             Invoke-DotfilesRunnerDownload -Url (Get-DotfilesRunnerUrl -BaseUrl $BaseUrl -Key $Key -Name $script:DotfilesRunnerExeName) -OutFile $tmpExe -TimeoutSec 300
         } catch {
             $result.Reason = Get-DotfilesRunnerDownloadReason -ErrorRecord $_
@@ -373,23 +400,31 @@ function Install-DotfilesRunnerExe {
         }
         $expected = ConvertFrom-DotfilesRunnerSha256 -Text ([IO.File]::ReadAllText($tmpSha))
         if (-not $expected) {
-            $result.Hard = $true
+            $result.Kind = 'hard'
             $result.Reason = "Release の $($script:DotfilesRunnerShaName) が読めない"
             return $result
         }
         $actual = Get-DotfilesRunnerFileSha256 -Path $tmpExe
         if ($actual -cne $expected) {
-            $result.Hard = $true
+            $result.Kind = 'hard'
             $result.Reason = "落とした exe の sha256 ($actual) が Release の値 ($expected) と合わない (落とした物は消した)"
             return $result
         }
-        # Invoke-WebRequest は Mark of the Web を付けないが、手で置いた物と同じ扱いにそろえる (sha256 は確かめた)
-        if (Get-Command -Name 'Unblock-File' -ErrorAction SilentlyContinue) {
-            Unblock-File -LiteralPath $tmpExe -ErrorAction SilentlyContinue
+        # Invoke-WebRequest は Mark of the Web を付けないが、手で置いた物と同じ扱いにそろえる (sha256 は確かめた)。Unblock-File は Windows だけ
+        # (Linux の pwsh にもあるが、-ErrorAction を付けても例外で止まる)
+        if ([IO.Path]::DirectorySeparatorChar -eq '\') {
+            try { Unblock-File -LiteralPath $tmpExe -ErrorAction Stop } catch { }
         }
-        # 並んで流した別の PowerShell が先に置いていれば、そちらを使う (中身は同じ key のもの。使う前に確かめる)
-        if (-not (Test-Path -LiteralPath $exe)) { Move-Item -LiteralPath $tmpExe -Destination $exe }
-        if (-not (Test-Path -LiteralPath $shaFile)) { Move-Item -LiteralPath $tmpSha -Destination $shaFile }
+        # 置き場に片方だけ残っていた物 (手で exe だけを置いた・消しかけて止まった) は、確かめた物で置き換える。動いていて置き換えられなければ止まる
+        foreach ($pair in @(@($tmpExe, $exe), @($tmpSha, $shaFile))) {
+            try {
+                if (Test-Path -LiteralPath $pair[1]) { Remove-Item -LiteralPath $pair[1] -Force -ErrorAction Stop }
+                Move-Item -LiteralPath $pair[0] -Destination $pair[1] -ErrorAction Stop
+            } catch {
+                $result.Reason = "置き場の $(Split-Path -Leaf $pair[1]) を置き換えられない (動いている exe など。$($_.Exception.Message))"
+                return $result
+            }
+        }
         $result.Ok = $true
         $result
     } finally {
@@ -399,14 +434,17 @@ function Install-DotfilesRunnerExe {
     }
 }
 
-# 置き場の exe が名乗る key を確かめ、合えば印を置く。合わない・起こせなければわけ (空なら合った)
+# 置き場の exe が名乗る key を確かめ、合えば印 (この exe の sha256 と key) を置く。結果は Ok・Kind (起こせない・0 でなく終わったは launch、
+# key が合わないは hard)・Reason
 function Confirm-DotfilesRunnerExe {
-    param([string]$Dir, [string]$Key)
+    param([string]$Dir, [string]$Key, [string]$ExeSha)
     $v = Read-DotfilesRunnerVersion -ExePath (Join-Path $Dir $script:DotfilesRunnerExeName)
-    if ($v.Error) { return $v.Error }
-    if ($v.Key -cne $Key) { return "exe が名乗る key ($($v.Key)) が clone の key と合わない" }
-    Set-Content -LiteralPath (Join-Path $Dir $script:DotfilesRunnerMarkName) -Value "$Key $((Get-Date).ToString('yyyy-MM-ddTHH:mm:sszzz'))" -Encoding ascii
-    ''
+    if ($v.Error) { return [pscustomobject]@{ Ok = $false; Kind = 'launch'; Reason = $v.Error } }
+    if ($v.Key -cne $Key) {
+        return [pscustomobject]@{ Ok = $false; Kind = 'hard'; Reason = "exe が名乗る key ($($v.Key)) が clone の key と合わない" }
+    }
+    Set-Content -LiteralPath (Join-Path $Dir $script:DotfilesRunnerMarkName) -Value "$ExeSha $Key $((Get-Date).ToString('yyyy-MM-ddTHH:mm:sszzz'))" -Encoding ascii
+    [pscustomobject]@{ Ok = $true; Kind = ''; Reason = '' }
 }
 
 # 置き場の古い key のディレクトリを消す (動いていて消せないものは次に回す)
@@ -425,11 +463,12 @@ function Write-DotfilesRunnerError {
     foreach ($h in @($Hints)) { Write-DotfilesRunnerLine "  $h" }
 }
 
-# 何で runner を起こすかを決める (落とすのもここ)。Kind は exe (Exe にパス)・cargo (Cargo に打つもの)・error。runner は呼び出し元 (末尾) が起こす:
-# ここで起こすと、この関数の戻り値を受けるために PowerShell が runner の出力をパイプで受け、runner が端末を見られない
+# 何で runner を起こすかを決める (落とすのもここ)。Kind は exe (Exe にパス)・cargo (Cargo に打つもの。Fallback は配った exe を使えずに cargo へ
+# 回ったか)・error。runner は呼び出し元 (末尾) が起こす: ここで起こすと、この関数の戻り値を受けるために PowerShell が runner の出力をパイプで受け、
+# runner が端末を見られない
 function Resolve-DotfilesRunner {
     param([string]$Clone, [string[]]$Arguments)
-    $plan = [pscustomobject]@{ Kind = 'error'; Exe = ''; Cargo = '' }
+    $plan = [pscustomobject]@{ Kind = 'error'; Exe = ''; Cargo = ''; Fallback = $false; CacheDir = '' }
     $runnerDir = [IO.Path]::Combine($Clone, 'win', 'runner')
     if (-not (Test-Path -LiteralPath (Join-Path $runnerDir 'Cargo.toml') -PathType Leaf)) {
         Write-DotfilesRunnerLine "dotfiles の runner がありません: $runnerDir (先に win\bootstrap\Install-Bootstrap.ps1 で clone する)" 'Yellow'
@@ -443,22 +482,27 @@ function Resolve-DotfilesRunner {
     $cargo = Find-DotfilesRunnerCargo
     $git = Find-DotfilesRunnerApplication -Name 'git'
     $key = ''
+    $gitMessage = ''
     $dirty = $false
     if (($mode -ne 'cargo') -and $git) {
-        $key = Get-DotfilesRunnerCloneKey -Git $git -Clone $Clone
+        $read = Read-DotfilesRunnerCloneKey -Git $git -Clone $Clone
+        $key = $read.Key
+        $gitMessage = $read.Message
         if ($key) { $dirty = Test-DotfilesRunnerDirty -Git $git -Clone $Clone }
     }
     $dir = ''
-    $state = 'none'
+    $plan.CacheDir = '%LOCALAPPDATA%\dotfiles\runner\<key>'
+    $cached = [pscustomobject]@{ State = 'none'; ExeSha = '' }
     if ($key) {
         if (-not $env:LOCALAPPDATA) {
             Write-DotfilesRunnerError '環境変数 LOCALAPPDATA がありません (runner の exe の置き場を決められない)' @()
             return $plan
         }
         $dir = Get-DotfilesRunnerCacheDir -LocalAppData $env:LOCALAPPDATA -Key $key
-        $state = Test-DotfilesRunnerCached -Dir $dir
+        $plan.CacheDir = $dir
+        $cached = Test-DotfilesRunnerCached -Dir $dir
     }
-    $decision = Get-DotfilesRunnerDecision -Mode $mode -HaveGit ([bool]$git) -Key $key -Dirty $dirty -HaveCargo ([bool]$cargo) -Cached (($state -eq 'ok') -or ($state -eq 'unverified'))
+    $decision = Get-DotfilesRunnerDecision -Mode $mode -HaveGit ([bool]$git) -Key $key -Dirty $dirty -HaveCargo ([bool]$cargo) -Cached (($cached.State -eq 'ok') -or ($cached.State -eq 'unverified')) -GitMessage $gitMessage
     if (($decision.Action -eq 'cargo') -and (-not $cargo)) {
         Write-DotfilesRunnerError 'cargo が見つからない ($env:DOTFILES_RUNNER が cargo。win\bootstrap\Install-Bootstrap.ps1 -Rust で Build Tools と rustup を入れる)' @()
         return $plan
@@ -472,36 +516,41 @@ function Resolve-DotfilesRunner {
     if ($decision.Action -eq 'cargo') {
         $plan.Kind = 'cargo'
         $plan.Cargo = $cargo
-        return $plan
-    }
-    if (($decision.Action -ne 'cargo') -and ($state -eq 'bad')) {
-        $f = Get-DotfilesRunnerFallback -Mode $mode -HaveCargo ([bool]$cargo) -Hard $true -Reason "置き場の $($script:DotfilesRunnerExeName) が $($script:DotfilesRunnerShaName) と合わない" -CacheDir $dir
-        Write-DotfilesRunnerError $f.Error $f.Hints
+        # 変更があって build するのも、配った exe を使えずに cargo へ回るのと同じく、build できないことがある (Build Tools が無いなど)。
+        # 明示の cargo のモードは除く
+        $plan.Fallback = ($mode -ne 'cargo')
         return $plan
     }
     $fallback = $null
-    if ($decision.Action -eq 'download') {
+    if ($cached.State -eq 'bad') {
+        $fallback = Get-DotfilesRunnerFallback -Mode $mode -HaveCargo ([bool]$cargo) -Kind 'hard' -Reason "置き場の $($script:DotfilesRunnerExeName) が $($script:DotfilesRunnerShaName) と合わない" -CacheDir $dir
+    }
+    if (($null -eq $fallback) -and ($decision.Action -eq 'download')) {
         $baseUrl = $script:DotfilesRunnerBaseUrl
         if ($env:DOTFILES_RUNNER_BASE_URL) { $baseUrl = "$env:DOTFILES_RUNNER_BASE_URL" }
         Write-DotfilesRunnerLine "==> runner の exe を落とす: $(Get-DotfilesRunnerTag -Key $key) ($baseUrl)"
         $r = Install-DotfilesRunnerExe -Dir $dir -Key $key -BaseUrl $baseUrl
-        if (-not $r.Ok) { $fallback = Get-DotfilesRunnerFallback -Mode $mode -HaveCargo ([bool]$cargo) -Hard $r.Hard -Reason $r.Reason -CacheDir $dir }
-    }
-    if (($null -eq $fallback) -and ((Test-DotfilesRunnerCached -Dir $dir) -ne 'ok')) {
-        # 落とした直後と、手で置いた物は、使う前に 1 回だけ version で key を確かめる (起こせなければ、ここで Smart App Control などが分かる)
-        $why = Confirm-DotfilesRunnerExe -Dir $dir -Key $key
-        if ($why) {
-            $hard = -not ($why -like 'exe を起こせない*')
-            $fallback = Get-DotfilesRunnerFallback -Mode $mode -HaveCargo ([bool]$cargo) -Hard $hard -Reason $why -CacheDir $dir
-            # 起こせない exe は cargo で作っても同じく止められるので、cargo に戻らない
-            if (-not $hard) { $fallback.Action = 'error'; $fallback.Hints = @() }
+        if ($r.Ok) {
+            # 置いた物を読み直す (落とした物の sha256 は確かめた。印はまだ無いので unverified)
+            $cached = Test-DotfilesRunnerCached -Dir $dir
+            if ($cached.State -eq 'bad') {
+                $fallback = Get-DotfilesRunnerFallback -Mode $mode -HaveCargo ([bool]$cargo) -Kind 'hard' -Reason "置いた $($script:DotfilesRunnerExeName) が $($script:DotfilesRunnerShaName) と合わない" -CacheDir $dir
+            }
+        } else {
+            $fallback = Get-DotfilesRunnerFallback -Mode $mode -HaveCargo ([bool]$cargo) -Kind $r.Kind -Reason $r.Reason -CacheDir $dir
         }
+    }
+    if (($null -eq $fallback) -and ($cached.State -eq 'unverified')) {
+        # 落とした直後と、手で置いた物は、使う前に 1 回だけ version で key を確かめる (起こせなければ、ここで Smart App Control などが分かる)
+        $c = Confirm-DotfilesRunnerExe -Dir $dir -Key $key -ExeSha $cached.ExeSha
+        if (-not $c.Ok) { $fallback = Get-DotfilesRunnerFallback -Mode $mode -HaveCargo ([bool]$cargo) -Kind $c.Kind -Reason $c.Reason -CacheDir $dir }
     }
     if ($null -ne $fallback) {
         foreach ($n in @($fallback.Notes)) { Write-DotfilesRunnerLine $n }
         if ($fallback.Action -eq 'cargo') {
             $plan.Kind = 'cargo'
             $plan.Cargo = $cargo
+            $plan.Fallback = $true
             return $plan
         }
         Write-DotfilesRunnerError $fallback.Error $fallback.Hints
@@ -552,6 +601,11 @@ if ($MyInvocation.InvocationName -ne '.') {
                     $exitCode = $LASTEXITCODE
                 } finally {
                     Pop-Location
+                }
+                # cargo が自分で落ちたとき (101。build できない (Build Tools が無いなど)。runner の panic も 101) に、配った exe を使えずに cargo へ
+                # 回ったのなら、合う exe を得る直し方を出す (runner の終了コードは 0〜3)
+                if (($exitCode -eq 101) -and $plan.Fallback) {
+                    Write-DotfilesRunnerError 'cargo が終了コード 101 で終わった (build できない (Build Tools が無いなど) か、runner が panic した)' (Get-DotfilesRunnerHints -CacheDir $plan.CacheDir)
                 }
             } else {
                 $exitCode = 2
