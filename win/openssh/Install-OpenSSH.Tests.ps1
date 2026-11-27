@@ -432,6 +432,55 @@ Test-Case '管理者で起動し直した子 (-LogPath) は、揃える段の行
     Invoke-ChildLogScenario
 }
 
+# Invoke-Winget (本物): winget は管へ UTF-8 で書く。コンソールの文字コードが UTF-8 でない窓 (UAC で昇格し直した子の窓・手で打った窓。日本語の
+# Windows の既定は CP932。ここでは ISO-8859-1 で代える) でも、打つ間だけ UTF-8 で読み、帯 (█▒) の行を除いて日本語を化けさせず、打った後は
+# 元に戻す。もう UTF-8 の窓 (runner と WSL の wrapper は [Text.Encoding]::UTF8 にしてから流す) では替えない。偽の winget を PATH の先頭に置く (Linux)
+function Invoke-RealWinget {
+    param([Text.Encoding]$Console)
+    $bin = Join-Path ([IO.Path]::GetTempPath()) ('install-openssh-winget-' + [guid]::NewGuid())
+    New-Item -ItemType Directory -Path $bin | Out-Null
+    Set-Content -LiteralPath (Join-Path $bin 'winget') -Value "#!/bin/sh`nprintf '  \342\226\210\342\226\210\342\226\222  1 MB / 2 MB\n'`nprintf '\343\201\202\343\201\204 ok\n'`nexit 7"
+    & chmod +x (Join-Path $bin 'winget')
+    $savedPath = $env:PATH
+    $savedEncoding = [Console]::OutputEncoding
+    $env:PATH = "$bin$([IO.Path]::PathSeparator)$savedPath"
+    try {
+        [Console]::OutputEncoding = $Console
+        $r = Invoke-Winget -Arguments @('install')
+        $after = [Console]::OutputEncoding
+    } finally {
+        [Console]::OutputEncoding = $savedEncoding
+        $env:PATH = $savedPath
+        Remove-Item -LiteralPath $bin -Recurse -Force
+    }
+    "$($r.ExitCode)|$($r.Lines -join '|')|$($after.CodePage)|$($after.GetPreamble().Length)"
+}
+Test-Case 'winget の出力は UTF-8 で読み (帯を除き、日本語は化けない)、終わったらコンソールの文字コードを戻す' '7|あい ok|28591|0' {
+    Invoke-RealWinget -Console ([Text.Encoding]::GetEncoding('ISO-8859-1'))
+}
+Test-Case 'もう UTF-8 の窓 (runner・WSL の wrapper の BOM 付きの UTF-8) では文字コードを替えない' '7|あい ok|65001|3' {
+    Invoke-RealWinget -Console ([Text.Encoding]::UTF8)
+}
+
+# winget の出力を取り込むほかの ps1 (Install-Sshd.ps1・Install-Herdr.ps1 など) の Invoke-Winget は、上で確かめたこの ps1 の Invoke-Winget と
+# 同じ本文 (どの窓から打っても UTF-8 で読む。写しをそろえる)。winget を直に打たない形 (bootstrap は Invoke-Native -Utf8 を通し、自分の試験で
+# 確かめる) は比べない
+Test-Case 'winget を打つほかの ps1 の Invoke-Winget は、この ps1 と同じ本文' '' {
+    $bodyOf = {
+        param([string]$Path)
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$null, [ref]$null)
+        $fn = @($ast.FindAll({ param($n) ($n -is [System.Management.Automation.Language.FunctionDefinitionAst]) -and ($n.Name -eq 'Invoke-Winget') }, $true))
+        if ($fn.Count -eq 0) { return $null }
+        $fn[0].Body.Extent.Text
+    }
+    $want = & $bodyOf (Join-Path $PSScriptRoot 'Install-OpenSSH.ps1')
+    $win = Split-Path -Parent $PSScriptRoot
+    @(Get-ChildItem -Path (Join-Path $win '*\*.ps1') -File | Where-Object { $_.Name -notlike '*.Tests.ps1' } | ForEach-Object {
+            $body = & $bodyOf $_.FullName
+            if (($null -ne $body) -and $body.Contains('& winget') -and ($body -cne $want)) { "$($_.Directory.Name)/$($_.Name)" }
+        }) -join ' '
+}
+
 # 揃えた・入れた後の ssh-add -l の行。1Password の SSH agent を使わないホスト (-NoOnePassword) は出さない
 Test-Case 'ssh-add -l の行: 鍵が見えれば本数' '  ssh-add -l      : 鍵 2 本' { Format-AgentKeyLine -Keys 2 }
 Test-Case 'ssh-add -l の行: 入れたばかり (-IfMissing) で見えなければ、1Password の SSH agent を有効にした後の確かめ方' '  ssh-add -l      : 鍵が見えない → 1Password の SSH agent を有効にしたら、Install-OpenSSH -Check で確かめる' {

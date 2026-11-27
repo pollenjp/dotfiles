@@ -94,7 +94,8 @@ PowerShell 7・Visual Studio Build Tools・rustup と dotfiles の clone) を揃
   残っていて dotfiles-private にもホストの値を書くと、runner の apply は止まる (どちらを使うか決まらない。手元の方を退ける)
 - 普通の (管理者でない) PowerShell で流す。管理者の PowerShell だと何も変えずに止まる (clone と rustup が管理者の持ち物になり、普通の
   権限の git が `dubious ownership` で止まるため)。UAC は道具ごとに出る (普段のアカウントが管理者の PC の PowerShell 7 (MSIX) と rustup は
-  ユーザー単位に入るので出ない。管理者でない PC の PowerShell 7 は MSI なので出る)
+  ユーザー単位に入るので出ない。管理者でない PC の PowerShell 7 は MSI なので出る)。入れたての Windows 11 で Git だけは、昇格した winget で
+  入れ直すことがある (下の「bootstrap がすること」の表)
 - 対象の CPU は x64 だけ (ARM64 の Windows は今は対象外)
 
 ### bootstrap を流す
@@ -153,7 +154,7 @@ dotfiles apply
 
    | 道具 | winget の ID | 固定した版 (param) | 入れ方 |
    | --- | --- | --- | --- |
-   | Git for Windows | `Git.Git` | `2.56.0.4` (`-GitVersion`) | machine の scope (`C:\Program Files\Git`)。インストーラーの選択肢は既定のまま |
+   | Git for Windows | `Git.Git` | `2.56.0.4` (`-GitVersion`) | machine の scope (`C:\Program Files\Git`)。インストーラーの選択肢は既定のまま。入れたての Windows 11 の winget (v1.11.510) は、昇格していないと machine の scope の source を開けず、`Failed to open the predefined source` (`0x80070005`) で落ちる。そのときだけ、同じ引数を昇格した winget で打ち直す (System32 の Windows PowerShell を UAC で昇格させて打つ。UAC の確認は Git の installer の代わりにそこで 1 回出る。普段のアカウントが管理者でない PC で、昇格した側のアカウントに winget が無ければ、そのアカウントと登録の手を出す) |
    | GitHub CLI (`-Private` だけ) | `GitHub.cli` | `2.103.3` (`-GhVersion`) | MSI (`C:\Program Files\GitHub CLI`)。`--silent` を付けないので、UAC と進み具合の小さな窓が出る (per-machine の MSI は、quiet だと管理者でない PowerShell から UAC を出せずに落ちる) |
    | PowerShell 7 | `Microsoft.PowerShell` | `7.6.10.0` (`-PwshVersion`) | 入っていないときだけ入れる。普段のアカウントが管理者の PC は MSIX (`--installer-type msix`。ユーザー単位に入るので UAC は出ない。`--silent`)、管理者でない PC は MSI (`--installer-type wix --custom "USE_MU=0 ENABLE_MU=0"`。`C:\Program Files\PowerShell\7`。`--silent` を付けないので、UAC で管理者の資格情報を入れる。Microsoft Update の更新には入れない)。管理者でない PC で MSIX しか無ければ MSI を `--force` で足す (入っている MSIX があると、winget は install を upgrade に替えて止まるため)。入れた直後に、7.6 の線に留める pin (`--version 7.6.*`) を足す。7.6 (LTS) の MSIX は package `Microsoft.PowerShell-LTS` で、7.7 からの MSIX (別の package `Microsoft.PowerShell`) へは上がらない。7.7 からは MSI も無い |
    | Visual Studio Build Tools 2022 | `Microsoft.VisualStudio.2022.BuildTools` | `17.14.44` (`-VsBuildToolsVersion`) | C++ のワークロード (`Workload.VCTools`。必須の部品だけ)・x64 の MSVC (`VC.Tools.x86.x64`)・Windows SDK (`Windows11SDK.26100`)・英語の言語パック。MSVC と SDK は rustup が自分で入れるときと同じ部品。`--silent` を付けないので、UAC と進み具合の窓が出る。数 GB を落とすので 10 分以上かかることがある |
@@ -321,6 +322,9 @@ winget upgrade --id Rustlang.Rustup --exact --version <版> --include-pinned --c
 
 - BOM 付きの UTF-8 で保存する。新しい Windows には Windows PowerShell 5.1 しか無いので、PowerShell 7 にしか無い書き方 (`??`・`?.`・
   三項演算子・`&&`・`||`・`-AsHashtable`・3 引数の `Join-Path`) を使わない (`Install-Bootstrap.Tests.ps1` が見る)
+- winget の出力は UTF-8 で読む (`Invoke-Winget` が `Invoke-Native -Utf8` を通す)。bootstrap を流す Windows PowerShell 5.1 の窓は、日本語の Windows では
+  コンソールの文字コードが CP932 で、そのまま読むと進み具合の帯 (█▒) が「笆遺毎」に化けて除けず、日本語のメッセージ (取り消しの「…: 1602」も) が化ける
+- `Start-Process` に `-Wait` を付けない (5.1 の `-Wait` は子孫のプロセスまで待つ)。`-PassThru` で handle を掴んで `WaitForExit()` で待つ (試験が見る)
 - 固定した版は param の既定値 (`[string]$GitVersion = '<版>'` の形の行)、パッケージ ID は 1 行ずつの変数 (`$gitPackageId = '<ID>'`)。
   `nix/scripts/check-winget-version.sh` がこの行を読む
 - 副作用の無い関数と、Windows に触る関数を偽物に差し替えた流れは `bootstrap/Install-Bootstrap.Tests.ps1` で確かめる (Linux の pwsh。
@@ -2965,6 +2969,10 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
 
 - winget の引数 (`Get-WingetCommands`) の upgrade には `--include-pinned` を付け、install・uninstall には付けない
   ([winget の pin](#winget-の-pin)。試験が確かめる)
+- `Invoke-Winget` は、コンソールの文字コードが UTF-8 でなければ、winget を打つ間だけ UTF-8 にして読む (winget は管へ UTF-8 で書く)。UAC で昇格し直した
+  子 (`-LogPath`) の窓と手で打った窓は CP932 で、そのまま読むと進み具合の帯 (█▒) が「笆遺毎」に化けて除けず、昇格した側の行 (`[管理者]`) に残った。
+  runner と WSL の wrapper は UTF-8 にしてから流すので替えない。winget を打つほかの ps1 (`Install-Sshd.ps1`・`Install-Herdr.ps1` など) の
+  `Invoke-Winget` も同じ本文にそろえてあり、`Install-OpenSSH.Tests.ps1` が突き合わせる (直すときは全部を直す)
 - `-Check` の終了コードと締めの文 (`Get-OpenSshExitCode`・`Get-OpenSshCheckMessage`) は、96 が読む。変えるときは
   `nix/scripts/bootstrap-windows-openssh.sh` とそのテストも直す
 - winget やサービスに触る部分は、実機で `-Check` と本番を打って確かめる
