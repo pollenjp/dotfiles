@@ -4821,7 +4821,9 @@ codex」と出す。winget の `PortableInstaller.cpp`)。置き場所の exe �
 - 昇格しても同じユーザーなので、置き場所・symlink・pin はこのユーザーのもの。入れた後の `winget list`・`pin`・`uninstall` は昇格せずに打てる。昇格した
   側のアカウントが違えば (UAC で別のアカウントの資格情報を入れたなど) 知らせる
 - symlink の無い形で入っていれば (前に手で winget install を打ったなど)、`-Check` が「codex と打てない」と出し、`Install-Codex` が同じ版を外してから入れ
-  直す。外す・入れるを 1 回の昇格で打つので、UAC を断れば何も変えない
+  直す。外す・入れるを 1 回の昇格で打つので、UAC を断れば何も変えない。入れ直した後も、前の形で winget がユーザーの PATH に足した置き場所の行が
+  残ることがある (テスト用の VM で残った)。置き場所に `codex.exe` は無いので `codex` の解決には効かない。消すなら、ユーザーの環境変数 `Path` から
+  `...\WinGet\Packages\OpenAI.Codex_Microsoft.Winget.Source_8wekyb3d8bbwe` の行を外す
 - 管理者でないアカウントで開発者モードも off なら、UAC で別のアカウントに昇格すると置き場所がそのアカウントのものになるので、昇格しない。入れても
   `codex` と打てないので、`Install-Codex` は入れずに止まり、開発者モードを on にする手 (設定 > システム > 開発者向け。管理者が要る) を出す (runner は
   知らせるだけ)
