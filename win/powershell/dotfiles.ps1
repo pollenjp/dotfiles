@@ -287,6 +287,11 @@ function Install-Fzf { & "$HOME\.config\powershell\Install-Fzf.ps1" @args }
 # dotfiles apply (runner の手順 starship) でも揃える。
 function Install-Starship { & "$HOME\.config\powershell\Install-Starship.ps1" @args }
 
+# Windows の winget (アプリ インストーラー) を、dotfiles で固定した版以上に揃える (下げない)。中身は同じ場所へ配る Install-WinGet.ps1
+# (win/README.md の「winget」)。-Check なら確かめるだけ。GitHub の microsoft/winget-cli の Release の msixbundle と依存を固定した sha256 で
+# 確かめ、Add-AppxPackage でこのユーザーに入れる (UAC を出さない。動いている winget は終わる)。dotfiles apply (runner の手順 winget) でも揃える。
+function Install-WinGet { & "$HOME\.config\powershell\Install-WinGet.ps1" @args }
+
 # Windows の Codex CLI (winget の OpenAI.Codex の portable) を、dotfiles で固定した版に揃える。中身は同じ場所へ配る Install-Codex.ps1
 # (win/README.md の「Codex CLI」)。-Check なら確かめるだけ。winget は昇格せずに打つ (UAC を出さない)。codex と打てる形は、winget が
 # WinGet\Links に置く symlink か、開発者モードが off のときに winget 1.30 が置き場所に置く codex.exe の hardlink のどちらでもよく、どちらも

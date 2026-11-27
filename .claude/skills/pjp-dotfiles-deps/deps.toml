@@ -111,6 +111,11 @@ run = ["nix", "shell", "--inputs-from", "./nix", "nixpkgs#powershell", "--comman
 when = ["win/starship/"]
 
 [[checks]]
+name = "win-winget"
+run = ["nix", "shell", "--inputs-from", "./nix", "nixpkgs#powershell", "--command", "pwsh", "-NoProfile", "-NonInteractive", "-File", "win/winget/Install-WinGet.Tests.ps1"]
+when = ["win/winget/"]
+
+[[checks]]
 name = "win-codex"
 run = ["nix", "shell", "--inputs-from", "./nix", "nixpkgs#powershell", "--command", "pwsh", "-NoProfile", "-NonInteractive", "-File", "win/codex/Install-Codex.Tests.ps1"]
 when = ["win/codex/"]

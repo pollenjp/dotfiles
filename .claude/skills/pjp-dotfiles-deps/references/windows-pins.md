@@ -100,5 +100,7 @@ Google 日本語入力・ntn・Claude Code・Tailscale・ghq・fzf・starship・
   出したとき」) と PowerToys (版を固定しない)
 - op-reason (`win/op-reason/Install-OpReason.ps1`。自作のアプリ。WSL の `nix/pkgs/op-reason` と同じ版を同じ PR で、Release を出す
   流れで上げる。`nix/README.md` の「op-reason の新しい版を出したとき」)
+- winget 自身 (`win/winget/Install-WinGet.ps1`。固定した版は下限で、新しい版を追いかけない。上げるのは道具が新しい winget を前提に
+  するとき・直したい不具合があるときだけ。`win/README.md` の「winget の固定した版を上げる」)
 - 週 1 回の CI (`winget-versions` の猶予 30 日・`herdr-app-installers` の猶予 7 日) は、これと別に今までどおり知らせる。見送りの
   一覧はどちらにも効く
