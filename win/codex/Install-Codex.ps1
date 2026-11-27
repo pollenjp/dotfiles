@@ -19,7 +19,7 @@ winget 1.29 までは hardlink を作らず、symlink を作れないと置き�
 winget は UAC で昇格して打たない (そのまま打つ)。winget 1.30 は、昇格した会話 (UAC で昇格した token) から user スコープの portable を入れる・外すのを
 0x8A15007D で断る。次のときは winget を打たずに止め、直し方を出す (runner は知らせるだけ):
   - 昇格した会話で、winget が 1.30 以降 (昇格していない PowerShell で打ち直す)
-  - 昇格していない会話で、開発者モードが off で、winget が 1.29 以前 (入れても codex と打てない。アプリ インストーラーを更新するか、開発者モードを on にする)
+  - 昇格していない会話で、開発者モードが off で、winget が 1.29 以前 (入れても codex と打てない。Install-WinGet (runner の手順 winget。codex より先に流れる) で winget を上げるか、開発者モードを on にする)
 codex と打てる形が無い形で入っていれば (1.29 以前の winget で入れたなど)、同じ版を入れ直して作らせる。
 
 codex は自分の置き場所の判定 (同梱の codex-path\rg.exe と codex-resources を使うか) を、実体の exe の名前が置き場所の codex-package.json の
@@ -416,7 +416,7 @@ function Format-CodexState {
             [pscustomobject]@{ Text = '※ 昇格していない PowerShell (デスクトップの普通の端末) で Install-Codex を打ち直す (win/README.md の「Codex CLI」)'; Warn = $false }
         } else {
             [pscustomobject]@{ Text = "⚠ winget が古く、codex と打てる形を作れない ($wingetText は symlink を作れないときに codex.exe の hardlink を作らず、開発者モードも off)。入れても codex と打てないので、Install-Codex は入れない"; Warn = $true }
-            [pscustomobject]@{ Text = '※ Microsoft Store で「アプリ インストーラー」を更新して winget を 1.30 以降にするか、開発者モードを on にして (設定 > システム > 開発者向け。管理者が要る)、Install-Codex を打ち直す (win/README.md の「Codex CLI」)'; Warn = $false }
+            [pscustomobject]@{ Text = '※ Install-WinGet で winget を固定した版 (1.30 以降) に上げるか、開発者モードを on にして (設定 > システム > 開発者向け。管理者が要る)、Install-Codex を打ち直す (win/README.md の「winget」「Codex CLI」)'; Warn = $false }
         }
     }
     if ($State.PathKind -eq 'other') {

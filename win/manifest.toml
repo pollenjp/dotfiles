@@ -154,6 +154,11 @@ dst = "%USERPROFILE%/.config/powershell/Install-Starship.ps1"
 hint = "PowerShell で Install-Starship -Check を打つと、固定した版との差が分かる (runner の dotfiles apply が winget の portable を入れて揃える。MSI の starship が入っていれば何も入れずに外し方を出す)"
 
 [[files]]
+src = "winget/Install-WinGet.ps1"
+dst = "%USERPROFILE%/.config/powershell/Install-WinGet.ps1"
+hint = "PowerShell で Install-WinGet -Check を打つと、winget が固定した版以上かが分かる (runner の dotfiles apply の手順 winget が、古ければ GitHub の Release から固定した版に上げる。UAC は出ない。下げない)"
+
+[[files]]
 src = "codex/Install-Codex.ps1"
 dst = "%USERPROFILE%/.config/powershell/Install-Codex.ps1"
 hint = "PowerShell で Install-Codex -Check を打つと、固定した版との差と、codex と打てるか (WinGet\\Links の symlink) が分かる (runner の dotfiles apply が入れるのはホストの値の [tools] windowsCodex が on のマシンだけ。開発者モードが off なら winget を UAC で昇格して打つ)"

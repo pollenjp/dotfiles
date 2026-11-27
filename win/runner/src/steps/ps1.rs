@@ -1,4 +1,4 @@
-//! `win/*/Install-*.ps1` を `-Check` してから入れる・揃える手順 (order 95〜97)。WSL の `nix/scripts/bootstrap-windows-<id>.sh` を写したもの。
+//! `win/*/Install-*.ps1` を `-Check` してから入れる・揃える手順 (order 95〜97。winget は 6、op-reason は 90)。WSL の `nix/scripts/bootstrap-windows-<id>.sh` を写したもの。
 //!
 //! clone の中の ps1 を、PATH の pwsh (無ければ Windows PowerShell) の `-Command` で呼ぶ。出力は UTF-8 にしてから流し (捕まえると
 //! PowerShell は端末の code page で書くため)、`$LASTEXITCODE` を 2 にしておく (ps1 が exit まで届かずに終わったとき、中の winget の 0 を
@@ -17,7 +17,7 @@
 //! sshd は、受け持ちが runner のホストでは ps1 を流す前に鍵の写し (`sshd_keys`。WSL の wrapper が写しを置くのと同じ段) と、ユーザーと送り元の
 //! 写し (`sshd_allow`。ホストの値の `[sshd] allowUsers`・`allowFrom`) を置く。
 //!
-//! Windows にしか無い手順 (t3-code・claude-desktop・ghq・fzf・starship・codex。`windows_only`) は WSL の wrapper を持たないので、判断は同じ型の Policy で
+//! Windows にしか無い手順 (winget・t3-code・claude-desktop・ghq・fzf・starship・codex。`windows_only`) は WSL の wrapper を持たないので、判断は同じ型の Policy で
 //! 決め、ps1 の締めの行の文言と出力の印は試験が ps1 の字と突き合わせる。
 //!
 //! ps1 の締めの行の文言 (「→ Install-Ntn で揃える」など) を変えるときは、ここも直す (WSL の wrapper と同じ約束)。
@@ -180,6 +180,51 @@ pub const ONE_PASSWORD_INSTALLED: &str = "1Password の鍵は、1Password の SS
 const NO_ONE_PASSWORD: &str = " -NoOnePassword";
 
 pub const SPECS: &[Ps1Spec] = &[
+    // winget 自身 (アプリ インストーラー。Windows にしか無い手順。WSL の setup には無い)。dotfiles の Windows の道具は winget 1.30 以降を前提に
+    // するので (portable の入れ方が 1.30 で変わった。dotfiles-private の docs/adr/120_codex_cli_without_uac_*)、どのホストでも、winget を使う
+    // ほかの手順より先 (order 6。bootstrap の次) に、固定した版以上に揃える。GitHub の microsoft/winget-cli の Release の msixbundle と依存を
+    // 固定した sha256 で確かめ、Add-AppxPackage でこのユーザーに入れる (UAC は出ない。下げない。dotfiles-private の docs/adr/121_win_winget_pin_*)
+    Ps1Spec {
+        id: "winget",
+        windows_only: true,
+        order: 6,
+        title: "winget (アプリ インストーラー) を固定した版以上に揃える (GitHub の Release から。下げない)",
+        gate: Gate::Always,
+        script: "win/winget/Install-WinGet.ps1",
+        command: "Install-WinGet",
+        subject: "Windows の winget",
+        package: "winget (アプリ インストーラー。GitHub の microsoft/winget-cli の Release)",
+        header: Header::Contains("winget (アプリ インストーラー"),
+        check_secs: 60,
+        // msixbundle (約 220 MB) と依存の zip (約 100 MB) を落とす
+        install_secs: 1800,
+        policy: Policy::Sync,
+        uac: false,
+        ok_text: "Windows の winget は、dotfiles で固定した版以上です。",
+        installed: &[
+            "Windows に winget を入れました (固定した版)。新しい PowerShell から winget と打てます。",
+        ],
+        synced: &["Windows の winget を固定した版に上げました。"],
+        manual_fix: &["上の ※ の行の手順で直す (win/README.md の「winget」)"],
+        sync_fix: &[
+            "揃えるには PowerShell で Install-WinGet を打つか、dotfiles apply --steps winget を流し直す (github.com に出られるかを確かめる。動いている winget は終わる)",
+        ],
+        releases_file: false,
+        ssh_relay: false,
+        sshd_keys: false,
+        one_password: false,
+        missing_blocked: None,
+        output_fixes: &[(
+            "winget を入れられない",
+            "この PC には dotfiles の手 (GitHub の Release) で winget を入れられない。上の ※ の行の手順で直してから dotfiles apply --steps winget を流し直す (win/README.md の「winget」)",
+        )],
+        install_notice: None,
+        sync_notice: None,
+        check_hang: None,
+        leftover: None,
+        notices: &[],
+        alerts: &[],
+    },
     Ps1Spec {
         id: "google-ime-install",
         windows_only: false,
@@ -965,7 +1010,7 @@ pub const SPECS: &[Ps1Spec] = &[
             ),
             (
                 "winget が古く、codex と打てる形を作れない",
-                "winget が 1.29 以前で開発者モードも off なので、入れても codex と打てない (winget は symlink を作れず、1.30 からの codex.exe の hardlink も作らない)。Microsoft Store で「アプリ インストーラー」を更新して winget を 1.30 以降にするか、開発者モードを on にして (設定 > システム > 開発者向け。管理者が要る)、dotfiles apply --steps codex を流し直す (win/README.md の「Codex CLI」)",
+                "winget が 1.29 以前で開発者モードも off なので、入れても codex と打てない (winget は symlink を作れず、1.30 からの codex.exe の hardlink も作らない)。dotfiles apply --steps winget,codex を流して winget を固定した版 (1.30 以降) に上げるか、開発者モードを on にして (設定 > システム > 開発者向け。管理者が要る)、dotfiles apply --steps codex を流し直す (win/README.md の「winget」「Codex CLI」)",
             ),
         ],
         install_notice: None,
@@ -2310,7 +2355,7 @@ mod tests {
                     "⚠️ winget が古く、codex と打てる形を作れない (winget 1.29 以前で、開発者モードも off) → ※ の手順で直す ⚠️".into(),
                 ],
                 "winget が古く、codex と打てる形を作れない (Install-Codex -Check の ※ の行。runner は直さない)",
-                "アプリ インストーラー",
+                "dotfiles apply --steps winget,codex",
             ),
         ];
         for (lines, text, fix) in cases {
@@ -2329,6 +2374,105 @@ mod tests {
                     o[0].notes
                 );
             }
+        }
+    }
+
+    /// winget: いつも on の Windows にしか無い手順で、winget を使うほかの手順より先 (order 6) に流す。3 は -IfMissing で入れ、「→ Install-WinGet
+    /// で揃える」(固定した版より古い) なら引数なしで上げる。UAC は出さない。入れられない (CPU・curl.exe・表に無い版。締めの行は「→ ※ の手順で
+    /// 直す」だけ) なら打たずに知らせ、その直し方を出す
+    #[test]
+    fn winget_runs_first_and_upgrades_without_uac() {
+        let s = spec("winget");
+        assert!(s.windows_only);
+        assert_eq!(s.gate, Gate::Always);
+        assert_eq!(s.policy, Policy::Sync);
+        assert!(!s.uac);
+        // winget を使う ps1 の手順 (と bootstrap の次の手順) より先に流す
+        let order = |id: &str| {
+            super::super::all()
+                .iter()
+                .position(|st| st.info().id == id)
+                .unwrap()
+        };
+        assert_eq!(order("winget"), order("bootstrap") + 1);
+        for other in SPECS.iter().filter(|o| o.id != "winget") {
+            assert!(s.order < other.order, "{} より先に流す", other.id);
+        }
+        // minimum のホストでも on
+        let minimum = crate::host::parse(
+            "group = \"minimum\"\n",
+            Path::new("h.toml"),
+            Groups::embedded().unwrap(),
+        )
+        .unwrap();
+        assert!(s.gate.off_reason(&minimum).is_none());
+        // 3: -IfMissing で入れる (UAC は知らせない)
+        let sys1 = sys(
+            (
+                3,
+                vec![
+                    header_line(s),
+                    "⚠️ winget が入っていない → Install-WinGet で入れる ⚠️".into(),
+                ],
+            ),
+            (0, vec![]),
+        );
+        let (o, out, calls) = run("winget", &sys1, APPLY);
+        assert_eq!(o, vec![Outcome::new(Kind::Ok, "入れた")]);
+        assert_eq!(ends(&calls), vec!["-Check", "-IfMissing"]);
+        assert!(!out.contains("UAC"), "{out}");
+        assert!(
+            out.contains("新しい PowerShell から winget と打てます"),
+            "{out}"
+        );
+        // 1 (古い): apply は引数なしで上げ、check は -Check だけ
+        let old = (
+            1,
+            vec![
+                header_line(s),
+                "⚠️ winget が固定した版より古い → Install-WinGet で揃える ⚠️".into(),
+            ],
+        );
+        let (o, out, calls) = run("winget", &sys(old.clone(), (0, vec![])), APPLY);
+        assert_eq!(o, vec![Outcome::new(Kind::Ok, "揃えた")]);
+        assert_eq!(ends(&calls), vec!["-Check", ""]);
+        assert!(
+            out.contains("Windows の winget を固定した版に上げました"),
+            "{out}"
+        );
+        let (o, _, calls) = run("winget", &sys(old.clone(), (0, vec![])), Mode::Check);
+        assert_eq!(o[0].kind, Kind::Fix);
+        assert_eq!(ends(&calls), vec!["-Check"]);
+        // 上げられなかった: 直し方を添える
+        let (o, _, _) = run("winget", &sys(old, (1, vec![])), APPLY);
+        assert!(
+            o.iter()
+                .flat_map(|x| x.notes.iter())
+                .any(|n| n.contains("dotfiles apply --steps winget")),
+            "{o:?}"
+        );
+        // 入れられない: 打たずに知らせ、直し方を出す (check も apply も)
+        for mode in [Mode::Check, APPLY] {
+            let blocked = sys(
+                (
+                    1,
+                    vec![
+                        header_line(s),
+                        "⚠ winget を入れられない (curl.exe が無い (Windows 10 1803 以降に System32 にある))".into(),
+                        "⚠️ winget を入れられない (上の ※ の行) → ※ の手順で直す ⚠️".into(),
+                    ],
+                ),
+                (0, vec![]),
+            );
+            let (o, _, calls) = run("winget", &blocked, mode);
+            assert_eq!(o.len(), 1);
+            assert_eq!(o[0].kind, Kind::Manual);
+            assert_eq!(ends(&calls), vec!["-Check"]);
+            assert!(
+                o[0].notes[0].contains("dotfiles apply --steps winget"),
+                "{:?}",
+                o[0].notes
+            );
         }
     }
 
@@ -2373,6 +2517,7 @@ mod tests {
         assert_eq!(
             only.iter().map(|s| s.id).collect::<Vec<_>>(),
             vec![
+                "winget",
                 "t3-code",
                 "claude-desktop",
                 "ghq",

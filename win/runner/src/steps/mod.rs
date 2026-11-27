@@ -287,6 +287,7 @@ mod tests {
             ids,
             vec![
                 (5, "bootstrap"),
+                (6, "winget"),
                 (50, "claude-env"),
                 (50, "claude-files"),
                 (50, "claude-footer-links"),
@@ -380,7 +381,7 @@ mod tests {
     /// 環境変数のファイル (local-env) と Notion の API キーの宣言と知らせ (notion-tokens) と herdr-app の mod
     /// (pjp-spaces と layout も) とキーと claude-personal・claude-work と claude-selector と T3 Code (入れる ps1 の手順と設定) と ghq・fzf (cdrepo が
     /// 使う。入れる ps1 の手順) と Claude Desktop (入れる ps1 の手順) と starship (入れる ps1 の手順と、$PROFILE の init の 1 行の starship-init) と
-    /// Codex CLI (入れる ps1 の手順) だけ
+    /// Codex CLI (入れる ps1 の手順) と winget 自身 (入れる ps1 の手順) だけ
     /// (WSL から写した手順・まだ無い手順は受け持ちに従う)
     #[test]
     fn windows_only_steps() {
@@ -393,6 +394,7 @@ mod tests {
             only,
             vec![
                 "bootstrap",
+                "winget",
                 "claude-env",
                 "claude-files",
                 "claude-footer-links",
