@@ -1237,7 +1237,7 @@ dotfiles apply --steps herdr-app-mods             # 置く
 
 | mod | 置くファイル | 中身 |
 | --- | --- | --- |
-| `pjp-hub-panel` | `main.js`・`mod.json`・`ring.svg`・`copy.svg` | ハブの Claude がユーザーに見せる panel。ハブの端末の横のペインに、質問 (選んで送る)・チケット・進み具合・PR の木 (チケットの下に進み具合の段と PR を 1 段下げて並べ、済んだチケットは畳む。`answer` のある段は押してハブへ送れる)・ユーザーの問いへの答え (Q&A。問いごとに開け閉めし、項目ごとに消す印を付けられる)・状況の説明 (markdown。絵だけの行で項目の下に小さな絵も)・進み具合 (段の並び)・チケットと PR の一覧・図 (SVG と、その上に重ねる動き: 一方向に流れる点・点滅する枠・行って戻る点・文字) を出す。チケットの行の ID の右のボタンで、ID だけをクリップボードへ写せる。props の `role` で「まとめ」(状況) と「問い」の 2 つのペインに分けて開け、問いのペインは送信すると自分で閉じる。図はペインの幅に合わせて縮め・大きくし、クリックすると大きく見る小窓で開く。答えは問いごとに 1 行にし、改行で区切って `hc send` で送る (「入力欄に入れる」はクリップボードから貼る)。上の行の `−`・`+` で panel の文字だけを上げ下げでき、大きさは herdr-app を上げ直しても残る。props・panel.json の形・図の置き場所と大きさ・文字の大きさ・罠の正本は `main.js` の頭のコメント |
+| `pjp-hub-panel` | `main.js`・`mod.json`・`ring.svg`・`copy.svg` | ハブの Claude がユーザーに見せる panel。ハブの端末の横のペインに、質問 (選んで送る)・チケット・進み具合・PR の木 (チケットの下に進み具合の段と PR を 1 段下げて並べる。`answer` のある段は押してハブへ送れる)・ユーザーの問いへの答え (Q&A。問いごとに開け閉めし、項目ごとに消す印を付けられる)・状況の説明 (markdown。絵だけの行で項目の下に小さな絵も)・進み具合 (段の並び)・チケットと PR の一覧・図 (SVG と、その上に重ねる動き: 一方向に流れる点・点滅する枠・行って戻る点・文字) を出す。済んだもの (Done・Canceled のチケット・merged と closed の PR・done の段・`done: true` の節) は、消さずに小さな字で出し (済んだ行の ID と題は薄い色)、チケットの行と節は初めから畳む。チケットの行の ID の右のボタンで、ID だけをクリップボードへ写せる。props の `role` で「まとめ」(状況) と「問い」の 2 つのペインに分けて開け、問いのペインは送信すると自分で閉じる。図はペインの幅に合わせて縮め・大きくし、クリックすると大きく見る小窓で開く。答えは問いごとに 1 行にし、改行で区切って `hc send` で送る (「入力欄に入れる」はクリップボードから貼る)。上の行の `−`・`+` で panel の文字だけを上げ下げでき、大きさは herdr-app を上げ直しても残る。props・panel.json の形・図の置き場所と大きさ・文字の大きさ・罠の正本は `main.js` の頭のコメント |
 | `pjp-prefix` | `main.js`・`mod.json` | 旧 herdr の prefix (`Ctrl+K`) の小窓。keys.json の `Ctrl+K` が開き、次の 1 キーで分割・タブ・worktree などの命令を流して閉じる ([次節](#herdr-app-のキー))。キーの一覧と命令の正本は `main.js` の頭のコメントと `BINDINGS` |
 | `pjp-worktree-remove` | `main.js`・`mod.json` | prefix の後の `d` と `Ctrl+Q` が開く確かめの小窓 (window)。今の space の端末を全部止め、終わるのを待ってから space を閉じて worktree を消す ([次節](#herdr-app-のキー))。止める端末・待つ上限・やり直し・残ったフォルダの扱いの正本は `main.js` の頭のコメント |
 | `pjp-sidebar-tabs` | `main.js`・`mod.json`・`spaces.svg`・`agents.svg` | 左のサイドパネルの Spaces と Agents を切り替える、上端のアイコンのタブ (layout pjp-main の stack `sidebar-lists` の header。layout に置くのは `herdr-app-pjp-spaces`)。選んでいるタブはアイコン + 名前、ほかはアイコンだけで、Agents のタブに blocked の agent の数の印を出す。Agents を出していない間は、agents の一覧の順 (`agent.next` の順) を代わりに渡す ([サイドパネルのタブ](#サイドパネルのタブ-pjp-sidebar-tabs))。herdr-app の決まりと見た目の正本は `main.js` の頭のコメント |
@@ -1381,8 +1381,8 @@ herdr-app do pane.close --pane '<問いのペイン>' | Out-String
   を並べ、その下に段 (`steps` の `{ label, state, answer }`。flow の段と同じ札で、`answer` のある段は押せる。下の「段の answer」)・一言 (`note`)・子を出す。
   ID か題を押すと `url` を開く (一覧と同じく http と https だけ)。
   Done・Canceled のチケットで、下に動いているもの (active か blocked の段・open か draft の PR) が無ければ初め上の段だけに畳み、下の PR の数を足す
-  (「PR 3 本 merged」。`▸` で開き、`▾` で畳む)。`related` が true の根の行は、点線の下に「関連」として出す。欄の意味・札の色・畳み方の正本は
-  `main.js` の頭のコメント:
+  (「PR 3 本 merged」。`▸` で開き、`▾` で畳む。畳んだ行は小さな字の 1 行で出す。下の「済んだもの」)。`related` が true の根の行は、点線の下に「関連」
+  として出す。欄の意味・札の色・畳み方の正本は `main.js` の頭のコメント:
 
 ```json
 { "type": "work", "id": "work", "title": "チケット・進み具合・PR", "rows": [
@@ -1396,6 +1396,15 @@ herdr-app do pane.close --pane '<問いのペイン>' | Out-String
   { "id": "TKT-j", "title": "前の会話のチケット", "url": "https://app.notion.com/p/<…>", "status": "Done", "note": "前の会話", "related": true } ] }
 ```
 
+- 済んだもの: チケットの木の済んだ行 (下に動いているもの (active か blocked の段・open か draft の PR) が無く、チケットは Done・Canceled、PR は
+  merged・closed、item は段が全部 done) と done の段、`done: true` を書いた節 (どの type も) は、消さずに小さな字 (13 と 12 は 10、11 と 10 は 9。
+  panel の文字の % に従う) で出す。済んだ行は ID と題を薄い色にし、済んだ行どうしの間を詰める。済んだ行の下 (開いたときの段・一言・子) も小さく、
+  下の行も薄い。済んだチケットの行は初めから畳み、畳んだ間は 1 行に収める (題は入るだけ出して後ろを `…` で省き、PR の数は省かずに右に寄せ、`who` を
+  出さない。`▸` で開くと全部出す)。
+  done の段は札の字と余白を小さくする (label は残す)。`done: true` の節は見出しを小さく薄く出して初めから畳み、開いた中身の字も小さい (図とミニ絵の
+  大きさはそのまま)。節の初めの開け閉め (`done` か `collapsed` の節を畳む) は panel.json を読み直すたびに決めるので、`version` を替えずに後から
+  足した節も畳んで出る (手で開け閉めした節は覚え、`version` が変わると初めに戻る)。ハブは済んだものを外さずに残し、済んだ話の節に `done: true` を
+  書く (`collapsed: true` も一緒に書くと、`done` を知らない古い mod でも `version` が替わったときに畳む)。正本は `main.js` の頭のコメントの「済んだもの」
 - ユーザーの問いへの答えは、節の型 `qa` (Q&A) で書く。答えがほかの子の返答に紛れて、どこで答えたか分からなくならないように、ハブはユーザーに問われたら
   答えをこの節の項目に書く。項目は `{ id, q, at, a, open }` で、1 つの項目がユーザーの問い 1 つとハブの答え 1 つ。panel は項目を枠のついた小さなカードで
   panel.json の順に縦に並べ、節の題の後ろに項目の数を `(N)` で足す。項目の頭の行に `▸`・`▾`・`Q. <q>` (太字)・時刻 (`at`。小さく薄く)・項目の `×` を

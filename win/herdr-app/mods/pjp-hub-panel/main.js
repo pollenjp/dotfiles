@@ -87,7 +87,8 @@
 //     縦の線を引き、子の行の印の欄へ短い横の線を出す (最後の子で縦の線を止める。色は theme の border)。
 //   - 開け閉め: steps か children を持つ ticket の行の印の欄に ▸ (畳んである)・▾ (開いている) を出し、押すと開け閉めする (ダブルクリック
 //     の 2 回目は数えない)。初めは、status が Done か Canceled (大文字小文字を問わない。Cancelled も) で、下 (自分の steps と、深さを
-//     問わず children) に動いているもの (state が active か blocked の段・state が open か draft の PR) が無い行を畳み、ほかは開く。
+//     問わず children) に動いているもの (state が active か blocked の段・state が open か draft の PR) が無い行を畳み、ほかは開く
+//     (畳む行は済んだチケットの行で、小さな字で 1 行に出す。下の「済んだもの」)。
 //     段の state は段の札と同じく字のまま比べる ("Active" は動いているとみない)。畳んだ行は上の段だけを出し、その後ろに、下 (深さを
 //     問わず) の PR の数を state ごとに足す (例「PR 3 本 merged」「PR 2 本 merged・1 本 closed」。open・draft・merged・closed の順で、
 //     知らない state は出てきた順に字のまま、state の無い PR は数だけ。大文字小文字の違う同じ state は 1 つに数え、初めに出てきた字で
@@ -188,10 +189,42 @@
 //   その段の answer を外し、state を done にして書く (mod がその印を外す)。印のファイルは書き換えない。この「段の answer:」の字の無い mod は
 //   answer を読まず、段を押せないだけ (answer を書いても害は無い)。
 //
+// 済んだもの: ハブが panel.json に残す済んだもの (チケット・進み具合・PR の木の済んだ行と done の段・ハブが done を書いた節) は、消さずに、字を
+//   小さく・色を薄く・間を詰めて出し、チケットの行と節は初めから畳む。出す・出さないは変えず、見た目だけを変える。
+//   - 済んだ行 (type "work" の木の行): 下 (自分の steps と、深さを問わず children) に動いているもの (上の「チケット・進み具合・PR の木」の
+//     開け閉めと同じ。active か blocked の段・open か draft の PR) が無く、ticket は status が Done・Canceled・Cancelled、pr は state が merged か
+//     closed、item (知らない kind も) は steps が 1 つ以上あって全部 done の行 (status と PR の state は大文字小文字を問わず、段の state は
+//     段の札と同じく字のまま比べる)。済んだ行の下の行 (開いたときの段・note・children) も、済んでいなくても同じく小さく薄く出す (済んだ行の
+//     下は済んだものでできている)。動いている行の下の済んだ行 (merged の PR・Done の子) は、その行 (と、その下) だけを小さく出す。
+//   - 済んだ行の出し方: 上の段の字を一回り小さくし (下の「小さく出す」)、ID と題を muted の色で出す (押すと url を開くのは今までどおり)。
+//     状態の札・who の札・ID を写すボタン・畳んだ行の PR の数も小さい。小さく出す行どうしが続く間は、行の間を 3 px (DONE.gap) に詰め
+//     (ほかの行との間は今までの 8 px)、段と note の上の空きも半分にする。済んだチケットの行は、今までどおり初めから畳む (▸。押すと開き、
+//     開いた下も小さいまま)。畳んだ済んだ行は 1 行に収める: 題と PR の数を ID と札の後ろの残りの幅 (伸びる箱) に入れ、題は入るだけ出して
+//     後ろを … で省き、PR の数は省かずに右に寄せ、who の札を出さない (開くと、題を折り返して全部出し、who も出す)。押すと url を開くのは
+//     題の字の幅だけで、箱の空いた所は押せない。ID と札も入らないほど狭いときだけ、札が次の段へ回る。畳めない済んだ行 (PR・item・段も子も
+//     無いチケット) は、題を折り返して全部出す。
+//   - done の段 (work の木と flow の steps の、state が done の段): 札の字と余白を小さくする (label の字は残す)。両隣が done の段の間の › も
+//     小さい。active・todo・blocked の段は今までどおり (済んだ行の下の段と、done の節の中の段は、どれも小さい)。押せる段 (answer のある段) の
+//     振る舞いは変えない。
+//   - done の節 (どの type の節も。欄 done が true): 見出しを小さく muted の色で出し、カードの上下の余白を 6 px (DONE.pad) に詰め (左右は
+//     今までの 12 px)、初めは畳む。開いた中身の字・札と、× と ID を写すボタンも小さく出す (図とミニ絵の大きさは今までのまま)。済んでいない
+//     行は、done の節の中でも薄くしない (薄くするのは済んだ行とその下)。
+//   - 節の初めの開け閉め: done が true か collapsed が真の節を畳み、ほかは開く。描くたびに今の panel.json の欄で決めるので、version を
+//     替えずに後から足した節 (初めて出す id)・後から done か collapsed を書いた節も畳んで出る (この「済んだもの:」の前の mod は、version が
+//     替わったとき (初めて読んだときも) だけ collapsed を読んだ)。手で開け閉めした節は id で覚え (初めの形より先に効く)、panel.json を
+//     書き直しても残し、version が変わると忘れて初めの形に戻す (木の行と Q&A の項目の開け閉めと同じ)。
+//   - 小さく出す: 字の大きさの値を 0.8 倍 (DONE.text) にして整数に丸め、9 (DONE.min) より小さくしない (ID と題・節の見出しの 13 と markdown の
+//     本文の 12 は 10、note・段の札・PR の数の 11 と札の 10 は 9)。字を囲む札・段の札と、× と ID を写すボタンの高さ・余白・角は 0.7 倍
+//     (DONE.box。押した段の確かめの「送る」「やめる」は、押しやすいように今の大きさ)。どちらも panel の文字の % (下の「文字の大きさ」) に従う。
+//     問いと、上の帯・答えの欄は小さくしない。
+//   - ハブがすること: 済んだものも消さずに残す (要らない節は、ユーザーが節の × で消す)。済んだ話の節には done: true を書く。この「済んだもの:」
+//     の字の無い古い mod は done を読まないので、collapsed: true も一緒に書くと、古い mod でも version が替わったときには畳む。
+//
 // 文字の大きさ: どの role のペインも、上の行 (題・更新の時刻の行) の「− <今の %> +」で、panel (この mod) の文字だけを上げ下げする。
 //   1 回で 10% ずつ、70%〜200%。% を押すと既定 (100%) に戻す (既定のときは押せない)。100% は、ここに書いた字の大きさの値
 //   (本文 13・題 15・問いの題 14・節の題 13・markdown の本文 12・段の札 11・札 10・ボタン 12 など。この mod を書いたときの px) の
-//   1.2 倍。字 (図の説明 caption も) と、字を囲む札・段の札・ボタンの高さ・余白・角が同じ倍率で変わる。変えないもの: カードと一覧の
+//   1.2 倍。字 (図の説明 caption も) と、字を囲む札・段の札・ボタンの高さ・余白・角が同じ倍率で変わる (済んだものは、そこから一回り
+//   小さく出す。上の「済んだもの」の「小さく出す」)。変えないもの: カードと一覧の
 //   余白・間、図そのもの (image の節の絵と marks。ペインの幅に合わせ、marks の label の字も図の倍率のまま)、「− % +」の
 //   組 (いつも 100% の大きさ。押しても組の幅が変わらず、ボタンがポインタの下から動かないように)。markdown の中の見出し (#) の大きさは
 //   TextView が決める (倍率に従うかは試していない。本文と箇条書きは親の字の大きさに従う)。
@@ -226,10 +259,10 @@
 //   { version, title, updated,
 //     questions: [{ id, short, title, body (markdown), options: [{ label, desc, recommended, answer }] }],
 //     sections: [
-//       { type: "work", id, title, rows: [...], collapsed },   (チケット・進み具合・PR の木。行の形は上の「チケット・進み具合・PR の木」、
-//                                                              段の answer は上の「段の answer」)
-//       { type: "qa", id, title, items: [{ id, q, at, a (markdown), open }], collapsed },   (ユーザーの問いと答え。上の「Q&A」)
-//       { type: "markdown", id, title, text (リンクは上の「リンク」、絵だけの行は上の「ミニ絵」), collapsed },
+//       { type: "work", id, title, rows: [...], collapsed, done },   (チケット・進み具合・PR の木。行の形は上の「チケット・進み具合・PR の
+//                                                                    木」、段の answer は上の「段の answer」)
+//       { type: "qa", id, title, items: [{ id, q, at, a (markdown), open }], collapsed, done },   (ユーザーの問いと答え。上の「Q&A」)
+//       { type: "markdown", id, title, text (リンクは上の「リンク」、絵だけの行は上の「ミニ絵」), collapsed, done },
 //       { type: "flow", id, title, rows: [{ label, sub, steps: [{ label, state: "done"|"active"|"todo"|"blocked" }] }] },
 //       { type: "tickets", id, title, rows: [{ id, title, url, status, note }] },   (チケットの一覧。上の「チケットと PR の一覧」)
 //       { type: "prs", id, title, rows: [{ id, title, url, state, ci, note }] },    (PR の一覧)
@@ -238,6 +271,8 @@
 //                 | { kind: "pulse", x, y, w, h, radius, period, color } (点滅する枠)
 //                 | { kind: "dot", x1, y1, x2, y2, period, size, color }  (行って戻る点)
 //                 | { kind: "label", x, y, text, size, color }] } ] }
+//   collapsed と done は、どの type の節にも書ける。collapsed が真なら初めに畳み、done が true なら済んだ節 (小さく出して初めに畳む)。
+//   どちらも、初めの開け閉めの決まりは上の「済んだもの」の「節の初めの開け閉め」。
 //   marks の座標は画像の px (width・height と同じ空間) で、図と同じ倍率で置く。color は "#rrggbb" か
 //   theme の名前 (accent・ok・warn・blocked・muted など)。width・height が数でない・0 以下なら 520×300 とみる。
 //   図の置き場所: herdr-app の home の pjp-hub-panel-media/ (Windows は %USERPROFILE%\.config\herdr-app\pjp-hub-panel-media)。ミニ絵の図も同じ。
@@ -402,6 +437,11 @@ const CI_CHIP = { pass: ["ok", "CI ✓"], fail: ["blocked", "CI ✗"], pending: 
 const TREE = { indent: 3, gap: 8 };
 const CLOSED_STATUS = new Set(["done", "canceled", "cancelled"]); // 初めに畳んでよい status (小文字にして比べる)
 const PR_ORDER = ["open", "draft", "merged", "closed"]; // 畳んだ行に足す PR の数の並び (知らない state はこの後ろ)
+const DONE_PR = new Set(["merged", "closed"]); // 済んだ PR の state (小文字にして比べる。頭のコメントの「済んだもの」)
+// 済んだもの (頭のコメントの「済んだもの」) を小さく出す寸法。text は字の大きさの値に掛ける倍率 (整数に丸め、min より小さくしない)、box は
+// 字を囲む札・段の札と、× と ID を写すボタンの高さ・余白・角に掛ける倍率、gap は小さく出す行どうしの間 (px。行の間と同じく % に従わない)、
+// pad は done の節のカードの上下の余白 (px。カードの余白と同じく % に従わない。左右は図の幅の計算 (PIC.pad) と合わせて変えない)
+const DONE = { text: 0.8, min: 9, box: 0.7, gap: 3, pad: 6 };
 // 形の違う行・段 (null・数・文字・配列) は中身の無いものとみる
 const objOr = (v) => (v !== null && typeof v === "object" && !Array.isArray(v) ? v : {});
 const listOf = (v) => (Array.isArray(v) ? v : []);
@@ -435,6 +475,20 @@ const isMoving = (r) =>
     const o = objOr(ch);
     return (kindOf(o) === "pr" && ["open", "draft"].includes(prStateOf(o).toLowerCase())) || isMoving(o);
   });
+// 済んだ行 (頭のコメントの「済んだもの」): ticket は status が Done か Canceled (CLOSED_STATUS)、pr は state が merged か closed、item (知らない
+// kind も) は段が 1 つ以上あって全部 done (段の札と同じく字のまま比べる) で、どれも下に動いているもの (isMoving) が無い。isMoving は下を深さを
+// 問わずたどるので、済んだ字の行だけで引く
+const isDoneRow = (r) => {
+  const kind = kindOf(r);
+  let done;
+  if (kind === "ticket") done = CLOSED_STATUS.has(str(r.status).trim().toLowerCase());
+  else if (kind === "pr") done = DONE_PR.has(prStateOf(r).toLowerCase());
+  else {
+    const steps = listOf(r.steps);
+    done = steps.length > 0 && steps.every((st) => objOr(st).state === "done");
+  }
+  return done && !isMoving(r);
+};
 // 下 (深さを問わず) の PR を state ごとに数える。鍵は小文字にした state で、字は初めに出てきたもの。出てきた順に並ぶ
 const tallyPrs = (r, out = new Map()) => {
   for (const ch of listOf(r.children)) {
@@ -721,11 +775,12 @@ export default class HubPanel extends View {
     this.rowOpen = {}; // 木の行を手で開け閉めした形 (鍵は rowKey。無い行は初めの形)
     this.qaOpen = {}; // Q&A の項目を手で開け閉めした形 (鍵は qaKey。無い項目は初めの形)
     this.miniCheck = new Map(); // ミニ絵の図を確かめた結果 (図のパス → { why } か { ok })。panel.json を読み直すたびに作り直す
-    this.probe = {}; // ミニ絵の物差しで測った記号の欄の幅 ("c:<記号の欄の字>" → zoom を掛けた後の logical px)
+    this.probe = {}; // ミニ絵の物差しで測った記号の欄の幅 (rulerKey の "c:<1 段の幅>:<記号の欄の字>" → zoom を掛けた後の logical px)
     this.status = "";
     this.busy = false;
     this.width = null;
     this.k = TEXT_BASE; // 字の倍率。render の頭で shared の % から決め直す
+    this.tiny = false; // 小さく出す間か (済んだ行とその下・done の節を作る間だけ true。withTiny)
     // 印のファイルの控え: 節を消す印 (dm) と段の押した印 (sp)。cur は印 (鍵 → 印。印のファイルの中身に、まだ書いていない押下を当てたもの)、
     // pending はまだ書いていない押下 (op の並び)、error は読み書きできなかったわけ。markTail は 2 つのファイルの読み書きを 1 つずつ流す鎖、
     // hash は今の panel.json の指紋。linkMsg はリンクを開かなかったわけ (わけの行に出したもの)
@@ -818,7 +873,8 @@ export default class HubPanel extends View {
         // 確かめのわけの字は消す (送っている段の「送っています…」は残す)
         const keep = this.sending != null && this.sending in this.stepMsg ? { [this.sending]: this.stepMsg[this.sending] } : {};
         this.stepMsg = keep;
-        for (const s of fresh.sections ?? []) if (s.collapsed) this.collapsed[s.id] = true;
+        // 節の初めの開け閉め (done か collapsed の節を畳む) は、ここで入れずに描くたびに今の panel.json から決める (section)。version を
+        // 替えずに後から足した節・後から done を書いた節も畳んで出る
       }
       this.data = next.data;
       this.hash = next.hash;
@@ -879,6 +935,29 @@ export default class HubPanel extends View {
   // 字の大きさと、字を囲む札・ボタンの高さ・余白・角を、panel の倍率で引く。n はこの mod を書いたときの px (100% の 1/1.2)
   fs(n) {
     return Math.round(n * this.k * 10) / 10;
+  }
+
+  // 小さく出す間 (on。既定は this.tiny) の字の大きさ: 字の大きさの値 n を DONE.text 倍にして整数に丸め、DONE.min より小さくしない (13 と 12 は
+  // 10、11 と 10 は 9)。小さく出さない間は fs(n) と同じ (頭のコメントの「済んだもの」)
+  ts(n, on = this.tiny) {
+    return this.fs(on ? Math.max(DONE.min, Math.round(n * DONE.text)) : n);
+  }
+
+  // 小さく出す間の、字を囲む札・段の札と、× と ID を写すボタンの高さ・余白・角: n を DONE.box 倍にする。小さく出さない間は fs(n) と同じ
+  bs(n, on = this.tiny) {
+    return this.fs(on ? n * DONE.box : n);
+  }
+
+  // fn の作る要素を、on なら小さく出す (ts・bs が小さい寸法を返す間に作る)。入れ子では外の小ささを保ち、作り終えたら元に戻す。要素は fn の中で
+  // 作り終える (押したときの仕事 (on_click など) は後で走るが、寸法を引かない)
+  withTiny(on, fn) {
+    const prev = this.tiny;
+    this.tiny = prev || !!on;
+    try {
+      return fn();
+    } finally {
+      this.tiny = prev;
+    }
   }
 
   setZoom(z, cx) {
@@ -1178,7 +1257,16 @@ export default class HubPanel extends View {
   // ---- 状況の節 ----
   section(s, i, c) {
     const id = s.id ?? `s${i}`;
-    const closed = !!this.collapsed[id];
+    // 済んだ節 (done が true) は、見出しを小さく薄く、中身の字も小さく出す (頭のコメントの「済んだもの」)
+    const done = s.done === true;
+    return this.withTiny(done, () => this.sectionCard(s, id, done, c));
+  }
+
+  // 節のカード (section が小さく出す間を決めてから呼ぶ)。初めの開け閉めは、done か collapsed の節を畳み、ほかは開く。描くたびに今の
+  // panel.json の欄で決めるので、version を替えずに後から足した節・後から done を書いた節も畳んで出る。手で開け閉めした節は this.collapsed に
+  // id で覚え (version が変わると忘れる)、初めの形より先に効く
+  sectionCard(s, id, done, c) {
+    const closed = this.collapsed[id] ?? (done || !!s.collapsed);
     // 消す印 (頭のコメントの「節を消す印」)。ボタンを出すのは、まとめのペインの id のある節だけ
     const key = this.marksOn() ? markKey(s) : null;
     const marked = this.markState(s) === "marked";
@@ -1198,9 +1286,9 @@ export default class HubPanel extends View {
         div()
           .flex_1()
           .min_w(0)
-          .text_size(this.fs(13))
+          .text_size(this.ts(13))
           .font_semibold()
-          .text_color(marked ? c.muted : c.fg)
+          .text_color(marked || done ? c.muted : c.fg)
           .when(marked, (el) => el.line_through())
           .child(s.type === "qa" ? this.qaTitle(s) : (s.title ?? "")),
       );
@@ -1217,13 +1305,16 @@ export default class HubPanel extends View {
     }
     return v_flex()
       .id(`hp-s-${id}`)
-      .p(12)
-      .gap(8)
+      .px(12)
+      .py(done ? DONE.pad : 12)
+      .gap(done ? 4 : 8)
       .rounded(10)
       .border_1()
       .when(marked, (el) => el.border_dashed())
       .border_color(marked ? c.warn : c.border)
       .bg(c.surface)
+      // 済んだ節は、字の大きさを継ぐ字 (印の ▸・木の行の ID と題・知らない節のわけなど) も小さくする
+      .when(done, (el) => el.text_size(this.ts(13)))
       // 題の行と、その右の印のボタン (題の行の外に置き、押しても節は開け閉めしない)
       .child(
         h_flex()
@@ -1238,7 +1329,7 @@ export default class HubPanel extends View {
             ),
           ),
       )
-      .when(marked, (el) => el.child(div().text_size(this.fs(11)).text_color(c.warn).child("次の更新で消える (「戻す」で残す)")))
+      .when(marked, (el) => el.child(div().text_size(this.ts(11)).text_color(c.warn).child("次の更新で消える (「戻す」で残す)")))
       .when(!!body, (el) => el.child(marked ? div().opacity(0.45).child(body) : body));
   }
 
@@ -1387,15 +1478,15 @@ export default class HubPanel extends View {
     return h_flex()
       .id(eid)
       .flex_none()
-      .h(this.fs(20))
-      .min_w(this.fs(20))
-      .px(this.fs(6))
+      .h(this.bs(20))
+      .min_w(this.bs(20))
+      .px(this.bs(6))
       .justify_center()
       .items_center()
-      .rounded(this.fs(5))
+      .rounded(this.bs(5))
       .border_1()
       .border_color(marked ? c.warn : c.border)
-      .text_size(this.fs(11))
+      .text_size(this.ts(11))
       .text_color(marked ? c.warn : c.dim)
       .cursor_pointer()
       .hover((st) => st.bg(c.raised))
@@ -1449,13 +1540,13 @@ export default class HubPanel extends View {
   // markdown の節の中身。絵だけの行があれば、文・ミニ絵・文の順に縦に並べる (文はそれぞれ md() の TextView)。無ければ今までどおり 1 つの TextView
   markdownBody(s, id, c) {
     const parts = typeof s.text === "string" ? splitMinis(s.text) : [];
-    if (!parts.some((p) => p.kind === "mini")) return div().text_size(this.fs(12)).text_color(c.fg).child(this.md(`hp-md-${id}`, s.text));
+    if (!parts.some((p) => p.kind === "mini")) return div().text_size(this.ts(12)).text_color(c.fg).child(this.md(`hp-md-${id}`, s.text));
     // 物差しで測る記号の欄の字 (箇条書きの中のミニ絵の分だけ)
     const prefixes = [...new Set(parts.filter((p) => p.kind === "mini" && p.align.depth > 0).map((p) => p.align.prefix))];
     return v_flex()
       .relative()
       .gap(MINI.gap)
-      .text_size(this.fs(12))
+      .text_size(this.ts(12))
       .text_color(c.fg)
       .children(parts.map((p, k) => (p.kind === "text" ? this.md(k === 0 ? `hp-md-${id}` : `hp-md-${id}-${k}`, p.text) : this.mini(p, s, id, k, c))))
       .when(prefixes.length > 0, (el) => el.child(this.miniRulers(id, prefixes)));
@@ -1466,7 +1557,8 @@ export default class HubPanel extends View {
   mini(p, s, id, k, c) {
     const x = this.miniX(p.align);
     const why = p.why ?? this.miniCheck.get(p.path)?.why ?? null;
-    if (why) return div().pl(x).text_size(this.fs(11)).text_color(c.dim).child(`ミニ絵を出せない: ${why}`);
+    if (why) return div().pl(x).text_size(this.ts(11)).text_color(c.dim).child(`ミニ絵を出せない: ${why}`);
+    // 大きさは fs (done の節の中でも小さくしない。図の大きさは済んだものでも今のまま。頭のコメントの「済んだもの」)
     const W = this.fs(MINI.w);
     const H = this.fs(MINI.h);
     // ペインの幅 (zoom で割った px) から一覧と節のカードの余白 (PIC.pad)・節の中の箱の余白 (s.inset。Q&A の項目のカードと答えの字下げ)・
@@ -1491,9 +1583,9 @@ export default class HubPanel extends View {
       );
   }
 
-  // TextView の箇条書きの 1 段の幅 (zoom を掛ける前の px)。TextView の字の大きさは、節の中身の字 (fs(12)) を継ぐ
+  // TextView の箇条書きの 1 段の幅 (zoom を掛ける前の px)。TextView の字の大きさは、節の中身の字 (ts(12)。done の節では小さい) を継ぐ
   listIndent() {
-    return this.fs(12) * LIST.indent;
+    return this.ts(12) * LIST.indent;
   }
 
   // ミニ絵の左の空き (zoom を掛ける前の px)。TextView (LIST) は入れ子の箇条書きを 1 段の幅ずつ下げ、記号の欄の後ろに字を置くので、
@@ -1502,8 +1594,14 @@ export default class HubPanel extends View {
   miniX(a) {
     if (!a || a.depth === 0) return 0;
     const ind = this.listIndent();
-    const w = this.probe[`c:${a.prefix}`];
+    const w = this.probe[this.rulerKey(ind, a.prefix)];
     return ind * (a.depth - 1) + (w != null ? w / appZoom() : ind);
+  }
+
+  // 物差しで測った幅の鍵。1 段の幅 (ind。本文の字の大きさで決まる) と記号の欄の字の組。done の節は本文の字が小さく、同じ記号でも幅が違うので、
+  // ふつうの節と鍵を分ける (分けないと、後から測った節の幅でもう一方の節のミニ絵がずれる)
+  rulerKey(ind, prefix) {
+    return `c:${ind}:${prefix}`;
   }
 
   // 物差し: 見えない要素で記号の欄の幅を測る。TextView の記号の欄と同じ作り (幅は 1 段の幅より狭くならず、記号の右に 1 段の幅の
@@ -1525,7 +1623,7 @@ export default class HubPanel extends View {
             .min_w(ind)
             .pr(ind * LIST.gap)
             .whitespace_nowrap()
-            .on_size_change((size, cx) => this.takeRuler(`c:${pf}`, size.width, cx))
+            .on_size_change((size, cx) => this.takeRuler(this.rulerKey(ind, pf), size.width, cx))
             .child(pf),
         ),
       );
@@ -1606,13 +1704,13 @@ export default class HubPanel extends View {
           .when(marked, (el) => el.line_through())
           .child(`Q. ${q}`),
       )
-      .when(at !== "", (el) => el.child(div().flex_none().text_size(this.fs(10)).text_color(c.dim).child(at)));
+      .when(at !== "", (el) => el.child(div().flex_none().text_size(this.ts(10)).text_color(c.dim).child(at)));
     let answer = null;
     if (open) {
       const a = str(it.a);
       answer =
         a.trim() === ""
-          ? div().text_size(this.fs(12)).text_color(c.dim).child("(まだ答えていない)")
+          ? div().text_size(this.ts(12)).text_color(c.dim).child("(まだ答えていない)")
           : // inset: 項目のカードの左右の余白と枠 (px(10)・border_1) と答えの字下げ。ミニ絵がカードからはみ出さない幅を決める
             this.markdownBody({ title: `Q. ${q}`, text: a, inset: 22 + S + gap }, `${id}-qa-${i}`, c);
     }
@@ -1625,7 +1723,7 @@ export default class HubPanel extends View {
       .border_1()
       .when(marked, (el) => el.border_dashed())
       .border_color(marked ? c.warn : c.border)
-      .text_size(this.fs(12))
+      .text_size(this.ts(12))
       .child(
         h_flex()
           .gap(6)
@@ -1639,7 +1737,7 @@ export default class HubPanel extends View {
             ),
           ),
       )
-      .when(marked, (el) => el.child(div().pl(S + gap).text_size(this.fs(11)).text_color(c.warn).child("次の更新で消える (「戻す」で残す)")))
+      .when(marked, (el) => el.child(div().pl(S + gap).text_size(this.ts(11)).text_color(c.warn).child("次の更新で消える (「戻す」で残す)")))
       .when(!!answer, (el) => el.child(div().pl(S + gap).min_w(0).when(marked, (e) => e.opacity(0.45)).child(answer)));
   }
 
@@ -1702,15 +1800,16 @@ export default class HubPanel extends View {
                 .children(chipsOf(row))
                 .when(title !== "", (el) => el.child(this.linkText(`hp-rt-${key}`, title, url, c.fg, c).min_w(0))),
             )
-            .when(note !== "", (el) => el.child(div().min_w(0).text_size(this.fs(11)).text_color(c.muted).child(note)));
+            .when(note !== "", (el) => el.child(div().min_w(0).text_size(this.ts(11)).text_color(c.muted).child(note)));
         }),
       );
   }
 
-  // 押すと url を開く字。下線と指の形のポインタで押せると分かるようにし、上に来ると url を出す。url が無ければ押せない字 (fg の色・下線なし)
-  linkText(eid, text, url, color, c) {
+  // 押すと url を開く字。下線と指の形のポインタで押せると分かるようにし、上に来ると url を出す。url が無ければ押せない字 (plain の色。既定は
+  // fg。下線なし)
+  linkText(eid, text, url, color, c, plain = c.fg) {
     const el = div().id(eid);
-    if (!url) return el.text_color(c.fg).child(text);
+    if (!url) return el.text_color(plain).child(text);
     return el
       .text_color(color)
       .underline()
@@ -1728,9 +1827,10 @@ export default class HubPanel extends View {
   // ---- ID を写すボタン (頭のコメントの「ID を写すボタン」) ----
 
   // 行の ID: 押すと url を開く字 (linkText)。copy (チケットの行) なら、その右に ID を写すボタンを付け、2 つを 1 つの組にする (狭いときも
-  // ボタンだけが次の段へ回らない。ID は縮んで折り返す)。写すのは ID の前後の空白を除いた字で、それが空ならボタンを付けない
-  idCell(linkEid, copyEid, rid, url, c, copy) {
-    const link = this.linkText(linkEid, rid, url, c.accent, c).min_w(0).font_semibold();
+  // ボタンだけが次の段へ回らない。ID は縮んで折り返す)。写すのは ID の前後の空白を除いた字で、それが空ならボタンを付けない。faint (木の
+  // 済んだ行。頭のコメントの「済んだもの」) なら、ID を accent でなく muted の色で出す
+  idCell(linkEid, copyEid, rid, url, c, copy, faint = false) {
+    const link = this.linkText(linkEid, rid, url, faint ? c.muted : c.accent, c, faint ? c.muted : c.fg).min_w(0).font_semibold();
     const text = rid.trim();
     if (!copy || text === "") return link;
     return h_flex().min_w(0).gap(4).items_center().child(link).child(this.copyButton(copyEid, text, c));
@@ -1746,19 +1846,20 @@ export default class HubPanel extends View {
     if (state === "ok") tip = `${text} をクリップボードに写した`;
     else if (state === "fail") tip = `${text} を写せない: ${m.why}`;
     else if (this.busy) tip = "送っている間は押せない";
-    let body = svg(COPY_ICON).flex_none().size(this.fs(12)).text_color(color);
+    // 大きさは bs・ts (済んだ行では、ボタンも字に合わせて小さい。頭のコメントの「済んだもの」)
+    let body = svg(COPY_ICON).flex_none().size(this.bs(12)).text_color(color);
     if (state === "ok") body = "✓";
     else if (state === "fail") body = "✗";
     return h_flex()
       .id(eid)
       .flex_none()
-      .h(this.fs(16))
-      .min_w(this.fs(16))
-      .px(this.fs(2))
+      .h(this.bs(16))
+      .min_w(this.bs(16))
+      .px(this.bs(2))
       .justify_center()
       .items_center()
-      .rounded(this.fs(4))
-      .text_size(this.fs(11))
+      .rounded(this.bs(4))
+      .text_size(this.ts(11))
       .text_color(color)
       .tooltip(tip)
       // 押せない間は薄く出す (button() の押せないボタンと同じく、押せないと分かるように)
@@ -1813,34 +1914,34 @@ export default class HubPanel extends View {
     });
   }
 
-  // 状態の札。枠と字を color で、地を同じ色の薄い色で塗る (地は color が #rrggbb のときだけ)
+  // 状態の札。枠と字を color で、地を同じ色の薄い色で塗る (地は color が #rrggbb のときだけ)。小さく出す間は字も余白も小さい (ts・bs)
   chip(text, color) {
     const bg = withAlpha(color, "26");
     return div()
       .flex_none()
-      .px(this.fs(6))
-      .py(this.fs(1))
-      .rounded(this.fs(8))
+      .px(this.bs(6))
+      .py(this.bs(1))
+      .rounded(this.bs(8))
       .border_1()
       .border_color(color)
       .when(!!bg, (el) => el.bg(bg))
       .text_color(color)
-      .text_size(this.fs(10))
+      .text_size(this.ts(10))
       .font_semibold()
       .child(text);
   }
 
-  // 枠だけの札 (木の行の who)。地を塗らず、字は細いまま。入らなければ縮んで、札の中で折り返す
+  // 枠だけの札 (木の行の who)。地を塗らず、字は細いまま。入らなければ縮んで、札の中で折り返す。小さく出す間は字も余白も小さい
   outlineChip(text, color) {
     return div()
       .min_w(0)
-      .px(this.fs(6))
-      .py(this.fs(1))
-      .rounded(this.fs(8))
+      .px(this.bs(6))
+      .py(this.bs(1))
+      .rounded(this.bs(8))
       .border_1()
       .border_color(color)
       .text_color(color)
-      .text_size(this.fs(10))
+      .text_size(this.ts(10))
       .child(text);
   }
 
@@ -1861,18 +1962,23 @@ export default class HubPanel extends View {
     if (roots.length === 0) return div().text_color(c.muted).child("(行はありません)");
     const g = this.treeGeom();
     const sec = markKey(s) ?? ""; // 押した印の section (頭のコメントの「段の answer」。id の無い節は空の字)
-    const stack = (list) =>
-      v_flex()
-        .min_w(0)
-        .gap(TREE.gap)
-        .children(
-          list.map(({ r, path }) => {
-            const { top, rest } = this.workRow(r, path, 0, id, g, c, null, sec);
-            return v_flex().min_w(0).child(top).when(!!rest, (el) => el.child(rest));
-          }),
-        );
+    // 根の行を上から並べる。行の間は TREE.gap で、小さく出す行 (済んだ行・done の節の中) が続く間は DONE.gap に詰める
+    const stack = (list) => {
+      const items = [];
+      let prev = null; // 前の行を小さく出したか (1 つ目の前は null)
+      for (const { r, path } of list) {
+        const small = this.tiny || isDoneRow(r);
+        if (prev != null) items.push(div().h(prev && small ? DONE.gap : TREE.gap));
+        prev = small;
+        const { top, rest } = this.workRow(r, path, 0, id, g, c, null, sec);
+        items.push(v_flex().min_w(0).child(top).when(!!rest, (el) => el.child(rest)));
+      }
+      return v_flex().min_w(0).children(items);
+    };
     const main = roots.filter(({ r }) => r.related !== true);
     const related = roots.filter(({ r }) => r.related === true);
+    // 「関連」の字は 1 つ目の関連の行と同じ大きさ (済んだ行なら小さい)
+    const relSize = related.length > 0 ? this.ts(13, this.tiny || isDoneRow(related[0].r)) : null;
     return v_flex()
       .gap(TREE.gap)
       .when(main.length > 0, (el) => el.child(stack(main)))
@@ -1880,14 +1986,28 @@ export default class HubPanel extends View {
         el
           .when(main.length > 0, (e) => e.child(div().border_t_1().border_dashed().border_color(c.border)))
           // 「関連」の字は行と同じ大きさにし、1 つ目の行の 1 行目とそろえる
-          .child(h_flex().items_start().gap(8).child(div().flex_none().text_color(c.muted).child("関連")).child(stack(related).flex_1())),
+          .child(
+            h_flex()
+              .items_start()
+              .gap(8)
+              .child(div().flex_none().text_size(relSize).text_color(c.muted).child("関連"))
+              .child(stack(related).flex_1()),
+          ),
       );
   }
 
   // 木の行。上の段 (top) と、その下 (rest: 段・一言・子。無ければ null) を分けて返す。親は子の top と rest の左に、それぞれ溝 (親の縦の
   // 線) を付ける。tick は親から来る横の線: null (根・線を引かない深さ)・"tee" (下に兄弟が続く)・"corner" (最後の子。親の縦の線をここで止める)。
-  // sec は押した印の section (節の id か空の字)
-  workRow(r, path, depth, id, g, c, tick, sec) {
+  // sec は押した印の section (節の id か空の字)。under は、上の行のどれかが済んだ行か
+  workRow(r, path, depth, id, g, c, tick, sec, under = false) {
+    // 済んだ行 (isDoneRow) と、その下の行は、上の段もその下 (段・一言・子) も小さく出し、ID と題を薄く出す (頭のコメントの「済んだもの」)
+    const faint = under || isDoneRow(r);
+    return this.withTiny(faint, () => this.workRowIn(r, path, depth, id, g, c, tick, sec, faint));
+  }
+
+  // workRow の中身 (小さく出す間を決めてから呼ぶ)。small は小さく出すか (済んだ行とその下・done の節の中)。行の間と段・一言の上を詰める
+  workRowIn(r, path, depth, id, g, c, tick, sec, faint) {
+    const small = this.tiny;
     const kind = kindOf(r);
     const steps = listOf(r.steps);
     const kids = listOf(r.children).map((k, i) => ({ r: objOr(k), path: `${path}.${i}` }));
@@ -1901,33 +2021,39 @@ export default class HubPanel extends View {
     const rest = [];
     if (open && steps.length > 0) {
       const at = { section: sec, row: rowName(r, path) }; // 押した印の section と row (頭のコメントの「段の answer」)
-      rest.push(this.treePiece(g, lined, 4, this.workSteps(steps.map(stepOf), `w-${id}-${path}`, at, c), c));
+      rest.push(this.treePiece(g, lined, small ? 2 : 4, this.workSteps(steps.map(stepOf), `w-${id}-${path}`, at, c), c));
     }
-    if (open && note !== "") rest.push(this.treePiece(g, lined, 2, div().min_w(0).text_size(this.fs(11)).text_color(c.muted).child(note), c));
+    if (open && note !== "") rest.push(this.treePiece(g, lined, small ? 1 : 2, div().min_w(0).text_size(this.ts(11)).text_color(c.muted).child(note), c));
     if (showKids) {
+      // 子の上の間は TREE.gap で、小さく出すものが続く (この行か前の子と、その子) 間は DONE.gap に詰める
+      let prev = small;
       kids.forEach(({ r: k, path: kp }, i) => {
         const last = i === kids.length - 1;
-        const part = this.workRow(k, kp, depth + 1, id, g, c, lined ? (last ? "corner" : "tee") : null, sec);
+        const ks = small || isDoneRow(k);
+        const gap = prev && ks ? DONE.gap : TREE.gap;
+        prev = ks;
+        const part = this.workRow(k, kp, depth + 1, id, g, c, lined ? (last ? "corner" : "tee") : null, sec, faint);
         if (lined) {
-          rest.push(this.treeSpacer(g, c));
+          rest.push(this.treeSpacer(g, c, gap));
           rest.push(this.treeWrap(g, !last, part.top, c));
           if (part.rest) rest.push(this.treeWrap(g, !last, part.rest, c));
         } else {
-          rest.push(div().h(TREE.gap));
+          rest.push(div().h(gap));
           rest.push(part.top);
           if (part.rest) rest.push(part.rest);
         }
       });
     }
     return {
-      top: this.workTop(r, kind, path, id, g, c, { foldable, open, key, tick, tail: lined, summary: open ? "" : prSummary(r) }),
+      top: this.workTop(r, kind, path, id, g, c, { foldable, open, key, tick, tail: lined, summary: open ? "" : prSummary(r), faint, small }),
       rest: rest.length > 0 ? v_flex().min_w(0).children(rest) : null,
     };
   }
 
-  // 木の行の初めの開け閉め: status が Done か Canceled で、下に動いているもの (isMoving) が無ければ畳む
+  // 木の行の初めの開け閉め: 済んだ行 (isDoneRow。畳めるのは ticket の行だけなので、status が Done か Canceled で、下に動いているもの
+  // (isMoving) が無い行) を畳む
   openByDefault(r) {
-    return !(CLOSED_STATUS.has(str(r.status).trim().toLowerCase()) && !isMoving(r));
+    return !isDoneRow(r);
   }
 
   // 木の行の開け閉めを覚える鍵 (節の id と行の名前。行の id か、id の無い行は木の中の位置)
@@ -1935,29 +2061,80 @@ export default class HubPanel extends View {
     return `${id}\u0000${rowName(r, path)}`;
   }
 
-  // 行の上の段: 印の欄 | ID・札・題・who (・畳んだ行の PR の数)。入らなければ右の欄の中で折り返す (一覧の行と同じ)
+  // 行の上の段: 印の欄 | ID・札・題・who (・畳んだ行の PR の数)。入らなければ右の欄の中で折り返す (一覧の行と同じ)。o.small なら字・札・
+  // ボタンを小さく、o.faint (済んだ行とその下) なら ID と題を muted の色で出す。畳んだ済んだ行 (brief) は 1 行に収める: 題と PR の数を、ID と札の
+  // 後ろの伸びる箱に入れ、題は入るだけ出して後ろを … で省き (開くと全部出る)、PR の数は省かずに右に寄せ、who の札を出さない (頭のコメントの
+  // 「済んだもの」)
   workTop(r, kind, path, id, g, c, o) {
     const url = webUrl(r.url);
     const rid = str(r.id);
     const title = str(r.title);
     const who = str(r.who).trim();
+    const brief = o.faint && o.foldable && !o.open;
+    const ink = o.faint ? c.muted : c.fg; // 題の色
     const chips = kind === "ticket" ? this.ticketChips(r, c) : kind === "pr" ? this.prChips(r, c) : [];
+    // ID の無い行 (item など) は、題を太字にして行の名前にする
+    const t =
+      title === ""
+        ? null
+        : this.linkText(`hp-wtt-${id}-${path}`, title, url, ink, c, ink)
+            .min_w(0)
+            .when(rid === "", (e) => e.font_semibold());
+    const sum = o.summary === "" ? null : div().text_size(this.ts(11)).text_color(c.muted).child(o.summary);
     const head = h_flex()
       .flex_1()
       .min_w(0)
       .flex_wrap()
-      .gap_x(6)
+      .gap_x(o.small ? 4 : 6)
       .gap_y(2)
       .items_center()
       // ticket の行は、ID の右に ID を写すボタン (idCell)
-      .when(rid !== "", (el) => el.child(this.idCell(`hp-wid-${id}-${path}`, `hp-wcp-${id}-${path}`, rid, url, c, kind === "ticket")))
-      .children(chips)
-      // ID の無い行 (item など) は、題を太字にして行の名前にする
-      .when(title !== "", (el) => el.child(this.linkText(`hp-wtt-${id}-${path}`, title, url, c.fg, c).min_w(0).when(rid === "", (e) => e.font_semibold())))
-      .when(who !== "", (el) => el.child(this.outlineChip(who, c.muted)))
-      // 畳んだ行の PR の数は右に寄せ、狭ければ縮んで折り返す (カードの外へはみ出さない)
-      .when(o.summary !== "", (el) => el.child(div().min_w(0).ml_auto().text_size(this.fs(11)).text_color(c.muted).child(o.summary)));
-    return h_flex().items_start().gap(g.gap).child(this.treeSlot(path, id, g, c, o)).child(head);
+      .when(rid !== "", (el) => el.child(this.idCell(`hp-wid-${id}-${path}`, `hp-wcp-${id}-${path}`, rid, url, c, kind === "ticket", o.faint)))
+      .children(chips);
+    if (brief) {
+      // 伸びる箱は flex_1 (伸びる元の幅が 0) なので、折り返す段の中でも ID と札と同じ段に入る。箱の中は折り返さず、題が縮んで … になり、PR の数は
+      // 縮めない (箱より広ければ箱で切る)。押せる (url を開く) のは題の字の幅だけで、箱の空いた所は押せない
+      return this.workTopRow(
+        head.child(
+          h_flex()
+            .flex_1()
+            .min_w(0)
+            .overflow_hidden()
+            .gap_x(4)
+            .items_center()
+            .when(!!t, (el) => el.child(t.truncate()))
+            .when(!!sum, (el) => el.child(sum.flex_none().ml_auto())),
+        ),
+        path,
+        id,
+        g,
+        c,
+        o,
+      );
+    }
+    return this.workTopRow(
+      head
+        .when(!!t, (el) => el.child(t))
+        .when(who !== "", (el) => el.child(this.outlineChip(who, c.muted)))
+        // 畳んだ行の PR の数は右に寄せ、狭ければ縮んで折り返す (カードの外へはみ出さない)
+        .when(!!sum, (el) => el.child(sum.min_w(0).ml_auto())),
+      path,
+      id,
+      g,
+      c,
+      o,
+    );
+  }
+
+  // 行の上の段の外枠: 印の欄 | head (workTop が作った ID・札・題などの並び)
+  workTopRow(head, path, id, g, c, o) {
+    return h_flex()
+      .items_start()
+      .gap(g.gap)
+      // 小さく出す行は、大きさを継ぐ字 (印の ▸・▾ と ID・題) も小さくする (札・PR の数は自分で ts を引く)
+      .when(o.small, (el) => el.text_size(this.ts(13)))
+      .child(this.treeSlot(path, id, g, c, o))
+      .child(head);
   }
 
   // 印の欄: 上に印 (▸・▾。畳めない行は空き) を 1 行の高さで置き、その下は上の段の高さまで伸ばす。tail なら印の下に縦の線 (この行から
@@ -2017,9 +2194,9 @@ export default class HubPanel extends View {
       .when(pass, (el) => el.child(this.vline(g.x0, c)));
   }
 
-  // 兄弟の行の間 (と、親の上の段・段・一言と 1 つ目の子の間)。親の縦の線を通す
-  treeSpacer(g, c) {
-    return h_flex().child(div().flex_none().w(g.I).h(TREE.gap).relative().child(this.vline(g.x0, c)));
+  // 兄弟の行の間 (と、親の上の段・段・一言と 1 つ目の子の間)。高さは h (px。小さく出す行が続く間は DONE.gap)。親の縦の線を通す
+  treeSpacer(g, c, h = TREE.gap) {
+    return h_flex().child(div().flex_none().w(g.I).h(h).relative().child(this.vline(g.x0, c)));
   }
 
   // 縦の線 (置いた箱の上から下まで)
@@ -2038,8 +2215,8 @@ export default class HubPanel extends View {
             .flex_wrap()
             .gap(6)
             .items_center()
-            .child(div().min_w(0).font_semibold().text_size(this.fs(12)).text_color(c.fg).child(r.label ?? ""))
-            .when(!!r.sub, (el) => el.child(div().min_w(0).text_size(this.fs(11)).text_color(c.muted).child(r.sub))),
+            .child(div().min_w(0).font_semibold().text_size(this.ts(12)).text_color(c.fg).child(r.label ?? ""))
+            .when(!!r.sub, (el) => el.child(div().min_w(0).text_size(this.ts(11)).text_color(c.muted).child(r.sub))),
         )
         .child(this.stepRow(r.steps ?? [], `${id}-${ri}`, c)),
     );
@@ -2047,28 +2224,31 @@ export default class HubPanel extends View {
   }
 
   // 段の並び (flow の行と木の行)。段の札を › でつなぎ、入らなければ折り返す。key は段の札の id の頭 (hp-st-<key>-<何番目>)。at は木の行の
-  // 押した印の { section, row } (flow の行は null。answer を見ない)
+  // 押した印の { section, row } (flow の行は null。answer を見ない)。› は、両隣が done の段か小さく出す間は小さい (頭のコメントの「済んだもの」)
   stepRow(steps, key, c, at = null) {
     const items = [];
+    const doneAt = (si) => objOr(steps[si]).state === "done";
     steps.forEach((st, si) => {
-      if (si > 0) items.push(div().text_color(c.dim).text_size(this.fs(11)).child("›"));
+      if (si > 0) items.push(div().text_color(c.dim).text_size(this.ts(11, this.tiny || (doneAt(si - 1) && doneAt(si)))).child("›"));
       items.push(this.step(st, `${key}-${si}`, c, at));
     });
-    return h_flex().flex_wrap().gap(4).items_center().children(items);
+    return h_flex().flex_wrap().gap(this.tiny ? 3 : 4).items_center().children(items);
   }
 
+  // 段の札。done の段と、小さく出す間 (済んだ行とその下・done の節) の段は、字と余白を小さくする (label の字は残す。頭のコメントの「済んだもの」)
   step(st, key, c, at = null) {
     const state = st.state ?? "todo";
     const label = st.label ?? ""; // label の無い段は印だけにする (undefined・null を字にしない)
     const tail = label === "" ? "" : ` ${label}`; // 印の後ろに付ける字
+    const tiny = this.tiny || state === "done";
     let base = h_flex()
       .id(`hp-st-${key}`)
-      .px(this.fs(7))
-      .py(this.fs(2))
-      .rounded(this.fs(6))
+      .px(this.bs(7, tiny))
+      .py(this.bs(2, tiny))
+      .rounded(this.bs(6, tiny))
       .border_1()
-      .text_size(this.fs(11))
-      .gap(this.fs(4))
+      .text_size(this.ts(11, tiny))
+      .gap(this.bs(4, tiny))
       .items_center();
     // answer のある木の段は押せる札にする (頭のコメントの「段の answer」。色・印・点滅は下のまま)
     if (at && st.answer != null && this.marksOn()) base = this.pressable(base, st, at, c);
@@ -2130,7 +2310,7 @@ export default class HubPanel extends View {
   // 押した段の確かめ (印の sent が false): 枠のついた小さな箱に「「<answer>」を送る?」と「送る」「やめる」、その下に送れなかったわけ。送った
   // (sent が true) なら「「<answer>」を送った」の 1 行。key は段の札の id の後ろ (確かめは hp-sp-<key>、ボタンは hp-sps-<key>・hp-spc-<key>)
   pressBox(pk, m, key, c) {
-    if (m.sent) return div().min_w(0).text_size(this.fs(11)).text_color(c.ok).child(`✓ 「${m.answer}」を送った`);
+    if (m.sent) return div().min_w(0).text_size(this.ts(11)).text_color(c.ok).child(`✓ 「${m.answer}」を送った`);
     const sending = this.sending === pk;
     const msg = str(this.stepMsg[pk]);
     // ダブルクリックの 2 回目は数えない (2 度送らない)
@@ -2141,13 +2321,13 @@ export default class HubPanel extends View {
     return v_flex()
       .id(`hp-sp-${key}`)
       .min_w(0)
-      .gap(this.fs(4))
-      .px(this.fs(8))
-      .py(this.fs(5))
-      .rounded(this.fs(6))
+      .gap(this.bs(4))
+      .px(this.bs(8))
+      .py(this.bs(5))
+      .rounded(this.bs(6))
       .border_1()
       .border_color(c.accent)
-      .text_size(this.fs(11))
+      .text_size(this.ts(11))
       .child(
         // 狭いときはボタンの組が字の次の行へ回る (右寄せ。ボタンは縮めない。字は縮んで折り返す)
         h_flex()
@@ -2284,9 +2464,9 @@ export default class HubPanel extends View {
           .gap(8)
           .items_start()
           .when(!!s.caption, (el) =>
-            el.child(div().flex_1().min_w(0).text_size(this.fs(11)).text_color(c.muted).child(TextView.markdown(`hp-cap-${id}`, s.caption))),
+            el.child(div().flex_1().min_w(0).text_size(this.ts(11)).text_color(c.muted).child(TextView.markdown(`hp-cap-${id}`, s.caption))),
           )
-          .child(div().flex_none().ml_auto().text_size(this.fs(10)).text_color(c.dim).child("クリックで拡大")),
+          .child(div().flex_none().ml_auto().text_size(this.ts(10)).text_color(c.dim).child("クリックで拡大")),
       );
   }
 
@@ -2524,6 +2704,7 @@ export default class HubPanel extends View {
     const c = this.colors();
     const z = this.zoom();
     this.k = (TEXT_BASE * z) / 100; // この描画の fs() の倍率
+    this.tiny = false; // 小さく出す間は、節と木の行を作る間だけ (withTiny)
     if (this.big) return this.renderBig(c);
     const d = this.data;
     const role = this.role();
