@@ -291,6 +291,82 @@ Test-Case 'UAC を断ったときの 1223 も取り消し' 'True' { Test-WingetC
 Test-Case 'ほかの終了コード (1603) は取り消しではない' 'False' { Test-WingetCancelled -ExitCode -1978335226 -Lines @('Installer failed with exit code: 1603') }
 Test-Case 'URL の中の 1602 は終了コードと読まない' 'False' { Test-WingetCancelled -ExitCode -1978335226 -Lines @('ダウンロード中 https://download.visualstudio.microsoft.com/download/pr/6bd63d7f-1602-4e03/vs_BuildTools.exe') }
 Test-Case 'winget が 0 で終わったら取り消しではない' 'False' { Test-WingetCancelled -ExitCode 0 -Lines @('Installer failed with exit code: 1602') }
+# 昇格した winget (Invoke-ElevatedWinget) を UAC で断った・出せなかったときは ERROR_CANCELLED (1223) を返す
+Test-Case 'UAC で昇格を断った (1223) も取り消し' 'True' { Test-WingetCancelled -ExitCode 1223 -Lines @('UAC: The operation was canceled by the user.') }
+
+# Test-WingetAccessDenied: 昇格していない winget が machine の scope の source を開けずに落ちたか (0x80070005。入れたての Windows 11 の
+# winget v1.11.510 で、Git の --scope machine の install が「Failed to open the predefined source」で落ちた)
+Test-Case '0x80070005 (Access is denied) は、昇格していない winget が machine の scope を読めない落ち方' 'True' { Test-WingetAccessDenied -ExitCode -2147024891 -Lines @() }
+Test-Case '「Failed to open the predefined source」の行があれば、終了コードが違っても同じ' 'True' { Test-WingetAccessDenied -ExitCode -1 -Lines @('Failed to open the predefined source; please report to winget maintainers.') }
+Test-Case 'ほかの落ち方 (インストーラーの 1603)・0 は違う' 'False False' { "$(Test-WingetAccessDenied -ExitCode -1978335226 -Lines @('Installer failed with exit code: 1603')) $(Test-WingetAccessDenied -ExitCode 0 -Lines @())" }
+
+# Get-ElevationFailureCode: 昇格した winget を起こせなかったときの終了コード。UAC で断った (Win32Exception の 1223。Start-Process は
+# InvalidOperationException に包む) なら 1223 (取り消し)、ほか (UAC を出せない SSH の会話など) は -1 (取り消しとは言わない。流し直しても直らない)
+Test-Case '昇格を UAC で断ったら 1223 (包まれていても)、ほかの理由で起こせなければ -1' '1223 1223 -1 -1' {
+    $declined = New-Object -TypeName System.ComponentModel.Win32Exception -ArgumentList 1223
+    $wrapped = New-Object -TypeName System.InvalidOperationException -ArgumentList @('This command cannot be run due to the error: The operation was canceled by the user.', $declined)
+    $other = New-Object -TypeName System.ComponentModel.Win32Exception -ArgumentList 1326
+    $plain = New-Object -TypeName System.InvalidOperationException -ArgumentList 'x'
+    "$(Get-ElevationFailureCode -Exception $declined) $(Get-ElevationFailureCode -Exception $wrapped) $(Get-ElevationFailureCode -Exception $other) $(Get-ElevationFailureCode -Exception $plain)"
+}
+
+# Select-WingetOutputLines: winget の出力の行から、進み具合の表示 (回る棒・帯) を除く。日本語の行は残す
+Test-Case 'winget の出力から回る棒と帯 (█▒) の行を除き、ほかの行 (日本語も) は残す' 'Successfully installed|インストールが完了しました' {
+    @(Select-WingetOutputLines -Lines @('  - ', '  \ ', '', "  $([char]0x2588)$([char]0x2588)$([char]0x2592)  1 MB / 2 MB", 'Successfully installed', 'インストールが完了しました')) -join '|'
+}
+
+# ConvertTo-EncodedCommand: -EncodedCommand に渡す形 (UTF-16LE の base64)
+Test-Case '-EncodedCommand の字は UTF-16LE の base64' "exit 3 'あ'" { [Text.Encoding]::Unicode.GetString([Convert]::FromBase64String((ConvertTo-EncodedCommand -Script "exit 3 'あ'"))) }
+
+# Format-WingetMissingNote: 昇格した側で winget が見つからないとき (Install-OpenSSH.ps1 と同じ字)
+Test-Case '昇格した側で winget が見つからなければ、そのアカウントと、サインインするか Add-AppxPackage で登録する手を出す' 'winget が見つからない (昇格した側のアカウント: it-admin)|True' {
+    $lines = @(Format-WingetMissingNote -Account 'it-admin')
+    "$($lines[0])|$($lines[1].Contains('Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe'))"
+}
+
+# Get-ElevatedWingetScript: 昇格した Windows PowerShell に渡す本文。昇格した側の winget (実行エイリアス → PATH の .exe) を引いて打ち、出力を
+# UTF-8 でログに書き、winget の終了コードで終わる。Linux の pwsh で本文をそのまま流して確かめる (偽の winget.exe を実行エイリアスの置き場に置く)
+function Invoke-ElevatedScriptHere {
+    param([bool]$HaveWinget)
+    $root = Join-Path ([IO.Path]::GetTempPath()) ('install-bootstrap-elevated-' + [guid]::NewGuid())
+    $alias = Join-Path $root 'Microsoft/WindowsApps'
+    New-Item -ItemType Directory -Force -Path $alias | Out-Null
+    if ($HaveWinget) {
+        # 帯 (UTF-8 の ██▒) と日本語の行を書き、受けた引数を出して 7 で終わる
+        Set-Content -LiteralPath (Join-Path $alias 'winget.exe') -Value "#!/bin/sh`nprintf '  \342\226\210\342\226\210\342\226\222  1 MB / 2 MB\n'`nprintf '\343\201\202\343\201\204 ok\n'`necho `"args: `$*`"`nexit 7"
+        & chmod +x (Join-Path $alias 'winget.exe')
+    }
+    $log = Join-Path $root "b'x.log"
+    $script = Get-ElevatedWingetScript -Arguments @('install', '--id', 'Git.Git', '--scope', 'machine', "it's") -LogPath $log
+    $saved = @{ LOCALAPPDATA = $env:LOCALAPPDATA; USERNAME = $env:USERNAME; PATH = $env:PATH }
+    $env:LOCALAPPDATA = $root
+    $env:USERNAME = 'it-admin'
+    # PATH の winget は見ない (Linux の名前には .exe が付かないので、どのみち当たらない)
+    try {
+        $pwsh = (Get-Process -Id $PID).Path
+        $null = & $pwsh -NoProfile -NonInteractive -EncodedCommand (ConvertTo-EncodedCommand -Script $script) 2>&1
+        $code = $LASTEXITCODE
+        $logged = @()
+        if (Test-Path -LiteralPath $log) { $logged = @(Get-Content -LiteralPath $log -Encoding UTF8) }
+    } finally {
+        foreach ($k in $saved.Keys) { Set-Item -Path "env:$k" -Value $saved[$k] }
+        Remove-Item -LiteralPath $root -Recurse -Force -ErrorAction SilentlyContinue
+    }
+    "$code|$($logged -join '|')"
+}
+Test-Case '昇格した側の本文は、実行エイリアスの winget を引数どおりに打ち、出力を UTF-8 でログに書き (帯も書く。読む側が除く)、winget の終了コードで終わる' "7|  $([char]0x2588)$([char]0x2588)$([char]0x2592)  1 MB / 2 MB|あい ok|args: install --id Git.Git --scope machine it's" {
+    Invoke-ElevatedScriptHere -HaveWinget $true
+}
+Test-Case '昇格した側に winget が無ければ、そのアカウントをログに書いて 2 で終わる (winget を打たない)' '2|winget が見つからない (昇格した側のアカウント: it-admin)' {
+    Invoke-ElevatedScriptHere -HaveWinget $false
+}
+Test-Case '昇格した側の本文は Windows PowerShell 5.1 の書き方だけ (7 にしか無い書き方を使わない・構文の誤りが無い)' '0|' {
+    $tokens = $null
+    $errors = $null
+    [void][System.Management.Automation.Language.Parser]::ParseInput((Get-ElevatedWingetScript -Arguments @('install') -LogPath 'C:\t.log'), [ref]$tokens, [ref]$errors)
+    $bad = @('QuestionQuestion', 'QuestionQuestionEquals', 'QuestionDot', 'QuestionLBracket', 'AndAnd', 'OrOr', 'QuestionMark')
+    "$(@($errors).Count)|$(@($tokens | Where-Object { "$($_.Kind)" -in $bad } | ForEach-Object { $_.Text }) -join ' ')"
+}
 
 # Get-WingetInstallArguments: 固定した版で入れる winget の引数
 Test-Case 'install は版を名指しし、道具ごとの引数を後ろに足す' 'install --id Git.Git --exact --source winget --silent --accept-source-agreements --disable-interactivity --version 2.56.0.4 --accept-package-agreements --scope machine' { (Get-WingetInstallArguments -PackageId 'Git.Git' -Version '2.56.0.4' -Silent $true -Extra @('--scope', 'machine')) -join ' ' }
@@ -304,6 +380,8 @@ Test-Case '-Private の入れる順は Git・gh・PowerShell 7・Build Tools・r
 Test-Case '既定の形は gh を入れない (Git・PowerShell 7・Build Tools・rustup)' 'git pwsh vs-buildtools rustup' { ($publicPackages | ForEach-Object { $_.Name }) -join ' ' }
 Test-Case '道具ごとの ID と版' 'Git.Git=2.56.0.4 GitHub.cli=2.103.3 Microsoft.PowerShell=7.6.10.0 Microsoft.VisualStudio.2022.BuildTools=17.14.44 Rustlang.Rustup=1.29.3' { ($packages | ForEach-Object { "$($_.PackageId)=$($_.Version)" }) -join ' ' }
 Test-Case 'Git は machine の scope' '--scope machine' { $packages[0].Args -join ' ' }
+# 昇格していない winget (入れたての Windows 11 の v1.11.510) は machine の scope の source を開けず、Git の install が 0x80070005 で落ちる
+Test-Case '昇格した winget で入れ直すのは、machine の scope で入れる Git だけ' 'git=True gh=False pwsh=False vs-buildtools=False rustup=False' { ($packages | ForEach-Object { "$($_.Name)=$($_.RetryElevated)" }) -join ' ' }
 Test-Case 'gh は MSI (wix)' '--installer-type wix' { $packages[1].Args -join ' ' }
 # 7.6 の winget の版は MSI もあるので msix を名指しする (ユーザー単位に入り、UAC が要らない)
 Test-Case '管理者の PC の PowerShell 7 は winget の MSIX' '--installer-type msix' { $packages[2].Args -join ' ' }
@@ -635,6 +713,29 @@ Test-Case 'Ctrl+C を受け止める handler の C# を読め、足す・外す�
     "$([bool]('DotfilesBootstrap.ConsoleBreak' -as [type])) $($set -is [bool]) $($unset -is [bool])"
 }
 
+# Invoke-Winget (本物): winget は管へ UTF-8 で書く。コンソールの文字コードが UTF-8 でない窓 (日本語の Windows の既定の CP932。ここでは
+# ISO-8859-1 で代える) でも、打つ間だけ UTF-8 で読み、帯 (█▒) の行を除いて日本語を化けさせない (CP932 で読むと「笆遺毎」になり、帯も
+# 除けない)。打った後は元の文字コードに戻す。偽の winget を PATH の先頭に置く (Linux)
+Test-Case 'winget の出力は UTF-8 で読み (帯を除き、日本語は化けない)、終わったらコンソールの文字コードを戻す' '7|あい ok|28591' {
+    $bin = Join-Path ([IO.Path]::GetTempPath()) ('install-bootstrap-winget-' + [guid]::NewGuid())
+    New-Item -ItemType Directory -Path $bin | Out-Null
+    Set-Content -LiteralPath (Join-Path $bin 'winget') -Value "#!/bin/sh`nprintf '  \342\226\210\342\226\210\342\226\222  1 MB / 2 MB\n'`nprintf '\343\201\202\343\201\204 ok\n'`nexit 7"
+    & chmod +x (Join-Path $bin 'winget')
+    $savedPath = $env:PATH
+    $savedEncoding = [Console]::OutputEncoding
+    $env:PATH = "$bin$([IO.Path]::PathSeparator)$savedPath"
+    try {
+        [Console]::OutputEncoding = [Text.Encoding]::GetEncoding('ISO-8859-1')
+        $r = Invoke-Winget -Arguments @('install')
+        $after = [Console]::OutputEncoding.CodePage
+    } finally {
+        [Console]::OutputEncoding = $savedEncoding
+        $env:PATH = $savedPath
+        Remove-Item -LiteralPath $bin -Recurse -Force
+    }
+    "$($r.ExitCode)|$($r.Lines -join '|')|$after"
+}
+
 # ---------------------------------------------------------------------------
 # 状態を読む (本物の Get-BootstrapState。Windows に触る一番下の関数だけを偽物にし、道具の置き場所は一時ディレクトリの空のファイル)
 # ---------------------------------------------------------------------------
@@ -773,6 +874,18 @@ function Invoke-Winget {
     if ($script:Fail.ContainsKey("$verb $id")) { $code = $script:Fail["$verb $id"] }
     $lines = @()
     if ($script:FailLines.ContainsKey("$verb $id")) { $lines = @($script:FailLines["$verb $id"]) }
+    [pscustomobject]@{ ExitCode = $code; Lines = $lines }
+}
+# 昇格した winget は「install-elevated <Id>」。終了コードと行は Fail・FailLines の同じ名前で決める
+function Invoke-ElevatedWinget {
+    param([string[]]$Arguments)
+    $id = $Arguments[[array]::IndexOf($Arguments, '--id') + 1]
+    $script:Calls.Add("install-elevated $id")
+    $script:ElevatedArgs = $Arguments -join ' '
+    $code = 0
+    if ($script:Fail.ContainsKey("install-elevated $id")) { $code = $script:Fail["install-elevated $id"] }
+    $lines = @()
+    if ($script:FailLines.ContainsKey("install-elevated $id")) { $lines = @($script:FailLines["install-elevated $id"]) }
     [pscustomobject]@{ ExitCode = $code; Lines = $lines }
 }
 function Invoke-Native {
@@ -981,6 +1094,35 @@ Test-Case '既定の形で Git が入らなければ、clone も雛形もせず�
     $s = New-FreshPublicState
     $r = Invoke-Flow -Public $true -States @($s, $s) -Fail @{ 'install Git.Git' = 1 } -FailLines @{}
     "$($r.Code) [$(@($r.Calls -split ' \| ' | Where-Object { $_ -notlike 'install-with-progress*' -and $_ -notlike 'install Rustlang*' -and $_ -notlike 'install Microsoft.PowerShell' -and $_ -notlike 'pin-add*' -and $_ -notlike 'native*' }) -join ' | ')] $($r.Text -like '*Git for Windows が入っていないので、clone しない*') $($r.Text -like '*gh*ログイン*')"
+}
+
+# 入れたての Windows 11 の winget (v1.11.510) は、昇格していないと machine の scope の source を開けず、Git の install が 0x80070005 で落ちる。
+# そのときだけ、同じ引数を昇格した winget で打ち直す (UAC の確認が 1 回出る)。Git のほかの道具・ほかの落ち方では打ち直さない
+$accessDenied = -2147024891
+$freshPublicElevatedCalls = $freshPublicCalls -replace '^install Git\.Git \| ', 'install Git.Git | install-elevated Git.Git | '
+Test-Case '入れたての Windows で Git の install が 0x80070005 で落ちたら、同じ引数を昇格した winget で打ち直して続け、0 で終える' "0 [$freshPublicElevatedCalls] True True True" {
+    $cloned = New-PublicState -HostFile @{ Exists = $false }
+    $r = Invoke-Flow -Public $true -States @((New-FreshPublicState), (New-PublicInstalledState), $cloned, (New-PublicState)) -Fail @{ 'install Git.Git' = $accessDenied } -FailLines @{ 'install Git.Git' = @('Failed to open the predefined source; please report to winget maintainers.') }
+    $said = $r.Text.Contains('昇格していない winget が machine の scope を読めなかった (終了コード 0x80070005)。昇格した winget で入れ直す (UAC の確認が 1 回出る')
+    $sameArgs = $script:ElevatedArgs -eq ((Get-WingetInstallArguments -PackageId 'Git.Git' -Version '2.56.0.4' -Silent $true -Extra @('--scope', 'machine')) -join ' ')
+    $notCancelled = -not $r.Text.Contains('取り消された')
+    "$($r.Code) [$($r.Calls)] $said $sameArgs $notCancelled"
+}
+Test-Case 'Git のほかの道具が 0x80070005 で落ちても・Git がほかの終了コードで落ちても、昇格して打ち直さない' 'False False' {
+    $s = New-FreshPublicState
+    $rustup = Invoke-Flow -Public $true -States @($s, $s) -Fail @{ 'install Rustlang.Rustup' = $accessDenied }
+    $git = Invoke-Flow -Public $true -States @($s, $s) -Fail @{ 'install Git.Git' = 1 }
+    "$($rustup.Calls -like '*install-elevated*') $($git.Calls -like '*install-elevated*')"
+}
+Test-Case '昇格した側に winget が無ければ (UAC で別の管理者のアカウントに昇格した)、そのアカウントと登録の手を出して 1' '1 True True' {
+    $s = New-FreshPublicState
+    $r = Invoke-Flow -Public $true -States @($s, $s) -Fail @{ 'install Git.Git' = $accessDenied; 'install-elevated Git.Git' = 2 } -FailLines @{ 'install-elevated Git.Git' = @('winget が見つからない (昇格した側のアカウント: it-admin)') }
+    "$($r.Code) $($r.Text -like '*winget が見つからない (昇格した側のアカウント: it-admin)*') $($r.Text -like '*Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe*')"
+}
+Test-Case '昇格の UAC で断ったら (1223)、Git のインストーラーが取り消されたと出して 1' '1 True' {
+    $s = New-FreshPublicState
+    $r = Invoke-Flow -Public $true -States @($s, $s) -Fail @{ 'install Git.Git' = $accessDenied; 'install-elevated Git.Git' = 1223 } -FailLines @{ 'install-elevated Git.Git' = @('UAC: The operation was canceled by the user.') }
+    "$($r.Code) $($r.Text -like '*Git for Windows のインストーラーが取り消された*')"
 }
 
 # 締めの案内: 揃え終えたとき (初めから揃っていたときも) に、次に打つコマンドとホストの値の行を出す。-Check と 1 で終えたときは出さない

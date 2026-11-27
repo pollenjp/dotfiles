@@ -146,8 +146,14 @@ impl Step for Files {
                             Ok(_) => {
                                 records.set(&dst_key, &want);
                                 ctx.say(format!("{label}: {dst_key}"));
-                                // 空の hint は出さない (WSL の [[ -n ${hint} ]] と同じ)
-                                if let Some(h) = f.hint.as_deref().filter(|h| !h.is_empty()) {
+                                // runner の案内 (runnerHint) があれば、hint (WSL の setup と共有。setup --update などを指す) の代わりに出す
+                                // (runner が files を置くのは受け持ちが runner のホストだけ)。空の案内は出さない (WSL の [[ -n ${hint} ]] と同じ)
+                                if let Some(h) = f
+                                    .runner_hint
+                                    .as_deref()
+                                    .or(f.hint.as_deref())
+                                    .filter(|h| !h.is_empty())
+                                {
                                     hints.push(format!("{dst_key}: {h}"));
                                 }
                             }
@@ -366,6 +372,24 @@ mod tests {
         assert_eq!(o.len(), 1);
     }
 
+    /// runner の案内 (runnerHint) があれば hint (WSL の setup と共有) の代わりに出し、無ければ hint を出す。runner が files を置くのは受け持ちが
+    /// runner のホストだけなので、WSL の setup の手 (setup --update・bootstrap-windows-*.sh) を案内しない
+    #[test]
+    fn runner_hint_replaces_the_shared_hint() {
+        let e = Env::new();
+        e.t.write(
+            "repo/win/manifest.toml",
+            "[[files]]\nsrc = \"app/a.json\"\ndst = \"%USERPROFILE%/.app/a.json\"\nhint = \"setup --update でも確かめる\"\nrunnerHint = \"dotfiles check の手順 a でも確かめる\"\n\n[[files]]\nsrc = \"app/b.toml\"\ndst = \"%APPDATA%/app/b.toml\"\nhint = \"読み直す\"\n",
+        );
+        let (_, out) = e.run_as(APPLY, true);
+        assert!(
+            out.contains("a.json: dotfiles check の手順 a でも確かめる"),
+            "{out}"
+        );
+        assert!(!out.contains("setup --update"), "{out}");
+        assert!(out.contains("b.toml: 読み直す"), "{out}");
+    }
+
     #[test]
     fn empty_hint_is_not_shown() {
         let e = Env::new();
@@ -559,6 +583,35 @@ mod tests {
 
     /// custom module の `shell` に書くと、Windows の starship が PATH から引いてしまう Unix の shell (拡張子を除いた名前を小文字で比べる)
     const UNIX_SHELLS: [&str; 8] = ["sh", "bash", "dash", "zsh", "ksh", "mksh", "ash", "fish"];
+
+    /// 本物の manifest で runner が出す案内 (runnerHint、無ければ hint) は、WSL の setup の手を指さない (runner が files を置くのは受け持ちが
+    /// runner のホストだけで、WSL の無いホストもある)
+    #[test]
+    fn real_repo_runner_hints_do_not_point_to_wsl() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
+        let plan = manifest::load(&repo, &Roots::from_home(Path::new("/mnt/c/Users/u"))).unwrap();
+        let wsl_only = [
+            "setup --update",
+            "setup で流した",
+            "bootstrap-windows-",
+            "dotfiles.wsl.",
+            "WSL の setup",
+        ];
+        let mut bad = Vec::new();
+        for f in &plan.files {
+            let Some(h) = f.runner_hint.as_deref().or(f.hint.as_deref()) else {
+                continue;
+            };
+            if let Some(w) = wsl_only.iter().find(|w| h.contains(*w)) {
+                bad.push(format!("{} ({w}): {h}", f.repo_path));
+            }
+        }
+        assert!(
+            bad.is_empty(),
+            "WSL の手を指す runner の案内:\n{}",
+            bad.join("\n")
+        );
+    }
 
     /// 本物の manifest の starship.toml: Linux の home-manager (`nix/home/modules/files.nix`) と同じ `nix/files/starship.toml` を、
     /// STARSHIP_CONFIG の無い starship が読む `<home>\.config\starship.toml` (starship 1.27 の `dirs::home_dir()` の下) に置く。

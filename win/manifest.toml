@@ -1,11 +1,14 @@
 # Windows 側へ配るファイル。WSL の nix/scripts/bootstrap-windows-files.sh が
-# /mnt/c へコピーする (~/dotfiles/setup --update で走る)。書き方は README.md。
+# /mnt/c へコピーする (~/dotfiles/setup --update で走る)。受け持ちを runner に切り替えたホストでは、Windows の
+# runner の dotfiles apply の手順 files が置く。書き方は README.md。
 #
-#   src   win/ からの相対パス (base = "nix" なら repo 直下の nix/ からの相対パス)
-#   dst   Windows 側の置き先。%USERPROFILE% / %APPDATA% / %LOCALAPPDATA% のどれかで始める
-#   hint  置き先を書き換えたときに出す文 (任意)
-#   base  src の起点。"win" (既定) か "nix" (Linux の home-manager も同じファイルを読むときだけ。home-manager からは
-#         nix/ しか見えない)
+#   src         win/ からの相対パス (base = "nix" なら repo 直下の nix/ からの相対パス)
+#   dst         Windows 側の置き先。%USERPROFILE% / %APPDATA% / %LOCALAPPDATA% のどれかで始める
+#   hint        置き先を書き換えたときに出す文 (任意)
+#   runnerHint  runner が置き先を書き換えたときに、hint の代わりに出す文 (任意。hint が WSL の setup の手 (setup --update・
+#               bootstrap-windows-*.sh など) を指すときに、runner の手で書く。WSL は読まない)
+#   base        src の起点。"win" (既定) か "nix" (Linux の home-manager も同じファイルを読むときだけ。home-manager からは
+#               nix/ しか見えない)
 
 [[files]]
 src = "orca/keybindings.json"
@@ -16,6 +19,7 @@ hint = "Orca の設定 → キーボードショートカット → 「ディス
 src = "powershell/dotfiles.ps1"
 dst = "%USERPROFILE%/.config/powershell/dotfiles.ps1"
 hint = "開いている PowerShell は . $PROFILE で読み直す ($PROFILE への読み込みの 1 行は、WSL の setup の bootstrap-windows-powershell-profile.sh か、受け持ちを切り替えたホストでは runner の powershell-profile が足す)"
+runnerHint = "開いている PowerShell は . $PROFILE で読み直す ($PROFILE への読み込みの 1 行は、同じ dotfiles apply の手順 powershell-profile が足す)"
 
 # starship のプロンプトの設定。Linux の home-manager (nix/home/modules/files.nix) も同じファイルを ~/.config/starship.toml に置くので、
 # nix/ に置いて base = "nix" で配る。starship は環境変数 STARSHIP_CONFIG が無ければ %USERPROFILE%\.config\starship.toml を読む。
@@ -36,26 +40,31 @@ hint = "herdr の中なら prefix + shift + r、外からなら PowerShell で h
 src = "openssh/Install-OpenSSH.ps1"
 dst = "%USERPROFILE%/.config/powershell/Install-OpenSSH.ps1"
 hint = "PowerShell で Install-OpenSSH -Check を打つと、固定した版との差が分かる (setup --update でも確かめる)"
+runnerHint = "PowerShell で Install-OpenSSH -Check を打つと、固定した版との差が分かる (dotfiles check・apply の手順 openssh でも確かめる。入っていなければ apply が入れ、ずれていれば知らせるだけ)"
 
 [[files]]
 src = "herdr/Install-Herdr.ps1"
 dst = "%USERPROFILE%/.config/powershell/Install-Herdr.ps1"
 hint = "PowerShell で Install-Herdr -Check を打つと、固定した版との差が分かる (setup --update でも確かめる)"
+runnerHint = "PowerShell で Install-Herdr -Check を打つと、固定した版との差が分かる (ホストの値の [tools] windowsHerdr が on なら、dotfiles check・apply の手順 herdr でも確かめる。入っていなければ apply が入れ、ずれていれば知らせるだけ)"
 
 [[files]]
 src = "ntn/Install-Ntn.ps1"
 dst = "%USERPROFILE%/.config/powershell/Install-Ntn.ps1"
 hint = "PowerShell で Install-Ntn -Check を打つと、固定した版との差が分かる (setup --update が入れて揃えるのは dotfiles.wsl.windowsFiles.ntn.enable = true のマシン (既定はグループで決まり、all の win/ を配るマシンで on)。ntn.exe が動いていれば揃えずに知らせる)"
+runnerHint = "PowerShell で Install-Ntn -Check を打つと、固定した版との差が分かる (dotfiles apply の手順 ntn が入れて揃えるのは、ホストの値の [tools] windowsNtn が on のホスト (既定はグループで決まり、all で on)。ntn.exe が動いていれば揃えずに知らせる)"
 
 [[files]]
 src = "claude-code/Install-ClaudeCode.ps1"
 dst = "%USERPROFILE%/.config/powershell/Install-ClaudeCode.ps1"
 hint = "PowerShell で Install-ClaudeCode -Check を打つと、固定した版との差が分かる (setup --update が入れて揃えるのは dotfiles.wsl.windowsFiles.claudeCode.enable = true のマシン (既定はグループで決まり、all の win/ を配るマシンで on)。Windows の Claude Code が動いていれば揃えずに知らせる)"
+runnerHint = "PowerShell で Install-ClaudeCode -Check を打つと、固定した版との差が分かる (dotfiles apply の手順 claude-code が入れて揃えるのは、ホストの値の [tools] windowsClaudeCode が on のホスト (既定はグループで決まり、all で on)。Windows の Claude Code が動いていれば揃えずに知らせる)"
 
 [[files]]
 src = "herdr-app/Install-HerdrApp.ps1"
 dst = "%USERPROFILE%/.config/powershell/Install-HerdrApp.ps1"
 hint = "PowerShell で Install-HerdrApp -Check を打つと、herdr-app と herdr-core が固定した版・取得元 (手元のフィード) どおりかが分かる (setup --update でも確かめ、揃っていなければ揃える)。外すのは Install-HerdrApp -Uninstall"
+runnerHint = "PowerShell で Install-HerdrApp -Check を打つと、herdr-app と herdr-core が固定した版・取得元 (手元のフィード) どおりかが分かる (ホストの値の [tools] windowsHerdr が on なら、dotfiles apply の手順 herdr-app でも確かめ、揃っていなければ揃える)。外すのは Install-HerdrApp -Uninstall"
 
 # herdr-app と herdr-core の固定した版と sha256。Install-HerdrApp.ps1 が隣のこのファイルを読む。Linux の home-manager
 # (nix/pkgs/herdr-core) も同じファイルを読むので、nix/ に置いて base = "nix" で配る
@@ -64,11 +73,13 @@ base = "nix"
 src = "pkgs/herdr-core/releases.json"
 dst = "%USERPROFILE%/.config/powershell/herdr-releases.json"
 hint = "Install-HerdrApp.ps1 が読む固定した版。setup --update なら続く bootstrap-windows-herdr-app.sh が、その版とフィードに揃える (手で配ったなら PowerShell で Install-HerdrApp)"
+runnerHint = "手で打つ Install-HerdrApp が読む固定した版 (ホストの値の [tools] windowsHerdr が on なら、dotfiles apply の手順 herdr-app が clone の nix/pkgs/herdr-core/releases.json を渡して、その版とフィードに揃える)"
 
 [[files]]
 src = "powertoys/keyboard-manager/default.json"
 dst = "%LOCALAPPDATA%/Microsoft/PowerToys/Keyboard Manager/default.json"
 hint = "setup で流したなら、続く bootstrap-windows-powertoys.sh が Keyboard Manager と自動起動をオンにして (オフなら PowerToys を起動し直す)、読み直させる。bootstrap-windows-files.sh だけを手で流したなら nix/scripts/bootstrap-windows-powertoys.sh も流す (Keyboard Manager がオンで PowerToys が動いていなければ、起動したときに読む。ただし PowerToys の設定画面を一度開いて settings.json ができるまでは読まれず、bootstrap-windows-powertoys.sh が案内する)"
+runnerHint = "同じ dotfiles apply の手順 powertoys が、Keyboard Manager と自動起動をオンにして (オフなら PowerToys を起動し直す)、読み直させる (読み直させられないときは、その手順が直し方を出す)"
 
 [[files]]
 src = "powertoys/keyboard-manager/editorSettings.json"
@@ -79,36 +90,43 @@ hint = "Keyboard Manager のエディタを開いていたら、閉じて開き�
 src = "google-japanese-input/Install-GoogleJapaneseInput.ps1"
 dst = "%USERPROFILE%/.config/powershell/Install-GoogleJapaneseInput.ps1"
 hint = "PowerShell で Install-GoogleJapaneseInput -Check を打つと、固定した版との差が分かる (setup --update でも確かめ、入っていなければ入れる。ずれていても上げず、⚠ で知らせるだけ。入れる・上げるときは UAC の確認が出る)"
+runnerHint = "PowerShell で Install-GoogleJapaneseInput -Check を打つと、固定した版との差が分かる (dotfiles check・apply の手順 google-ime-install でも確かめ、入っていなければ apply が入れる。ずれていても上げず、⚠ で知らせるだけ。入れる・上げるときは UAC の確認が出る)"
 
 [[files]]
 src = "powertoys/Install-PowerToys.ps1"
 dst = "%USERPROFILE%/.config/powershell/Install-PowerToys.ps1"
 hint = "PowerShell で Install-PowerToys -Check を打つと、入っているかが分かる (setup --update でも確かめ、入っていなければ入れる)"
+runnerHint = "PowerShell で Install-PowerToys -Check を打つと、入っているかが分かる (dotfiles apply の手順 powertoys でも確かめ、入っていなければ入れる)"
 
 [[files]]
 src = "port-forward/Start-PortForward.ps1"
 dst = "%USERPROFILE%/.config/powershell/Start-PortForward.ps1"
 hint = "PowerShell 7 で pf を打つ (dotfiles.ps1 の pf から呼ぶ。開いている PowerShell は . $PROFILE で読み直す)。共有の port の組は bootstrap-windows-port-forward.sh が置く"
+runnerHint = "PowerShell 7 で pf を打つ (dotfiles.ps1 の pf から呼ぶ。開いている PowerShell は . $PROFILE で読み直す)。共有の port の組は、ホストの値の [tools] privateRepos が on なら dotfiles apply の手順 port-forward が置く"
 
 [[files]]
 src = "type-clipboard/Install-TypeClipboard.ps1"
 dst = "%USERPROFILE%/.config/powershell/Install-TypeClipboard.ps1"
 hint = "PowerShell で Install-TypeClipboard -Check を打つと、固定した版との差が分かる (setup --update が入れて確かめるのは dotfiles.wsl.windowsFiles.typeClipboard.enable = true のマシンだけ。ほかのマシンでも Install-TypeClipboard で入れられる)"
+runnerHint = "PowerShell で Install-TypeClipboard -Check を打つと、固定した版との差が分かる (dotfiles apply の手順 type-clipboard が入れて確かめるのは、ホストの値の [tools] windowsTypeClipboard が on のホストだけ。ほかのホストでも Install-TypeClipboard で入れられる)"
 
 [[files]]
 src = "op-reason/Install-OpReason.ps1"
 dst = "%USERPROFILE%/.config/powershell/Install-OpReason.ps1"
 hint = "PowerShell で Install-OpReason -Check を打つと、固定した版との差が分かる (setup --update が入れて揃えるのは、WSL の op の wrapper (op-reason) を入れるマシンだけ。ほかのマシンでも Install-OpReason で入れられる)"
+runnerHint = "PowerShell で Install-OpReason -Check を打つと、固定した版との差が分かる (dotfiles apply の手順 op-reason が入れて揃えるのは、ホストの値の [tools] onePassword が on のホストだけ。ほかのホストでも Install-OpReason で入れられる)"
 
 [[files]]
 src = "openssh/Install-Sshd.ps1"
 dst = "%USERPROFILE%/.config/powershell/Install-Sshd.ps1"
 hint = "PowerShell で Install-Sshd -Check を打つと、sshd (Tailscale と localhost からだけ、鍵でだけ入れる形) との差が分かる (setup --update が入れるのは dotfiles.wsl.windowsFiles.sshd.enable = true のマシンだけで、入っていないときだけ入れる (UAC の確認が出る)。ずれていれば知らせるだけ)"
+runnerHint = "PowerShell で Install-Sshd -Check を打つと、sshd (Tailscale と localhost からだけ、鍵でだけ入れる形) との差が分かる (dotfiles apply の手順 sshd が入れるのは、ホストの値の [tools] windowsSshd が on のホストだけで、入っていないときだけ入れる (UAC の確認が出る)。ずれていれば知らせるだけ)"
 
 [[files]]
 src = "tailscale/Install-Tailscale.ps1"
 dst = "%USERPROFILE%/.config/powershell/Install-Tailscale.ps1"
 hint = "PowerShell で Install-Tailscale -Check を打つと、固定した版との差が分かる (setup --update が入れるのは dotfiles.wsl.windowsFiles.tailscale.enable = true のマシンだけで、入っていないときだけ入れる (UAC の確認が出る)。入っていれば上げない。ログインは手でする)"
+runnerHint = "PowerShell で Install-Tailscale -Check を打つと、固定した版との差が分かる (dotfiles apply の手順 tailscale が入れるのは、ホストの値の [tools] windowsTailscale が on のホストだけで、入っていないときだけ入れる (UAC の確認が出る)。入っていれば上げない。ログインは手でする)"
 
 [[files]]
 src = "t3-code/Install-T3Code.ps1"

@@ -74,8 +74,11 @@ pub struct PlanFile {
     pub repo_path: String,
     /// 置き先 (Windows のパス)
     pub dst: PathBuf,
-    /// 置き先を書き換えたときに出す文
+    /// 置き先を書き換えたときに出す文 (WSL の setup と共有)
     pub hint: Option<String>,
+    /// runner が置き先を書き換えたときに `hint` の代わりに出す文 (`runnerHint`。WSL の setup の手 (`setup --update`・
+    /// `bootstrap-windows-*.sh`) でなく、runner の手を案内する。無ければ `hint`)
+    pub runner_hint: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -170,11 +173,11 @@ fn to_file(i: usize, entry: &toml::Value, repo: &Path, roots: &Roots) -> Result<
     let unknown: Vec<&str> = f
         .keys()
         .map(String::as_str)
-        .filter(|k| !["src", "dst", "hint", "base"].contains(k))
+        .filter(|k| !["src", "dst", "hint", "runnerHint", "base"].contains(k))
         .collect();
     if !unknown.is_empty() {
         return Err(fail(&format!(
-            "{at}: 知らないキーがあります: {} (書けるのは src / dst / hint / base)",
+            "{at}: 知らないキーがあります: {} (書けるのは src / dst / hint / runnerHint / base)",
             unknown.join(", ")
         )));
     }
@@ -184,24 +187,24 @@ fn to_file(i: usize, entry: &toml::Value, repo: &Path, roots: &Roots) -> Result<
     let string = |k: &str| f.get(k).map(|v| v.as_str());
     let (Some(Some(src)), Some(Some(dst))) = (string("src"), string("dst")) else {
         return Err(fail(&format!(
-            "{at}: src / dst / hint / base は文字列で書いてください"
+            "{at}: src / dst / hint / runnerHint / base は文字列で書いてください"
         )));
     };
-    let hint = match string("hint") {
-        None => None,
-        Some(Some(h)) => Some(h.to_string()),
-        Some(None) => {
-            return Err(fail(&format!(
-                "{at}: src / dst / hint / base は文字列で書いてください"
-            )));
-        }
+    let optional = |k: &str| match string(k) {
+        None => Ok(None),
+        Some(Some(h)) => Ok(Some(h.to_string())),
+        Some(None) => Err(fail(&format!(
+            "{at}: src / dst / hint / runnerHint / base は文字列で書いてください"
+        ))),
     };
+    let hint = optional("hint")?;
+    let runner_hint = optional("runnerHint")?;
     let base = match string("base") {
         None => "win",
         Some(Some(b)) => b,
         Some(None) => {
             return Err(fail(&format!(
-                "{at}: src / dst / hint / base は文字列で書いてください"
+                "{at}: src / dst / hint / runnerHint / base は文字列で書いてください"
             )));
         }
     };
@@ -277,6 +280,7 @@ fn to_file(i: usize, entry: &toml::Value, repo: &Path, roots: &Roots) -> Result<
         repo_path: format!("{base}/{src}"),
         dst: push_segments(root_path, rest),
         hint,
+        runner_hint,
     })
 }
 
@@ -291,6 +295,7 @@ pub fn plan_json(plan: &Plan) -> serde_json::Value {
                 "repoPath": f.repo_path,
                 "dst": f.dst.to_string_lossy(),
                 "hint": f.hint,
+                "runnerHint": f.runner_hint,
             })
         })
         .collect();
@@ -341,6 +346,7 @@ mod tests {
 src = \"orca/keybindings.json\"
 dst = \"%USERPROFILE%/.orca/keybindings.json\"
 hint = \"読み直す\"
+runnerHint = \"runner で読み直す\"
 
 [[files]]
 src = \"herdr/config.toml\"
@@ -361,6 +367,8 @@ dst = \"%LOCALAPPDATA%/x/releases.json\"
             push_segments(Path::new("/mnt/c/Users/u"), ".orca/keybindings.json")
         );
         assert_eq!(f0.hint.as_deref(), Some("読み直す"));
+        assert_eq!(f0.runner_hint.as_deref(), Some("runner で読み直す"));
+        assert_eq!(plan.files[1].runner_hint, None);
         assert_eq!(
             plan.files[1].dst,
             push_segments(
@@ -412,7 +420,7 @@ dst = \"%LOCALAPPDATA%/x/releases.json\"
                     "{}other = 1\n",
                     file("orca/keybindings.json", "%USERPROFILE%/a")
                 ),
-                "win/manifest.toml: files[1]: 知らないキーがあります: other (書けるのは src / dst / hint / base)",
+                "win/manifest.toml: files[1]: 知らないキーがあります: other (書けるのは src / dst / hint / runnerHint / base)",
             ),
             (
                 "[[files]]\nsrc = \"orca/keybindings.json\"\n".into(),
@@ -420,14 +428,21 @@ dst = \"%LOCALAPPDATA%/x/releases.json\"
             ),
             (
                 "[[files]]\nsrc = 1\ndst = \"%USERPROFILE%/a\"\n".into(),
-                "win/manifest.toml: files[1]: src / dst / hint / base は文字列で書いてください",
+                "win/manifest.toml: files[1]: src / dst / hint / runnerHint / base は文字列で書いてください",
             ),
             (
                 format!(
                     "{}hint = 1\n",
                     file("orca/keybindings.json", "%USERPROFILE%/a")
                 ),
-                "win/manifest.toml: files[1]: src / dst / hint / base は文字列で書いてください",
+                "win/manifest.toml: files[1]: src / dst / hint / runnerHint / base は文字列で書いてください",
+            ),
+            (
+                format!(
+                    "{}runnerHint = 1\n",
+                    file("orca/keybindings.json", "%USERPROFILE%/a")
+                ),
+                "win/manifest.toml: files[1]: src / dst / hint / runnerHint / base は文字列で書いてください",
             ),
             (
                 format!(
@@ -547,6 +562,20 @@ dst = \"%LOCALAPPDATA%/x/releases.json\"
         let f = &v["files"][0];
         assert_eq!(f["repoPath"], "win/orca/keybindings.json");
         assert!(f["hint"].is_null());
+        assert!(f["runnerHint"].is_null());
+        let with = parse(
+            &format!(
+                "{}runnerHint = \"r\"\n",
+                file(
+                    "orca/keybindings.json",
+                    "%USERPROFILE%/.orca/keybindings.json"
+                )
+            ),
+            r.path(),
+            &roots(),
+        )
+        .unwrap();
+        assert_eq!(plan_json(&with)["files"][0]["runnerHint"], "r");
         assert!(f["src"].as_str().unwrap().ends_with("keybindings.json"));
         assert!(f["dst"].as_str().unwrap().ends_with("keybindings.json"));
     }

@@ -24,6 +24,7 @@
 
 use super::{Gate, Mode, Outcome, Step, StepInfo};
 use crate::context::Ctx;
+use crate::host::HostValues;
 use crate::process::{CommandSpec, Exit, RunResult, strip_ansi};
 use crate::report::Kind;
 use std::path::PathBuf;
@@ -103,6 +104,10 @@ pub struct Ps1Spec {
     /// `-KeysFrom` に受け持ち (runner・wsl) を渡す (Install-Sshd.ps1 が鍵とユーザー・送り元の直し方を、TOML の値と dotfiles apply か、Nix の値と
     /// WSL の setup で案内する)。sshd だけ
     pub sshd_keys: bool,
+    /// 1Password の SSH agent の鍵を確かめる手順か (openssh)。道具の switch `onePassword` が off のホストでは、ps1 に `-NoOnePassword` を渡し
+    /// (-Check にも入れる・揃える流れにも。ps1 は `ssh-add -l` の行と 1Password の案内を出さない)、手で打つ直し方のコマンドにも添える。入れた後に
+    /// 添える 1Password の行 ([`ONE_PASSWORD_INSTALLED`]) は、on のホストでだけ出す
+    pub one_password: bool,
     /// 3 でも、出力にこれがあれば入れられないので打たない (google-ime-install の「固定した版が winget に無い」)
     pub missing_blocked: Option<&'static str>,
     /// 出力の印ごとの直し方 (上から見て最初に当たったもの)。当たれば `manual_fix`・`sync_fix` の代わりに出す (google-ime-install の
@@ -167,6 +172,13 @@ const SSHD_BAD_KEYS_RUNNER: &str = "鍵の写し (%LOCALAPPDATA%\\dotfiles\\sshd
 
 const UAC_LEFT: &str = "Windows のデスクトップに UAC の確認が残っていれば、先に押すか閉じてから流し直す (残ったまま流し直すと、別のインストールが進行中 (1618) で落ちる)";
 
+/// 1Password の鍵を確かめる手順 (`one_password`) で、入れた後に 1Password を使うホスト (道具の switch onePassword が on) にだけ添える行
+/// (WSL の bootstrap-windows-openssh.sh の入れた後の行と同じ字)
+pub const ONE_PASSWORD_INSTALLED: &str = "1Password の鍵は、1Password の SSH agent を有効にしてから PowerShell の Install-OpenSSH -Check で確かめる";
+
+/// 1Password を使わないホストで、ps1 に渡す引数と、手で打つ直し方のコマンドに添える字
+const NO_ONE_PASSWORD: &str = " -NoOnePassword";
+
 pub const SPECS: &[Ps1Spec] = &[
     Ps1Spec {
         id: "google-ime-install",
@@ -197,6 +209,7 @@ pub const SPECS: &[Ps1Spec] = &[
         releases_file: false,
         ssh_relay: false,
         sshd_keys: false,
+        one_password: false,
         missing_blocked: Some("winget show --versions に無い"),
         output_fixes: &[
             (
@@ -235,9 +248,9 @@ pub const SPECS: &[Ps1Spec] = &[
         policy: Policy::Warn,
         uac: true,
         ok_text: "Windows の OpenSSH は、dotfiles で固定した版に揃っています。",
+        // 1Password の鍵の確かめ方の行は、1Password を使うホストでだけ後ろに足す (ONE_PASSWORD_INSTALLED)
         installed: &[
             "Windows の OpenSSH を入れました (固定した版。ssh-agent サービスは停止・無効、winget pin あり)。",
-            "1Password の鍵は、1Password の SSH agent を有効にしてから PowerShell の Install-OpenSSH -Check で確かめる",
         ],
         synced: &[],
         manual_fix: &[
@@ -249,6 +262,7 @@ pub const SPECS: &[Ps1Spec] = &[
         releases_file: false,
         ssh_relay: false,
         sshd_keys: false,
+        one_password: true,
         missing_blocked: None,
         output_fixes: &[],
         install_notice: None,
@@ -291,6 +305,7 @@ pub const SPECS: &[Ps1Spec] = &[
         releases_file: false,
         ssh_relay: false,
         sshd_keys: true,
+        one_password: false,
         missing_blocked: None,
         // 揃える前に人が直すこと (Install-Sshd.ps1 の締めの行の文言)。揃えるコマンドを打っても直らない
         output_fixes: &[
@@ -362,6 +377,7 @@ pub const SPECS: &[Ps1Spec] = &[
         releases_file: false,
         ssh_relay: false,
         sshd_keys: false,
+        one_password: false,
         missing_blocked: Some("winget show --versions に無い"),
         output_fixes: &[
             (
@@ -408,6 +424,7 @@ pub const SPECS: &[Ps1Spec] = &[
         releases_file: false,
         ssh_relay: false,
         sshd_keys: false,
+        one_password: false,
         missing_blocked: None,
         output_fixes: &[],
         install_notice: None,
@@ -444,6 +461,7 @@ pub const SPECS: &[Ps1Spec] = &[
         releases_file: true,
         ssh_relay: false,
         sshd_keys: false,
+        one_password: false,
         missing_blocked: None,
         output_fixes: &[],
         install_notice: None,
@@ -478,6 +496,7 @@ pub const SPECS: &[Ps1Spec] = &[
         releases_file: false,
         ssh_relay: false,
         sshd_keys: false,
+        one_password: false,
         missing_blocked: None,
         output_fixes: &[],
         install_notice: None,
@@ -514,6 +533,7 @@ pub const SPECS: &[Ps1Spec] = &[
         releases_file: false,
         ssh_relay: false,
         sshd_keys: false,
+        one_password: false,
         missing_blocked: None,
         output_fixes: &[],
         install_notice: None,
@@ -559,6 +579,7 @@ pub const SPECS: &[Ps1Spec] = &[
         releases_file: false,
         ssh_relay: true,
         sshd_keys: false,
+        one_password: false,
         missing_blocked: None,
         output_fixes: &[],
         install_notice: Some(
@@ -599,6 +620,7 @@ pub const SPECS: &[Ps1Spec] = &[
         releases_file: false,
         ssh_relay: false,
         sshd_keys: false,
+        one_password: false,
         missing_blocked: None,
         output_fixes: &[],
         install_notice: None,
@@ -640,6 +662,7 @@ pub const SPECS: &[Ps1Spec] = &[
         releases_file: false,
         ssh_relay: false,
         sshd_keys: false,
+        one_password: false,
         missing_blocked: Some("winget show --versions に無い"),
         output_fixes: &[
             (
@@ -694,6 +717,7 @@ pub const SPECS: &[Ps1Spec] = &[
         releases_file: false,
         ssh_relay: false,
         sshd_keys: false,
+        one_password: false,
         missing_blocked: Some("winget show --versions に無い"),
         output_fixes: &[
             (
@@ -793,6 +817,7 @@ pub const SPECS: &[Ps1Spec] = &[
         releases_file: false,
         ssh_relay: false,
         sshd_keys: false,
+        one_password: false,
         missing_blocked: None,
         output_fixes: &[],
         install_notice: None,
@@ -831,6 +856,7 @@ pub const SPECS: &[Ps1Spec] = &[
         releases_file: false,
         ssh_relay: false,
         sshd_keys: false,
+        one_password: false,
         missing_blocked: None,
         output_fixes: &[(
             "MSI の fzf (machine スコープ) が入っている",
@@ -876,6 +902,7 @@ pub const SPECS: &[Ps1Spec] = &[
         releases_file: false,
         ssh_relay: false,
         sshd_keys: false,
+        one_password: false,
         missing_blocked: None,
         output_fixes: &[(
             "MSI の starship (machine スコープ) が入っている",
@@ -1199,21 +1226,52 @@ impl Ps1Step {
         if self.0.sshd_keys {
             a.push_str(&format!(" -KeysFrom '{}'", keys_from(ctx)));
         }
+        if self.without_one_password(&ctx.host) {
+            a.push_str(NO_ONE_PASSWORD);
+        }
         a
     }
 
+    /// 1Password の鍵を確かめる手順 (`one_password`) で、このホストが 1Password を使わない (道具の switch onePassword が off) か
+    fn without_one_password(&self, host: &HostValues) -> bool {
+        self.0.one_password && !host.tool("onePassword")
+    }
+
     /// 直し方: 出力の印 (`output_fixes`) に当たればそれ、無ければ `default`。sshd の鍵の写しの読めない行は、受け持ちが runner の
-    /// ホスト (`runner_host`) なら TOML の値と dotfiles apply で直す
-    fn fixes(&self, runner_host: bool, lines: &[String], default: &[&'static str]) -> Vec<String> {
-        for (marker, fix) in self.0.output_fixes {
-            if lines.iter().any(|l| l.contains(marker)) {
-                if self.0.sshd_keys && runner_host && *marker == SSHD_BAD_KEYS {
-                    return vec![SSHD_BAD_KEYS_RUNNER.to_string()];
-                }
-                return vec![fix.to_string()];
+    /// ホストなら TOML の値と dotfiles apply で直す。1Password を使わないホストの openssh は、手で打つコマンド (`<command> を打つ`・
+    /// `<command> -IfMissing を打つ`) に -NoOnePassword を添える
+    fn fixes(&self, host: &HostValues, lines: &[String], default: &[&'static str]) -> Vec<String> {
+        let found = self
+            .0
+            .output_fixes
+            .iter()
+            .find(|(marker, _)| lines.iter().any(|l| l.contains(marker)));
+        let picked: Vec<String> = match found {
+            Some((marker, _))
+                if self.0.sshd_keys && host.runner_enable && *marker == SSHD_BAD_KEYS =>
+            {
+                vec![SSHD_BAD_KEYS_RUNNER.to_string()]
             }
+            Some((_, fix)) => vec![fix.to_string()],
+            None => default.iter().map(|n| n.to_string()).collect(),
+        };
+        if !self.without_one_password(host) {
+            return picked;
         }
-        default.iter().map(|n| n.to_string()).collect()
+        let command = self.0.command;
+        picked
+            .into_iter()
+            .map(|n| {
+                n.replace(
+                    &format!("{command} -IfMissing を打つ"),
+                    &format!("{command} -IfMissing{NO_ONE_PASSWORD} を打つ"),
+                )
+                .replace(
+                    &format!("{command} を打つ"),
+                    &format!("{command}{NO_ONE_PASSWORD} を打つ"),
+                )
+            })
+            .collect()
     }
 
     /// 締めの行 (⚠️ で始まる行) があり、どれも人が切り替える設定 (`alerts`) の印のものか (1 のわけが、それだけ)
@@ -1421,7 +1479,7 @@ impl Ps1Step {
                     ),
                 );
                 for n in self.fixes(
-                    ctx.host.runner_enable,
+                    &ctx.host,
                     &r.output,
                     &["上の出力の ⚠️ の行の手順で -Version を winget にある版へ変える"],
                 ) {
@@ -1430,7 +1488,7 @@ impl Ps1Step {
                 vec![o]
             }
             Plan::Warn | Plan::HerdrWarn | Plan::PathOnly => {
-                self.warn(ctx.host.runner_enable, plan, v, &r.output)
+                self.warn(&ctx.host, plan, v, &r.output)
             }
             Plan::Install | Plan::Sync | Plan::SyncIfMissing => {
                 let (args, label) = match plan {
@@ -1492,7 +1550,7 @@ impl Ps1Step {
     }
 
     /// 知らせるだけの行
-    fn warn(&self, runner_host: bool, plan: Plan, v: Verdict, lines: &[String]) -> Vec<Outcome> {
+    fn warn(&self, host: &HostValues, plan: Plan, v: Verdict, lines: &[String]) -> Vec<Outcome> {
         let s = self.0;
         match plan {
             Plan::PathOnly => {
@@ -1513,7 +1571,7 @@ impl Ps1Step {
                     ),
                 };
                 let mut o = Outcome::new(Kind::Manual, text);
-                for n in self.fixes(runner_host, lines, s.manual_fix) {
+                for n in self.fixes(host, lines, s.manual_fix) {
                     o = o.note(n);
                 }
                 vec![o]
@@ -1538,7 +1596,7 @@ impl Ps1Step {
                         o = o.note(*n);
                     }
                 }
-                for n in self.fixes(runner_host, lines, s.manual_fix) {
+                for n in self.fixes(host, lines, s.manual_fix) {
                     o = o.note(n);
                 }
                 vec![o]
@@ -1596,7 +1654,7 @@ impl Ps1Step {
             if s.uac {
                 o = o.note(UAC_LEFT);
             }
-            for n in self.fixes(ctx.host.runner_enable, &r.output, s.sync_fix) {
+            for n in self.fixes(&ctx.host, &r.output, s.sync_fix) {
                 o = o.note(n);
             }
             return vec![o];
@@ -1613,6 +1671,10 @@ impl Ps1Step {
             } else {
                 for l in if installing { s.installed } else { s.synced } {
                     ctx.say(*l);
+                }
+                // 1Password の鍵の確かめ方は、1Password を使うホストでだけ添える
+                if installing && s.one_password && !self.without_one_password(&ctx.host) {
+                    ctx.say(ONE_PASSWORD_INSTALLED);
                 }
             }
             let mut out = vec![Outcome::new(Kind::Ok, format!("{did}た"))];
@@ -1638,7 +1700,7 @@ impl Ps1Step {
                     s.command
                 ),
             );
-            for n in self.fixes(ctx.host.runner_enable, &r.output, s.manual_fix) {
+            for n in self.fixes(&ctx.host, &r.output, s.manual_fix) {
                 o = o.note(n);
             }
             return vec![o];
@@ -1652,7 +1714,7 @@ impl Ps1Step {
             Kind::Failed,
             format!("{did}られなかった ({why}。上の出力を見る)"),
         );
-        for n in self.fixes(ctx.host.runner_enable, &r.output, s.sync_fix) {
+        for n in self.fixes(&ctx.host, &r.output, s.sync_fix) {
             o = o.note(n);
         }
         if v.path && s.policy == Policy::Sync {
@@ -1687,6 +1749,8 @@ mod tests {
     //!   渡す (受け持ちが WSL のホストの check も同じ)。ほかの手順には渡さない。版は揃っていて中継だけが違えば (ps1 の「SSH の中継が
     //!   揃っていない」)、行と前に出す行を中継の字にする。手で打つ -Check にも中継のモードを添える。前に出す行は手順の字 (無い手順は型の字と
     //!   待つ秒数)、-Check の時間切れに winget の見込みを添えない。WSL の script との突き合わせは `op_reason_parity`
+    //! - openssh は、1Password を使わないホスト (道具の switch onePassword が off) では -Check にも入れる流れにも -NoOnePassword を渡し、入れた後の
+    //!   1Password の行を出さず、手で打つ直し方のコマンドにも -NoOnePassword を添える。on のホストは渡さず、入れた後に 1Password の行を出す
     //! - ghq・fzf・starship は Windows にしか無い手順で、いつも on。ntn と同じく 3 は -IfMissing で入れ、「→ … で揃える」なら引数なしで揃え、
     //!   PATH のずれだけなら知らせる。fzf・starship は MSI の締めの行 (「→ ※ の手順で直す」だけ) なら打たずに知らせ、MSI の外し方を出す
     //! - claude-desktop は Windows にしか無い手順で、道具の switch (windowsClaudeDesktop) で on/off。3 は UAC を先に知らせて -IfMissing で
@@ -2566,11 +2630,12 @@ mod tests {
             let sys1 = sys((1, vec![header_line(s)]), (0, vec![]));
             let (o, _, calls) = run(id, &sys1, APPLY);
             assert_eq!(o[0].kind, Kind::Manual, "{id}");
-            // sshd は受け持ち (ファイルが無いホストは WSL) も渡す
-            let check = if id == "sshd" {
-                "-Check -KeysFrom 'wsl'"
-            } else {
-                "-Check"
+            // sshd は受け持ち (ファイルが無いホストは WSL) も渡す。openssh は、1Password を使わないホスト (ファイルが無いときは minimum の
+            // 既定で onePassword が off) なので -NoOnePassword も渡す
+            let check = match id {
+                "sshd" => "-Check -KeysFrom 'wsl'",
+                "openssh" => "-Check -NoOnePassword",
+                _ => "-Check",
             };
             assert_eq!(ends(&calls), vec![check], "{id}");
             assert!(!o[0].notes.is_empty(), "{id}");
@@ -3305,6 +3370,74 @@ mod tests {
         assert_eq!(o.len(), 1);
         assert_eq!(o[0].kind, Kind::Failed);
         assert!(!o[0].notes.iter().any(|n| n.contains("Preview")));
+    }
+
+    /// openssh: 1Password の SSH agent を使わないホスト (道具の switch onePassword が off。minimum の既定) では、-Check にも入れる流れにも
+    /// -NoOnePassword を渡し、入れた後の 1Password の行を出さない。手で打つ直し方のコマンドにも -NoOnePassword を添える。on のホストは今のまま
+    #[test]
+    fn openssh_leaves_out_1password_on_hosts_without_it() {
+        let s = spec("openssh");
+        let missing = (
+            3,
+            vec![
+                header_line(s),
+                "⚠️ OpenSSH が入っていない → Install-OpenSSH -IfMissing で入れる (UAC が 1 回出る) ⚠️".into(),
+            ],
+        );
+        let off = Some("[runner]\nenable = true\n");
+        let sys1 = sys(missing.clone(), (0, vec!["入れた".into()]));
+        let (o, out, calls) = run_host("openssh", &sys1, APPLY, off);
+        assert_eq!(o, vec![Outcome::new(Kind::Ok, "入れた")]);
+        assert_eq!(
+            ends(&calls),
+            vec!["-Check -NoOnePassword", "-IfMissing -NoOnePassword"]
+        );
+        assert!(out.contains(&format!("{}\n", s.installed[0])), "{out}");
+        assert!(!out.contains("1Password"), "{out}");
+        // 揃っていない (知らせるだけ)・入れられなかったときの直し方
+        let sys2 = sys((1, vec![header_line(s)]), (0, vec![]));
+        let (o, _, _) = run_host("openssh", &sys2, APPLY, off);
+        assert!(
+            o[0].notes
+                .iter()
+                .any(|n| n.contains("PowerShell で Install-OpenSSH -NoOnePassword を打つ")),
+            "{o:?}"
+        );
+        let sys3 = sys(missing.clone(), (1, vec![]));
+        let (o, _, _) = run_host("openssh", &sys3, APPLY, off);
+        assert!(
+            o[0].notes
+                .iter()
+                .any(|n| n
+                    .contains("PowerShell で Install-OpenSSH -IfMissing -NoOnePassword を打つ")),
+            "{o:?}"
+        );
+        // on: 渡さず、入れた後に 1Password の行を出す
+        let on = Some("[runner]\nenable = true\n[tools]\nonePassword = true\n");
+        let sys4 = sys(missing, (0, vec!["入れた".into()]));
+        let (o, out, calls) = run_host("openssh", &sys4, APPLY, on);
+        assert_eq!(o, vec![Outcome::new(Kind::Ok, "入れた")]);
+        assert_eq!(ends(&calls), vec!["-Check", "-IfMissing"]);
+        assert!(
+            out.contains(&format!("{ONE_PASSWORD_INSTALLED}\n")),
+            "{out}"
+        );
+        let sys5 = sys((1, vec![header_line(s)]), (0, vec![]));
+        let (o, _, _) = run_host("openssh", &sys5, APPLY, on);
+        assert!(
+            o[0].notes
+                .iter()
+                .any(|n| n.contains("PowerShell で Install-OpenSSH を打つ")),
+            "{o:?}"
+        );
+        // ほかの手順には渡さない
+        assert!(
+            SPECS
+                .iter()
+                .filter(|x| x.one_password)
+                .map(|x| x.id)
+                .eq(["openssh"])
+        );
     }
 
     #[test]

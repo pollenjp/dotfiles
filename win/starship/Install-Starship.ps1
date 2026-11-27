@@ -271,14 +271,34 @@ function Format-StarshipVerdict {
 # Windows に触る関数 (実機で -Check と本番を打って確かめる)
 # ---------------------------------------------------------------------------
 
-# winget を打ち、出力の行 (進み具合の表示は除く) と終了コードを返す (Install-Ntn.ps1 と同じ)
+# winget を打ち、出力の行 (進み具合の表示は除く) と終了コードを返す。winget は管へ UTF-8 で書くので、コンソールの文字コードが UTF-8 でなければ
+# 打つ間だけ UTF-8 にする (日本語の Windows の既定は CP932。手で打った窓・UAC で昇格し直した子の窓。そのまま読むと進み具合の帯と日本語の
+# メッセージが化ける。runner と WSL の wrapper は UTF-8 にしてから流すので替えない)。本文は Install-OpenSSH.ps1 の Invoke-Winget と同じ
+# (Install-OpenSSH.Tests.ps1 が突き合わせる)
 function Invoke-Winget {
     param([string[]]$Arguments)
     # 5.1 では Stop のままだと、外部コマンドの stderr の 1 行目で止まる
     $ErrorActionPreference = 'Continue'
-    $lines = & winget @Arguments 2>&1 | ForEach-Object { "$_" } |
-        Where-Object { $_ -notmatch '^\s*[-\\|/]?\s*$' -and $_ -notmatch '[█▒]' }
-    [pscustomobject]@{ ExitCode = $LASTEXITCODE; Lines = @($lines) }
+    $saved = $null
+    try {
+        if ([Console]::OutputEncoding.CodePage -ne 65001) {
+            $current = [Console]::OutputEncoding
+            [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
+            $saved = $current
+        }
+    } catch {
+        $saved = $null
+    }
+    try {
+        $lines = & winget @Arguments 2>&1 | ForEach-Object { "$_" } |
+            Where-Object { $_ -notmatch '^\s*[-\\|/]?\s*$' -and $_ -notmatch '[\u2588\u2592]' }
+        $code = $LASTEXITCODE
+    } finally {
+        if ($null -ne $saved) {
+            try { [Console]::OutputEncoding = $saved } catch { }
+        }
+    }
+    [pscustomobject]@{ ExitCode = $code; Lines = @($lines) }
 }
 
 # 置き場所の starship.exe を探す。manifest の RelativeFilePath (starship.exe。置き場所の直下) を先に見て、

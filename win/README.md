@@ -94,7 +94,8 @@ PowerShell 7・Visual Studio Build Tools・rustup と dotfiles の clone) を揃
   残っていて dotfiles-private にもホストの値を書くと、runner の apply は止まる (どちらを使うか決まらない。手元の方を退ける)
 - 普通の (管理者でない) PowerShell で流す。管理者の PowerShell だと何も変えずに止まる (clone と rustup が管理者の持ち物になり、普通の
   権限の git が `dubious ownership` で止まるため)。UAC は道具ごとに出る (普段のアカウントが管理者の PC の PowerShell 7 (MSIX) と rustup は
-  ユーザー単位に入るので出ない。管理者でない PC の PowerShell 7 は MSI なので出る)
+  ユーザー単位に入るので出ない。管理者でない PC の PowerShell 7 は MSI なので出る)。入れたての Windows 11 で Git だけは、昇格した winget で
+  入れ直すことがある (下の「bootstrap がすること」の表)
 - 対象の CPU は x64 だけ (ARM64 の Windows は今は対象外)
 
 ### bootstrap を流す
@@ -153,7 +154,7 @@ dotfiles apply
 
    | 道具 | winget の ID | 固定した版 (param) | 入れ方 |
    | --- | --- | --- | --- |
-   | Git for Windows | `Git.Git` | `2.56.0.4` (`-GitVersion`) | machine の scope (`C:\Program Files\Git`)。インストーラーの選択肢は既定のまま |
+   | Git for Windows | `Git.Git` | `2.56.0.4` (`-GitVersion`) | machine の scope (`C:\Program Files\Git`)。インストーラーの選択肢は既定のまま。入れたての Windows 11 の winget (v1.11.510) は、昇格していないと machine の scope の source を開けず、`Failed to open the predefined source` (`0x80070005`) で落ちる。そのときだけ、同じ引数を昇格した winget で打ち直す (System32 の Windows PowerShell を UAC で昇格させて打つ。UAC の確認は Git の installer の代わりにそこで 1 回出る。普段のアカウントが管理者でない PC で、昇格した側のアカウントに winget が無ければ、そのアカウントと登録の手を出す) |
    | GitHub CLI (`-Private` だけ) | `GitHub.cli` | `2.103.3` (`-GhVersion`) | MSI (`C:\Program Files\GitHub CLI`)。`--silent` を付けないので、UAC と進み具合の小さな窓が出る (per-machine の MSI は、quiet だと管理者でない PowerShell から UAC を出せずに落ちる) |
    | PowerShell 7 | `Microsoft.PowerShell` | `7.6.10.0` (`-PwshVersion`) | 入っていないときだけ入れる。普段のアカウントが管理者の PC は MSIX (`--installer-type msix`。ユーザー単位に入るので UAC は出ない。`--silent`)、管理者でない PC は MSI (`--installer-type wix --custom "USE_MU=0 ENABLE_MU=0"`。`C:\Program Files\PowerShell\7`。`--silent` を付けないので、UAC で管理者の資格情報を入れる。Microsoft Update の更新には入れない)。管理者でない PC で MSIX しか無ければ MSI を `--force` で足す (入っている MSIX があると、winget は install を upgrade に替えて止まるため)。入れた直後に、7.6 の線に留める pin (`--version 7.6.*`) を足す。7.6 (LTS) の MSIX は package `Microsoft.PowerShell-LTS` で、7.7 からの MSIX (別の package `Microsoft.PowerShell`) へは上がらない。7.7 からは MSI も無い |
    | Visual Studio Build Tools 2022 | `Microsoft.VisualStudio.2022.BuildTools` | `17.14.44` (`-VsBuildToolsVersion`) | C++ のワークロード (`Workload.VCTools`。必須の部品だけ)・x64 の MSVC (`VC.Tools.x86.x64`)・Windows SDK (`Windows11SDK.26100`)・英語の言語パック。MSVC と SDK は rustup が自分で入れるときと同じ部品。`--silent` を付けないので、UAC と進み具合の窓が出る。数 GB を落とすので 10 分以上かかることがある |
@@ -321,6 +322,9 @@ winget upgrade --id Rustlang.Rustup --exact --version <版> --include-pinned --c
 
 - BOM 付きの UTF-8 で保存する。新しい Windows には Windows PowerShell 5.1 しか無いので、PowerShell 7 にしか無い書き方 (`??`・`?.`・
   三項演算子・`&&`・`||`・`-AsHashtable`・3 引数の `Join-Path`) を使わない (`Install-Bootstrap.Tests.ps1` が見る)
+- winget の出力は UTF-8 で読む (`Invoke-Winget` が `Invoke-Native -Utf8` を通す)。bootstrap を流す Windows PowerShell 5.1 の窓は、日本語の Windows では
+  コンソールの文字コードが CP932 で、そのまま読むと進み具合の帯 (█▒) が「笆遺毎」に化けて除けず、日本語のメッセージ (取り消しの「…: 1602」も) が化ける
+- `Start-Process` に `-Wait` を付けない (5.1 の `-Wait` は子孫のプロセスまで待つ)。`-PassThru` で handle を掴んで `WaitForExit()` で待つ (試験が見る)
 - 固定した版は param の既定値 (`[string]$GitVersion = '<版>'` の形の行)、パッケージ ID は 1 行ずつの変数 (`$gitPackageId = '<ID>'`)。
   `nix/scripts/check-winget-version.sh` がこの行を読む
 - 副作用の無い関数と、Windows に触る関数を偽物に差し替えた流れは `bootstrap/Install-Bootstrap.Tests.ps1` で確かめる (Linux の pwsh。
@@ -650,7 +654,7 @@ item = "op://<vault の ID>/<項目の ID>/<欄の ID>"   # 元の値の 1Passwo
 | 50 | `claude-skills` | claude-skills の clone の `skills/`・`agents/`・`commands/`・`rules/` の中身を `%USERPROFILE%\.claude\` へ (ディレクトリは junction、ファイルはコピー)。clone の場所を `%USERPROFILE%\.local\state\dotfiles\claude-skills-dir` に書く | `claudePrivateSkills` | 有る (Windows だけ) |
 | 50 | `claude-statusline` | `settings.json` の `statusLine` を hook の口の status line へ向ける | `windowsClaudeCode` | 有る (Windows だけ) |
 | 50 | `claude-t3` | T3 Code の会話だけの Claude の設定 (`claude-code/t3/` の `settings.json`・`CLAUDE.t3.md`) を `%USERPROFILE%\.claude\t3\` へ記録つきのコピーで置き (改行は LF にし、JSON は object かを確かめてから置く。置き先で変えたファイルは衝突として知らせ、`--force` で上書き。置くファイルから外したものは、置いたままなら消す。`t3` がリンクなら触らない)、T3 の Launch arguments の文を出す (この手順は T3 の設定を書かない。`windowsT3Code` のホストでは `t3-code-settings` が書く。[後述](#claude-code-の設定))。記録は `%LOCALAPPDATA%\dotfiles\state\claude-t3.deployed.json` | `windowsClaudeCode` | 有る (Windows だけ) |
-| 50 | `git-config` | git の設定 (`%USERPROFILE%\.config\git\config`・`ignore`) を、WSL の home-manager と同じ `nix/home/modules/git.toml` から置く (署名と delta は除く。Windows だけ `core.sshCommand` に Windows の OpenSSH の `ssh.exe` を足す。[後述](#git-の設定)) | いつも (名前とメールは `gitIdentity`) | 有る (Windows だけ) |
+| 50 | `git-config` | git の設定 (`%USERPROFILE%\.config\git\config`・`ignore`) を、WSL の home-manager と同じ `nix/home/modules/git.toml` から置く (署名と delta は除く。Windows だけ `core.sshCommand` に Windows の OpenSSH の `ssh.exe` を足す。apply では `openssh` (96) の後に、その `ssh.exe` が変わっていればもう一度流す。[後述](#git-の設定)) | いつも (名前とメールは `gitIdentity`) | 有る (Windows だけ) |
 | 50 | `local-env` | マシンローカルの環境変数のファイル `%USERPROFILE%\.config\pjp\env` を、無ければ作り、頭の「dotfiles が書く欄」を、つないだ skill の `pjp-env.txt` から書き直す (Linux の `bootstrap-local-env` と同じ印と書き直し方。欄の外の行と値には触れない。dotfiles の節は入れない。[後述](#マシンローカルの環境変数-configpjpenv)) | `claudePrivateSkills` | 有る (Windows だけ) |
 | 55 | `notion-tokens` | ホストの値の `[claude.notion.tokens]` から `%USERPROFILE%\.local\state\dotfiles\notion-tokens.json` を書き、宣言したプロファイルごとに `~/.config/pjp/env` の変数の行と、env の ACL を値を出さずに確かめて知らせる (Linux の home-manager と `bootstrap-notion-tokens` を 1 つにしたもの。env と ACL は書き換えない。[後述](#notion-の-api-キーの宣言-claudenotiontokens)) | `windowsClaudeCode` | 有る (Windows だけ) |
 | 55 | `pjp` | shim の `pjp` を (要れば) `cargo install` し、`pjp --build` で道具を作る | `claudePrivateSkills` | 有る (Windows だけ) |
@@ -664,7 +668,7 @@ item = "op://<vault の ID>/<項目の ID>/<欄の ID>"   # 元の値の 1Passwo
 | 94 | `starship-init` | `$PROFILE` (pwsh に聞く `CurrentUserCurrentHost`) に、starship を起こす 1 行 (`Get-Command starship` で囲む) を、`dotfiles.ps1` を読む行より前に足す (無ければ末尾に。新しい PC では、続く `powershell-profile` がその後ろに足す)。starship の init の行 (手で書いた行も) があれば何もせず、`dotfiles.ps1` を読む行より後ろにあれば前へ移すよう知らせる。足した後で消した 1 行は足し直さない (`--force` で足す)。差し込むときは前の中身を `%LOCALAPPDATA%\dotfiles\state\starship-init\backup\` へ写す。記録は `%LOCALAPPDATA%\dotfiles\state\starship-init.added.json` ([starship](#starship)) | いつも | 有る (Windows だけ) |
 | 95 | `google-ime-install` | `Install-GoogleJapaneseInput.ps1`: 入っていなければ入れる (UAC)。ずれは知らせるだけ | いつも | 有る |
 | 95 | `powershell-profile` | `$PROFILE` (pwsh に聞く `CurrentUserCurrentHost`) に `dotfiles.ps1` を読む 1 行を足す。読む行があれば何もせず、足した後で消した 1 行は足し直さない (`--force` で足す)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-powershell-profile.json` ([PowerShell](#powershell)) | いつも | 有る |
-| 96 | `openssh` | `Install-OpenSSH.ps1`: 入っていなければ入れる (UAC)。ずれは知らせるだけ | いつも | 有る |
+| 96 | `openssh` | `Install-OpenSSH.ps1`: 入っていなければ入れる (UAC)。ずれは知らせるだけ。`onePassword` が off のホストは `-NoOnePassword` を付けて流し、1Password の SSH agent の案内を出さない ([OpenSSH](#openssh)) | いつも | 有る |
 | 96 | `sshd` | `Install-Sshd.ps1`: 入っていなければ OpenSSH の MSI に Server を足して揃える (UAC)。ずれは知らせるだけ。受け持ちが runner のホストでは、先にホストの値の `[sshd] authorizedKeys` から鍵の写しを、`allowUsers`・`allowFrom` からユーザーと送り元の写しを置く (受け持ちが WSL のホストは、鍵の写しは WSL の setup が置き、ユーザーと送り元は既定) | `windowsSshd` | 有る |
 | 96 | `tailscale` | `Install-Tailscale.ps1`: 入っていなければ入れる (UAC)。古いときは知らせるだけ (入っている版の方が新しければ揃っている扱い) | `windowsTailscale` | 有る |
 | 97 | `claude-code` | `Install-ClaudeCode.ps1`: 入れる・揃える (PATH のずれは知らせるだけ) | `windowsClaudeCode` | 有る |
@@ -717,6 +721,11 @@ item = "op://<vault の ID>/<項目の ID>/<欄の ID>"   # 元の値の 1Passwo
 3. 偽の `Sys` (`testutil::FakeSys`) で分かれ道を試す (偽のコマンドの stderr の行は `testutil::stderr_line` で印を付ける。`stdout_only` の写しに入らず、
    流す口には届く本物の口と同じになる)
 4. この節の表に行を足す
+
+手順の順は WSL の `# order:` にそろえるので、前の手順が書く中身が、後ろの手順の入れるもので変わることがある (`git-config` (50) の `core.sshCommand` と、
+OpenSSH を入れる `openssh` (96))。そのときは前の手順に trait `Step` の `rerun_after` を書く: apply で後ろの手順が流れた直後に runner が聞き、true なら
+その場でもう一度流す (締めの表では、前の手順の行を「<後ろの手順> の後に流し直した: 」の行に置き換える。1 回目の出力は見出しの上に残る。check と
+dry-run では聞かない)。書き直すものが無ければ false を返す (毎回流し直さない)。相手の手順の id と順は、前の手順の試験で確かめる (変わると黙って効かなくなる)
 
 WSL の側に Windows の手順 (`nix/scripts/bootstrap-windows-<id>.sh`) を足したときは、runner に写すまで `runner/src/steps/pending.rs` の `PENDING`
 に足し (gate は script の `# tool:` と同じにする)、`order_matches_wsl_setup` の並びと上の表にも足す。WSL の script が一覧に無い・`# tool:` と
@@ -1198,6 +1207,11 @@ WSL と違うもの:
 - `~/.gitconfig` が無いと、`git config --global` (gh の `auth setup-git` なども) はここの `config` に書き、次の `dotfiles check` が衝突で知らせる。Windows だけの
   設定は `~/.gitconfig` に書く (`git config --file "$HOME\.gitconfig" <キー> <値>`)。git は `~/.config/git/config` の後に `~/.gitconfig` を読むので同じキーは
   `~/.gitconfig` が勝ち、`~/.gitconfig` があれば `git config --global` もそこへ書く。`~/.gitconfig` がある間は、締めの表の ※ にそう添える
+- 入れたての Windows 11 には Windows の機能の版 (`System32\OpenSSH`) が既定で入っていて、winget の版は同じ apply の手順 `openssh` (order 96) が後から
+  入れる。そこで apply は、`openssh` の後に、置いた `config` (記録どおりのもの) の `core.sshCommand` が今選ぶ `ssh.exe` と違えば `git-config` をもう一度
+  流す (見出しに「(openssh の後に流し直す)」と出て、締めの表の git-config の行は「openssh の後に流し直した: 」の行に置き換わる)。受け持ちが runner のホストなら、入れたての Windows でも
+  1 回の apply で揃う。順は 50 のまま (ハブを作る `hc-hub` (60) の `pjp hub init` の commit を、ここで書く名前とメールにする。ADR 066)。check と dry-run は
+  流し直さないので、Windows の機能の版を選んだときは、その行に「apply の手順 openssh (96) が winget の版を入れた後に書き直す」と添える
 - `core.sshCommand` を書くようになる前に置いた `config` も、中身が記録どおりなら次の `dotfiles apply` で書き換わる (衝突にならない)。`OpenSSH` を後から入れた・
   消したときも同じく書き換える。Claude Code の会話の git は `claude-env` の env (`GIT_CONFIG_*`) で GitHub の ssh の URL を https に読み替えるので、GitHub
   には ssh を使わない (この値に左右されない。GitHub の外の ssh の remote にはこの値が効く)
@@ -1731,7 +1745,9 @@ nix/scripts/bootstrap-windows-files.sh --dry-run   # 判定だけ見る
 - 配り先の `/mnt/c/Users/<名前>` は `dotfiles.wsl.windowsUserName` で決まる
 - 配るのは setup を流した checkout の作業ツリー。commit していない変更も配られる
 - 置いたファイルをアプリが読み直すとは限らない。書き換えたときは manifest の `hint` が出る
-  (Orca なら「設定 → キーボードショートカット → ディスクから再読み込み」)
+  (Orca なら「設定 → キーボードショートカット → ディスクから再読み込み」)。runner の手順 `files` は、`runnerHint` があればそちらを出す
+  (`hint` が WSL の setup の手 (`setup --update`・`bootstrap-windows-*.sh` など) を指す項に、runner の手で書く。WSL の無いホストにも出るため。
+  runner が出す案内に WSL の手が残っていないかは、runner の試験が本物の manifest で確かめる)
 
 ## ファイルを足す
 
@@ -1745,10 +1761,14 @@ nix/scripts/bootstrap-windows-files.sh --dry-run   # 判定だけ見る
 src = "orca/keybindings.json"                  # win/ からの相対パス
 dst = "%USERPROFILE%/.orca/keybindings.json"   # Windows 側の置き先
 hint = "Orca の設定 → キーボードショートカット → 「ディスクから再読み込み」"   # 任意
+# runnerHint = "…"   # 任意。runner が hint の代わりに出す文 (hint が WSL の setup の手を指すとき)
 ```
 
 - `dst` は `%USERPROFILE%` / `%APPDATA%` / `%LOCALAPPDATA%` のどれかで始める。区切りは `/`
-- 書けるキーは `src` / `dst` / `hint` / `base` だけ。`..` と `\` は書けない
+- 書けるキーは `src` / `dst` / `hint` / `runnerHint` / `base` だけ。`..` と `\` は書けない
+- `hint` は WSL の setup (`bootstrap-windows-files.sh`) と runner の両方が出す。`setup --update`・`bootstrap-windows-*.sh`・`dotfiles.wsl.*` を書くなら、
+  runner の手 (dotfiles apply の手順の名前と、on/off を決めるホストの値の `[tools]`) で `runnerHint` も書く (runner の試験が、runner の出す案内に
+  WSL の手が残っていると落ちる)
 - `base = "nix"` の表だけ、`src` は repo 直下の `nix/` からの相対パスになる (既定は `"win"`)。Linux の home-manager も同じファイルを
   読むときに使う (home-manager からは `nix/` しか見えないので、1 か所は `nix/` に置く。今は herdr の固定した版の `releases.json` と、
   [starship](#starship) の `starship.toml`)。`src` は `win/` の外なので、[`.github/workflows/win-runner.yml`](../.github/workflows/win-runner.yml) の
@@ -2857,6 +2877,7 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
 | `Install-OpenSSH -Check` (PowerShell) | 差を出すだけ。管理者は要らない。揃っていれば終了コード 0、入っていなければ 3、ほかの差があれば 1 |
 | `Install-OpenSSH -IfMissing` (PowerShell) | 入っていなければ固定した版を入れる (UAC が 1 回出る)。ssh-agent を止めて無効にし、pin も足す。入っていれば `-Check` と同じ。入れたあとは、1Password の鍵が見えなくても成功にする (新しい PC ではまだ 1Password を入れていない) |
 | `Install-OpenSSH` (PowerShell) | 揃える。直すことがあるときだけ UAC が 1 回出る |
+| `-NoOnePassword` を足す (PowerShell) | 1Password の SSH agent を使わないホスト向け。入れた・揃えた後に `ssh-add -l` で 1Password の鍵を見ず、1Password の案内も出さない (引数なしの「揃った」も鍵で決めない)。runner の手順 `openssh` は、ホストの値の道具の switch `onePassword` が off なら `-Check` にも `-IfMissing` にも付け、直し方のコマンドにも添える |
 | `nix/scripts/bootstrap-windows-openssh.sh` (WSL) | `setup --update` でも毎回走る (order 96)。`-Check` を流し、入っていなければ `-IfMissing` で入れ (UAC が出る。待つのは 600 秒まで)、差があれば ⚠ で囲んで知らせる (揃えはしない) |
 | `nix/scripts/bootstrap-windows-openssh.sh --apply` (WSL) | WSL から揃える。UAC は Windows のデスクトップに出る |
 | `nix/scripts/check-winget-version.sh openssh` (WSL・CI) | 固定した版を winget の版の一覧と比べる。GitHub Actions の `winget-versions` が週 1 回流し、新しい版が GitHub に出て 30 日たつと落ちて知らせる ([後述](#openssh-の新しい版が出たとき)) |
@@ -2948,6 +2969,12 @@ winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
 
 - winget の引数 (`Get-WingetCommands`) の upgrade には `--include-pinned` を付け、install・uninstall には付けない
   ([winget の pin](#winget-の-pin)。試験が確かめる)
+- `Invoke-Winget` は、コンソールの文字コードが UTF-8 でなければ、winget を打つ間だけ UTF-8 にして読む (winget は管へ UTF-8 で書く)。UAC で昇格し直した
+  子 (`-LogPath`) の窓と手で打った窓は CP932 で、そのまま読むと進み具合の帯 (█▒) が「笆遺毎」に化けて除けず、昇格した側の行 (`[管理者]`) に残った。
+  runner と WSL の wrapper は UTF-8 にしてから流すので替えない。winget を打つほかの ps1 (`Install-Sshd.ps1`・`Install-Herdr.ps1` など 13 本) の
+  `Invoke-Winget` も同じ本文にそろえてあり、`Install-OpenSSH.Tests.ps1` が突き合わせ、持つ ps1 の数 (bootstrap と合わせて 14 本) も数える (直すときは
+  全部を直す。winget を打つ ps1 を足したら、この本文を写して試験の数を直す)。昇格した側で winget が見つからないときの `Format-WingetMissingNote` も、
+  bootstrap・`Install-OpenSSH.ps1`・`Install-Sshd.ps1` で同じ本文にそろえてあり、同じ試験が突き合わせる
 - `-Check` の終了コードと締めの文 (`Get-OpenSshExitCode`・`Get-OpenSshCheckMessage`) は、96 が読む。変えるときは
   `nix/scripts/bootstrap-windows-openssh.sh` とそのテストも直す
 - winget やサービスに触る部分は、実機で `-Check` と本番を打って確かめる

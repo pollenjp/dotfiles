@@ -432,6 +432,123 @@ Test-Case '管理者で起動し直した子 (-LogPath) は、揃える段の行
     Invoke-ChildLogScenario
 }
 
+# Invoke-Winget (本物): winget は管へ UTF-8 で書く。コンソールの文字コードが UTF-8 でない窓 (UAC で昇格し直した子の窓・手で打った窓。日本語の
+# Windows の既定は CP932。ここでは ISO-8859-1 で代える) でも、打つ間だけ UTF-8 で読み、帯 (█▒) の行を除いて日本語を化けさせず、打った後は
+# 元に戻す。もう UTF-8 の窓 (runner と WSL の wrapper は [Text.Encoding]::UTF8 にしてから流す) では替えない。偽の winget を PATH の先頭に置く (Linux)
+function Invoke-RealWinget {
+    param([Text.Encoding]$Console)
+    $bin = Join-Path ([IO.Path]::GetTempPath()) ('install-openssh-winget-' + [guid]::NewGuid())
+    New-Item -ItemType Directory -Path $bin | Out-Null
+    Set-Content -LiteralPath (Join-Path $bin 'winget') -Value "#!/bin/sh`nprintf '  \342\226\210\342\226\210\342\226\222  1 MB / 2 MB\n'`nprintf '\343\201\202\343\201\204 ok\n'`nexit 7"
+    & chmod +x (Join-Path $bin 'winget')
+    $savedPath = $env:PATH
+    $savedEncoding = [Console]::OutputEncoding
+    $env:PATH = "$bin$([IO.Path]::PathSeparator)$savedPath"
+    try {
+        [Console]::OutputEncoding = $Console
+        $r = Invoke-Winget -Arguments @('install')
+        $after = [Console]::OutputEncoding
+    } finally {
+        [Console]::OutputEncoding = $savedEncoding
+        $env:PATH = $savedPath
+        Remove-Item -LiteralPath $bin -Recurse -Force
+    }
+    "$($r.ExitCode)|$($r.Lines -join '|')|$($after.CodePage)|$($after.GetPreamble().Length)"
+}
+Test-Case 'winget の出力は UTF-8 で読み (帯を除き、日本語は化けない)、終わったらコンソールの文字コードを戻す' '7|あい ok|28591|0' {
+    Invoke-RealWinget -Console ([Text.Encoding]::GetEncoding('ISO-8859-1'))
+}
+Test-Case 'もう UTF-8 の窓 (runner・WSL の wrapper の BOM 付きの UTF-8) では文字コードを替えない' '7|あい ok|65001|3' {
+    Invoke-RealWinget -Console ([Text.Encoding]::UTF8)
+}
+
+# 写しの関数の本文 (`{ … }`)。改行は LF にそろえて比べる (Windows の core.autocrlf の clone では、.gitattributes で -text の
+# Install-PowerToys.ps1 だけが LF のまま残る)。関数が無ければ $null
+function Get-FunctionBody {
+    param([string]$Path, [string]$Name)
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$null, [ref]$null)
+    $fn = @($ast.FindAll({ param($n) ($n -is [System.Management.Automation.Language.FunctionDefinitionAst]) -and ($n.Name -eq $Name) }, $true))
+    if ($fn.Count -eq 0) { return $null }
+    $fn[0].Body.Extent.Text -replace "`r`n", "`n"
+}
+$winScripts = @(Get-ChildItem -Path (Join-Path (Split-Path -Parent $PSScriptRoot) '*\*.ps1') -File | Where-Object { $_.Name -notlike '*.Tests.ps1' } | Sort-Object FullName)
+function Get-ScriptLabel { param($File) "$($File.Directory.Name)/$($File.Name)" }
+
+# winget の出力を取り込むほかの ps1 (Install-Sshd.ps1・Install-Herdr.ps1 など) の Invoke-Winget は、上で確かめたこの ps1 の Invoke-Winget と
+# 同じ本文 (どの窓から打っても UTF-8 で読む。写しをそろえる)。bootstrap だけは Invoke-Native -Utf8 を通す別の形で、自分の試験で確かめる
+Test-Case 'winget を打つほかの ps1 の Invoke-Winget は、この ps1 と同じ本文 (bootstrap を除く)' '' {
+    $want = Get-FunctionBody -Path (Join-Path $PSScriptRoot 'Install-OpenSSH.ps1') -Name 'Invoke-Winget'
+    @($winScripts | Where-Object { (Get-ScriptLabel $_) -ne 'bootstrap/Install-Bootstrap.ps1' } | ForEach-Object {
+            $body = Get-FunctionBody -Path $_.FullName -Name 'Invoke-Winget'
+            if (($null -ne $body) -and ($body -cne $want)) { Get-ScriptLabel $_ }
+        }) -join ' '
+}
+# Invoke-Winget を持つ ps1 の数 (増えた・減ったら、ここと win/README.md の「Install-OpenSSH.ps1 を書くときの注意」を直す)
+Test-Case 'Invoke-Winget を持つ ps1 は 14 本 (bootstrap と、同じ本文の 13 本)' 14 {
+    @($winScripts | Where-Object { $null -ne (Get-FunctionBody -Path $_.FullName -Name 'Invoke-Winget') }).Count
+}
+
+# Format-WingetMissingNote (昇格した側で winget が見つからないときの行) は、bootstrap・Install-OpenSSH・Install-Sshd で同じ本文
+Test-Case 'Format-WingetMissingNote は bootstrap・Install-OpenSSH・Install-Sshd にあり、同じ本文' 'bootstrap/Install-Bootstrap.ps1 openssh/Install-OpenSSH.ps1 openssh/Install-Sshd.ps1|' {
+    $want = Get-FunctionBody -Path (Join-Path $PSScriptRoot 'Install-OpenSSH.ps1') -Name 'Format-WingetMissingNote'
+    $have = @($winScripts | Where-Object { $null -ne (Get-FunctionBody -Path $_.FullName -Name 'Format-WingetMissingNote') })
+    $differ = @($have | Where-Object { (Get-FunctionBody -Path $_.FullName -Name 'Format-WingetMissingNote') -cne $want } | ForEach-Object { Get-ScriptLabel $_ })
+    "$(@($have | ForEach-Object { Get-ScriptLabel $_ }) -join ' ')|$($differ -join ' ')"
+}
+
+# 揃えた・入れた後の ssh-add -l の行。1Password の SSH agent を使わないホスト (-NoOnePassword) は出さない
+Test-Case 'ssh-add -l の行: 鍵が見えれば本数' '  ssh-add -l      : 鍵 2 本' { Format-AgentKeyLine -Keys 2 }
+Test-Case 'ssh-add -l の行: 入れたばかり (-IfMissing) で見えなければ、1Password の SSH agent を有効にした後の確かめ方' '  ssh-add -l      : 鍵が見えない → 1Password の SSH agent を有効にしたら、Install-OpenSSH -Check で確かめる' {
+    Format-AgentKeyLine -Keys $null -IfMissing
+}
+Test-Case 'ssh-add -l の行: 揃えた後に見えなければ、1Password を起動し直す手' '  ssh-add -l      : 鍵が見えない → 1Password をトレイから終了して起動し直し、もう一度 -Check で確かめる' {
+    Format-AgentKeyLine -Keys $null
+}
+Test-Case 'ssh-add -l の行: 1Password を使わないホスト (-NoOnePassword) は、見えても見えなくても出さない' '0 0 0' {
+    "$(@(Format-AgentKeyLine -Keys $null -IfMissing -NoOnePassword).Count) $(@(Format-AgentKeyLine -Keys $null -NoOnePassword).Count) $(@(Format-AgentKeyLine -Keys 2 -NoOnePassword).Count)"
+}
+# 引数なしで揃えた後の「揃った」: 版・ssh-agent・pin に加えて 1Password の鍵が見えること。-NoOnePassword は鍵を数えない
+Test-Case '揃った: 鍵が見えなければ揃っていない。1Password を使わないホストは鍵を数えない' 'True False True False' {
+    $synced = [pscustomobject]@{ Plan = 'none'; AgentDisabled = $true; Pinned = $true }
+    "$(Test-OpenSshSynced -State $synced -Keys 1) $(Test-OpenSshSynced -State $synced -Keys $null) $(Test-OpenSshSynced -State $synced -Keys $null -NoOnePassword) $(Test-OpenSshSynced -State $unpinned -Keys $null -NoOnePassword)"
+}
+
+# 入っていない PC で -IfMissing を打った形 (管理者の窓から。Test-IsAdmin が真) で流し、画面に出た行を返す。-NoOnePassword なら ssh-add -l を
+# 打たず、1Password の行を出さない。状態の読み取り・winget・サービスの cmdlet・ssh-add・Write-Host を偽物に替える
+function Invoke-IfMissingScenario {
+    param([switch]$NoOnePassword)
+    $missSaid = [System.Collections.Generic.List[string]]::new()
+    $missKeys = [System.Collections.Generic.List[string]]::new()
+    $missStates = [System.Collections.Generic.Queue[object]]::new()
+    $missStates.Enqueue([pscustomobject]@{
+            Installed = $null; Plan = 'install'; AgentStatus = $null; AgentStartType = $null
+            AgentDisabled = $true; Pinned = $false; Latest = [version]'10.4.0.0'; Inbox = $true; Server = $false
+        })
+    $missStates.Enqueue([pscustomobject]@{
+            Installed = [version]'10.4.0.0'; Plan = 'none'; AgentStatus = 'Stopped'; AgentStartType = 'Disabled'
+            AgentDisabled = $true; Pinned = $true; Latest = [version]'10.4.0.0'; Inbox = $true; Server = $false
+        })
+    function Get-Command { param($Name, $ErrorAction) [pscustomobject]@{ Name = 'winget' } }
+    function Get-OpenSshState { param($PackageId, $InstallDir, $Target) $missStates.Dequeue() }
+    function Test-IsAdmin { $true }
+    function Invoke-Winget { param([string[]]$Arguments) [pscustomobject]@{ ExitCode = 0; Lines = @() } }
+    function Get-Service { param($Name, $ErrorAction) $null }
+    function Get-AgentKeyCount { param($SshAddExe) $missKeys.Add('ssh-add'); $null }
+    function Write-Host { param($Object, $ForegroundColor) $missSaid.Add("$Object") }
+    Remove-Variable -Name StepLog -Scope Script -ErrorAction SilentlyContinue
+    $savedPf = $env:ProgramFiles
+    $env:ProgramFiles = Join-Path ([IO.Path]::GetTempPath()) "install-openssh-ifmissing-$PID"
+    try {
+        $code = Invoke-InstallOpenSsh -Version '10.4.0.0' -IfMissing -NoOnePassword:$NoOnePassword
+    } finally {
+        $env:ProgramFiles = $savedPf
+    }
+    $onePassword = @($missSaid | Where-Object { $_.Contains('1Password') }).Count
+    "$code|$($missKeys.Count)|$onePassword|$(@($missSaid | Where-Object { $_.Contains('入れた') }).Count -gt 0)"
+}
+Test-Case '-IfMissing で入れた後、鍵が見えなければ 1Password の SSH agent の案内を出す' '0|1|1|True' { Invoke-IfMissingScenario }
+Test-Case '-IfMissing -NoOnePassword で入れた後は、ssh-add -l を打たず、1Password の行を出さない' '0|0|0|True' { Invoke-IfMissingScenario -NoOnePassword }
+
 # 本体の入口: 思わぬ例外でも、終了コード 2 で止まる (成功に見せない)。
 # Linux の pwsh には $env:ProgramFiles が無く、本体の最初で例外になるのを使う
 # (2026-10-06 の本番で、例外のあと外側の exit $LASTEXITCODE が中の winget の 0 を返し「揃いました」と出た)

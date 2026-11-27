@@ -50,7 +50,10 @@ winget upgrade には --include-pinned を付ける (付けないと、bootstrap
 何も変えずに止めるとき: 管理者の PowerShell (clone と rustup が管理者の持ち物になり、普通の権限の git が dubious ownership で止まる)・
 x64 でない CPU。SAC がオフでないときは止めず、最初の警告と表の ⚠ の行で知らせる (終了コードは 1)。
 UAC は winget と Visual Studio Installer が道具ごとに出す (管理者の PC の PowerShell 7 (MSIX) と rustup はユーザー単位に入るので出ない。
-管理者でない PC の PowerShell 7 は MSI なので出る)。
+管理者でない PC の PowerShell 7 は MSI なので出る)。入れたての Windows 11 の winget (v1.11.510) は、昇格していないと machine の scope の source を
+開けず、Git の install が 0x80070005 (Failed to open the predefined source) で落ちる。そのときだけ、同じ引数を昇格した winget (System32 の
+Windows PowerShell を UAC で昇格させて打つ) で打ち直す (UAC の確認は Git の installer の代わりにそこで 1 回出る)。winget の出力は UTF-8 で読む
+(コンソールの既定の CP932 で読むと、進み具合の帯と日本語のメッセージが化ける)。
 
 BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無い UTF-8 を CP932 として読む)。新しい Windows には 5.1 しか
 無いので、PowerShell 7 にしか無い書き方を使わない (Install-Bootstrap.Tests.ps1 が見る)。
@@ -366,15 +369,114 @@ function Test-WingetPinned {
 # winget install が「取り消された」(UAC で「はい」を押さなかった・installer の窓を閉じた) で落ちたか。winget の「取り消した」
 # (0x8A15010C。MSI の 1602 は winget がこれにする) か、出力のインストーラーの終了コードが 1602 (取り消し)・1223 (UAC を断った) か。
 # exe の installer の終了コードは、winget が 0x8A150006 にして「Installer failed with exit code: 1602」(日本語なら
-# 「インストーラーが終了コードで失敗しました: 1602」) と出す。コロンの直後の数だけを見る (URL の中の数を拾わない)
+# 「インストーラーが終了コードで失敗しました: 1602」) と出す。コロンの直後の数だけを見る (URL の中の数を拾わない)。昇格した winget
+# (Invoke-ElevatedWinget) を UAC で断ったときは、ERROR_CANCELLED (1223) を終了コードにする (Get-ElevationFailureCode)
 function Test-WingetCancelled {
     param([int]$ExitCode, [string[]]$Lines)
     if ($ExitCode -eq 0) { return $false }
-    if ($ExitCode -eq -1978334964) { return $true }
+    if (($ExitCode -eq -1978334964) -or ($ExitCode -eq 1223)) { return $true }
     foreach ($line in $Lines) {
         if ("$line".Trim() -match '[:：]\s*(1602|1223)$') { return $true }
     }
     $false
+}
+
+# 昇格していない winget が、machine の scope の source を開けずに落ちたか。入れたての Windows 11 の winget (v1.11.510) は、--scope machine の
+# install (と list) を「Failed to open the predefined source」「0x80070005 : Access is denied」で落とす (昇格した winget は開ける)。終了コード
+# 0x80070005 か、その英語の行で見る
+function Test-WingetAccessDenied {
+    param([int]$ExitCode, [string[]]$Lines)
+    if ($ExitCode -eq 0) { return $false }
+    if ($ExitCode -eq -2147024891) { return $true }
+    foreach ($line in $Lines) {
+        if ("$line" -match 'Failed to open the predefined source') { return $true }
+    }
+    $false
+}
+
+# 昇格した winget を起こせなかったとき (Start-Process -Verb RunAs の例外) の終了コード。UAC で断った (Win32Exception の ERROR_CANCELLED。
+# Start-Process は InvalidOperationException に包む) なら 1223 (Test-WingetCancelled が取り消しと読む)、ほか (UAC を出せない SSH の会話など。
+# 流し直しても直らない) は -1
+function Get-ElevationFailureCode {
+    param([Exception]$Exception)
+    $e = $Exception
+    while ($null -ne $e) {
+        if (($e -is [System.ComponentModel.Win32Exception]) -and ($e.NativeErrorCode -eq 1223)) { return 1223 }
+        $e = $e.InnerException
+    }
+    -1
+}
+
+# winget の出力の行から、進み具合の表示 (回る棒・帯 █▒) を除く。帯の字は UTF-8 で読んだときだけ除ける (CP932 で読むと「笆遺毎」に化ける。
+# Invoke-Winget が UTF-8 で読む)
+function Select-WingetOutputLines {
+    param([string[]]$Lines)
+    foreach ($line in $Lines) {
+        $s = "$line"
+        if (($s -notmatch '^\s*[-\\|/]?\s*$') -and ($s -notmatch '[\u2588\u2592]')) { $s }
+    }
+}
+
+# PowerShell の一重引用符の文字列にする (中の ' を重ねる。全角の引用符も PowerShell は ' と読むので重ねる。Install-ClaudeDesktop.ps1 と同じ)
+function ConvertTo-PsLiteral {
+    param([string]$Text)
+    $quotes = @([char]0x27, [char]0x2018, [char]0x2019, [char]0x201A, [char]0x201B)
+    $sb = New-Object System.Text.StringBuilder
+    foreach ($c in "$Text".ToCharArray()) {
+        [void]$sb.Append($c)
+        if ($quotes -contains $c) { [void]$sb.Append($c) }
+    }
+    "'" + $sb.ToString() + "'"
+}
+
+# PowerShell の本文を -EncodedCommand に渡す形 (UTF-16LE の base64) にする
+function ConvertTo-EncodedCommand {
+    param([string]$Script)
+    [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($Script))
+}
+
+# 昇格した Windows PowerShell に渡す本文 (Windows PowerShell 5.1 の書き方だけ)。昇格した側のアカウントの winget を引き (実行エイリアス
+# %LOCALAPPDATA%\Microsoft\WindowsApps\winget.exe、無ければ PATH の winget の .exe だけ。関数・alias・.cmd・.ps1 は管理者の権限で流さない)、
+# 引数を渡して打ち、出力 (stderr も) を UTF-8 で読んで $LogPath に UTF-8 で書き、winget の終了コードで終わる (Start-Process -Verb RunAs は
+# 昇格した process の出力を受け取れない)。winget が無ければ、そのアカウントを $LogPath に書いて 2 で終わる (UAC で別の管理者のアカウントに
+# 昇格すると、そのアカウントに winget が登録されていないことがある)。起こせなければ、わけを書いて 2 で終わる ($LASTEXITCODE を先に 2 に
+# しておく。起こせないまま exit $LASTEXITCODE に届くと 0 で終わり、入ったように見える)
+function Get-ElevatedWingetScript {
+    param([string[]]$Arguments, [string]$LogPath)
+    $quotedArgs = @($Arguments | ForEach-Object { ConvertTo-PsLiteral -Text $_ }) -join ' '
+    $log = ConvertTo-PsLiteral -Text $LogPath
+    @(
+        "`$ErrorActionPreference = 'Continue'"
+        '$global:LASTEXITCODE = 2'
+        'try { [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false } catch { }'
+        '$w = $null'
+        'if ($env:LOCALAPPDATA) {'
+        "    `$alias = Join-Path `$env:LOCALAPPDATA 'Microsoft\WindowsApps\winget.exe'"
+        '    if (Test-Path -LiteralPath $alias) { $w = $alias }'
+        '}'
+        'if (-not $w) {'
+        '    $found = @(Get-Command -Name winget -CommandType Application -ErrorAction SilentlyContinue | Where-Object { "$($_.Source)" -like ''*.exe'' })'
+        '    if ($found.Count -gt 0) { $w = $found[0].Source }'
+        '}'
+        'if (-not $w) {'
+        "    ('winget が見つからない (昇格した側のアカウント: ' + `$env:USERNAME + ')') | Out-File -LiteralPath $log -Encoding utf8"
+        '    exit 2'
+        '}'
+        'try {'
+        "    & `$w $quotedArgs 2>&1 | ForEach-Object { `"`$_`" } | Out-File -LiteralPath $log -Encoding utf8"
+        '} catch {'
+        "    ('winget を起こせなかった: ' + `$_.Exception.Message) | Out-File -LiteralPath $log -Encoding utf8 -Append"
+        '    $global:LASTEXITCODE = 2'
+        '}'
+        'exit $LASTEXITCODE'
+    ) -join "`n"
+}
+
+# 昇格した側で winget が見つからないときの行 (Install-OpenSSH.ps1・Install-Sshd.ps1 と同じ字)
+function Format-WingetMissingNote {
+    param([string]$Account)
+    "winget が見つからない (昇格した側のアカウント: $Account)"
+    '※ UAC で別の管理者のアカウントの資格情報を入れたなら、そのアカウントには winget (App Installer) が登録されていないことがある (winget は Windows にサインインしたときに使う人ごとに登録され、この PC に一度もサインインしていないアカウントには無い)。そのアカウントでこの PC に一度サインインするか、そのアカウントの管理者の PowerShell (Windows PowerShell を「管理者として実行」で開き、UAC でそのアカウントの資格情報を入れる) で Add-AppxPackage -RegisterByFamilyName -MainPackage Microsoft.DesktopAppInstaller_8wekyb3d8bbwe を打ってから、流し直す。普段のアカウントのまま昇格したなら、Microsoft Store の「アプリ インストーラー」を入れる (更新する)'
 }
 
 # 固定した版で入れる winget install の引数。道具ごとの引数 (scope・installer の種類・--custom) を後ろに足す。-Silent $false なら
@@ -425,12 +527,14 @@ function Get-BootstrapPackages {
         $pwshSilent = $false
         $pwshArgs = @('--installer-type', 'wix', '--custom', (Get-PwshMsiCustomArgument))
     }
+    # RetryElevated: 昇格していない winget が machine の scope の source を開けずに落ちたら (Test-WingetAccessDenied。入れたての Windows 11 の
+    # winget v1.11.510)、同じ引数を昇格した winget で打ち直す。--scope machine で入れる Git だけ (ほかは scope を名指ししない)
     $all = @(
-        [pscustomobject]@{ Name = 'git'; Title = 'Git for Windows'; PackageId = $gitPackageId; Version = $GitVersion; Silent = $true; Args = @('--scope', 'machine') }
-        [pscustomobject]@{ Name = 'gh'; Title = 'GitHub CLI'; PackageId = $ghPackageId; Version = $GhVersion; Silent = $false; Args = @('--installer-type', 'wix') }
-        [pscustomobject]@{ Name = 'pwsh'; Title = 'PowerShell 7'; PackageId = $pwshPackageId; Version = $PwshVersion; Silent = $pwshSilent; Args = $pwshArgs }
-        [pscustomobject]@{ Name = 'vs-buildtools'; Title = 'Visual Studio Build Tools 2022'; PackageId = $vsBuildToolsPackageId; Version = $VsBuildToolsVersion; Silent = $false; Args = @('--custom', $vsCustom) }
-        [pscustomobject]@{ Name = 'rustup'; Title = 'rustup'; PackageId = $rustupPackageId; Version = $RustupVersion; Silent = $true; Args = @('--custom', (Get-RustupInitArgument)) }
+        [pscustomobject]@{ Name = 'git'; Title = 'Git for Windows'; PackageId = $gitPackageId; Version = $GitVersion; Silent = $true; Args = @('--scope', 'machine'); RetryElevated = $true }
+        [pscustomobject]@{ Name = 'gh'; Title = 'GitHub CLI'; PackageId = $ghPackageId; Version = $GhVersion; Silent = $false; Args = @('--installer-type', 'wix'); RetryElevated = $false }
+        [pscustomobject]@{ Name = 'pwsh'; Title = 'PowerShell 7'; PackageId = $pwshPackageId; Version = $PwshVersion; Silent = $pwshSilent; Args = $pwshArgs; RetryElevated = $false }
+        [pscustomobject]@{ Name = 'vs-buildtools'; Title = 'Visual Studio Build Tools 2022'; PackageId = $vsBuildToolsPackageId; Version = $VsBuildToolsVersion; Silent = $false; Args = @('--custom', $vsCustom); RetryElevated = $false }
+        [pscustomobject]@{ Name = 'rustup'; Title = 'rustup'; PackageId = $rustupPackageId; Version = $RustupVersion; Silent = $true; Args = @('--custom', (Get-RustupInitArgument)); RetryElevated = $false }
     )
     $all | Where-Object { $Private -or ($_.Name -ne 'gh') }
 }
@@ -736,25 +840,58 @@ function Get-BootstrapPaths {
     }
 }
 
-# winget を打ち、出力の行 (進み具合の表示は除く) と終了コードを返す (Install-Herdr.ps1 と同じ)
+# winget を打ち、出力の行 (進み具合の表示は除く) と終了コードを返す。winget は管へ UTF-8 で書くので、UTF-8 で読む (Invoke-Native -Utf8)。
+# bootstrap は Windows PowerShell 5.1 の窓で流し、日本語の Windows のコンソールの既定は CP932 なので、そのまま読むと進み具合の帯 (█▒) が
+# 「笆遺毎」に化けて除けず、日本語のメッセージ (取り消しの「…: 1602」も) も化ける
 function Invoke-Winget {
     param([string[]]$Arguments)
-    # 5.1 では Stop のままだと、外部コマンドの stderr の 1 行目で止まる
-    $ErrorActionPreference = 'Continue'
-    $lines = & winget @Arguments 2>&1 | ForEach-Object { "$_" } |
-        Where-Object { $_ -notmatch '^\s*[-\\|/]?\s*$' -and $_ -notmatch '[█▒]' }
-    [pscustomobject]@{ ExitCode = $LASTEXITCODE; Lines = @($lines) }
+    $r = Invoke-Native -FilePath 'winget' -Arguments $Arguments -Utf8
+    [pscustomobject]@{ ExitCode = $r.ExitCode; Lines = @(Select-WingetOutputLines -Lines $r.Lines) }
 }
 
-# exe を打ち、出力の行と終了コードを返す。起動できなければ終了コード -1。-Utf8 は、UTF-8 で書く exe (vswhere -utf8) の出力を
-# 読むあいだだけ、コンソールの文字コードを UTF-8 にする (日本語の Windows の既定は CP932)
+# 昇格した winget で打つ (UAC の確認が 1 回出る。確認なしで昇格する設定の PC では出ない)。System32 の Windows PowerShell (同じユーザーが
+# 差し替えられないもの) を Start-Process -Verb RunAs で昇格させ、Get-ElevatedWingetScript の本文を -EncodedCommand で渡す。昇格した側は
+# 出力を一時ファイルに書き、winget の終了コードで終わる。こちらはその終了コードと、ファイルの行 (進み具合の表示は除く) を返す。UAC を断った・
+# 起こせなかったときは、UAC で断ったなら終了コードを 1223 (ERROR_CANCELLED。取り消し)、ほか (UAC を出せない SSH の会話など) なら -1 にする
+# (Get-ElevationFailureCode。Install-ClaudeDesktop.ps1 の Invoke-ElevatedWinget と同じ形で、取り消しと言うのは断ったときだけにした)。
+# 待つのは昇格した PowerShell だけ (-Wait は付けず、handle を掴んで WaitForExit。5.1 の -Wait は子孫のプロセスまで待つ。Invoke-VsModify と同じ)
+function Invoke-ElevatedWinget {
+    param([string[]]$Arguments)
+    $log = Join-Path ([IO.Path]::GetTempPath()) ('dotfiles-bootstrap-winget-{0}.log' -f [guid]::NewGuid().ToString('N'))
+    $shell = Join-Path ([Environment]::SystemDirectory) 'WindowsPowerShell\v1.0\powershell.exe'
+    $encoded = ConvertTo-EncodedCommand -Script (Get-ElevatedWingetScript -Arguments $Arguments -LogPath $log)
+    try {
+        $p = Start-Process -FilePath $shell -ArgumentList @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encoded) -Verb RunAs -WindowStyle Hidden -PassThru -ErrorAction Stop
+        $null = $p.Handle
+        $p.WaitForExit()
+    } catch {
+        return [pscustomobject]@{ ExitCode = (Get-ElevationFailureCode -Exception $_.Exception); Lines = @("UAC: $($_.Exception.Message)") }
+    }
+    $lines = @()
+    if (Test-Path -LiteralPath $log) {
+        $lines = @(Select-WingetOutputLines -Lines @(Get-Content -LiteralPath $log -Encoding UTF8))
+        Remove-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue
+    }
+    [pscustomobject]@{ ExitCode = $p.ExitCode; Lines = $lines }
+}
+
+# exe を打ち、出力の行と終了コードを返す。起動できなければ終了コード -1。-Utf8 は、UTF-8 で書く exe (winget・vswhere -utf8) の出力を
+# 読むあいだだけ、コンソールの文字コードを UTF-8 にする (日本語の Windows の既定は CP932)。もう UTF-8 なら替えない。コンソールの無い host で
+# 替えられなければ、替えずに読む
 function Invoke-Native {
     param([string]$FilePath, [string[]]$Arguments, [switch]$Utf8)
     $ErrorActionPreference = 'Continue'
     $saved = $null
     if ($Utf8) {
-        $saved = [Console]::OutputEncoding
-        [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
+        try {
+            if ([Console]::OutputEncoding.CodePage -ne 65001) {
+                $current = [Console]::OutputEncoding
+                [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
+                $saved = $current
+            }
+        } catch {
+            $saved = $null
+        }
     }
     try {
         $lines = @(& $FilePath @Arguments 2>&1 | ForEach-Object { "$_" })
@@ -763,7 +900,9 @@ function Invoke-Native {
         $lines = @("$($_.Exception.Message)")
         $code = -1
     } finally {
-        if ($null -ne $saved) { [Console]::OutputEncoding = $saved }
+        if ($null -ne $saved) {
+            try { [Console]::OutputEncoding = $saved } catch { }
+        }
     }
     [pscustomobject]@{ ExitCode = $code; Lines = $lines }
 }
@@ -1198,6 +1337,20 @@ function Invoke-InstallBootstrap {
         if ($p.Name -eq 'vs-buildtools') { Write-Host '  (Build Tools は数 GB を落として入れるので、10 分以上かかることがある。UAC と進み具合の窓が出る)' }
         if (($p.Name -eq 'pwsh') -and (-not $accountAdmin)) { Write-Host '  (管理者でない PC なので、PowerShell 7 は MSI (マシン単位) で入れる。UAC で管理者の資格情報を入れる)' }
         $result = Invoke-Winget -Arguments $arguments
+        # 入れたての Windows 11 の winget (v1.11.510) は、昇格していないと machine の scope の source を開けずに落ちる (0x80070005)。Git
+        # (machine の scope) だけ、同じ引数を昇格した winget で打ち直す。今動いている PC (新しい winget) は普通に入るので、昇格しない
+        if ($p.RetryElevated -and (Test-WingetAccessDenied -ExitCode $result.ExitCode -Lines $result.Lines)) {
+            Write-Tail -Lines $result.Lines
+            Write-Host ('昇格していない winget が machine の scope を読めなかった (終了コード 0x{0:X8})。昇格した winget で入れ直す (UAC の確認が 1 回出る。出たら「はい」を押す。昇格した側の進み具合は出ず、終わるまで数分かかることがある)' -f $result.ExitCode)
+            $result = Invoke-ElevatedWinget -Arguments $arguments
+            # UAC で別の管理者のアカウントに昇格し、そのアカウントに winget が無かった: そのアカウントと登録の手を出す
+            $missing = @($result.Lines | Where-Object { "$_" -match '^winget が見つからない \(昇格した側のアカウント: (.*)\)$' })
+            if ($missing.Count -gt 0) {
+                $account = $missing[0] -replace '^winget が見つからない \(昇格した側のアカウント: (.*)\)$', '$1'
+                foreach ($line in @(Format-WingetMissingNote -Account $account)) { Write-Host "  $line" -ForegroundColor Yellow }
+                $result = [pscustomobject]@{ ExitCode = $result.ExitCode; Lines = @($result.Lines | Where-Object { "$_" -notin $missing }) }
+            }
+        }
         Write-Tail -Lines $result.Lines
         if ($result.ExitCode -ne 0) {
             # 再起動待ち (Build Tools の 3010 など) でも 0 以外で返る。入ったかは読み直して決める
