@@ -13,8 +13,8 @@
 #    ログインできない PC は -Private でない bootstrap で dotfiles だけを clone する。dotfiles-private の docs/adr/111_win_runner_without_gh_*)。
 #    gh が無ければ GitHub の remote を資格情報なしの HTTPS で取る (public な dotfiles は取れる。gh があってログインしていなくても、public な repo は
 #    資格情報を求められないので gh の helper は呼ばれない)
-# 3. 後ろに runner の引数があれば、進めた後に runner に渡す (dotfiles 関数と同じく win\runner で cargo run。runner は clone から作り直すので、
-#    進めた後のコードで動く)
+# 3. 後ろに runner の引数があれば、進めた後に runner に渡す (dotfiles 関数と同じく、進めた後の clone の launcher Invoke-DotfilesRunner.ps1 で
+#    起こす。launcher は進めた後の clone の HEAD の runner に合う exe を使い、無ければ落とす。launcher の無い clone では win\runner で cargo run)
 # 4. 締めに、進めなかった clone と、dotfiles.ps1 が変わったら新しい PowerShell を開くことを出す (今の PowerShell の関数は古いまま)
 #
 # --self-update の直後の --dry-run は、fetch して進める commit を出すだけ (fast-forward も runner もしない。fetch は remote-tracking の ref だけを
@@ -530,15 +530,22 @@ if ($MyInvocation.InvocationName -ne '.') {
             $runnerCode = $null
             if ($state.Runner) {
                 Write-Host ''
-                # dotfiles 関数 (dotfiles.ps1) と同じ打ち方: win\runner に入ってから打ち、'--' は引用符で囲む (理由は dotfiles 関数の注意)。
-                # Invoke-DotfilesSelfUpdate.Tests.ps1 が、dotfiles 関数と同じ場所で同じ引数を渡すかを突き合わせる
+                # dotfiles 関数 (dotfiles.ps1) と同じ打ち方: 進めた後の clone の launcher に clone と引数を渡す。launcher の無い clone では、
+                # win\runner に入ってから cargo run を打ち、'--' は引用符で囲む (理由は dotfiles 関数の注意)。
+                # Invoke-DotfilesSelfUpdate.Tests.ps1 が、dotfiles 関数と同じものを同じ引数で打つかを突き合わせる
                 $runnerArgs = @($state.RunnerArgs)
-                Push-Location -LiteralPath $state.Runner
-                try {
-                    cargo run --quiet --release --locked '--' @runnerArgs
+                $launcher = [IO.Path]::Combine($state.DotfilesDir, 'win', 'powershell', 'Invoke-DotfilesRunner.ps1')
+                if (Test-Path -LiteralPath $launcher -PathType Leaf) {
+                    & $launcher $state.DotfilesDir @runnerArgs
                     $runnerCode = $LASTEXITCODE
-                } finally {
-                    Pop-Location
+                } else {
+                    Push-Location -LiteralPath $state.Runner
+                    try {
+                        cargo run --quiet --release --locked '--' @runnerArgs
+                        $runnerCode = $LASTEXITCODE
+                    } finally {
+                        Pop-Location
+                    }
                 }
             }
             $exitCode = Complete-DotfilesSelfUpdate -State $state -RunnerCode $runnerCode
