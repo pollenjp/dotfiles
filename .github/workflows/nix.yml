@@ -10,6 +10,7 @@ on:
       - "docs/**"
       # repo の .claude/skills/ (この repo の session だけの skill) の frontmatter も lint が見る
       - ".claude/**"
+      - ".github/scripts/**"
       - ".github/workflows/nix.yml"
   pull_request:
     paths:
@@ -17,6 +18,7 @@ on:
       - "win/**"
       - "docs/**"
       - ".claude/**"
+      - ".github/scripts/**"
       - ".github/workflows/nix.yml"
   workflow_dispatch:
     inputs:
@@ -180,7 +182,8 @@ jobs:
       # nix/ 配下の *.sh をすべて見る。scripts/ だけでなく、Nix が配置する
       # files/bin/ files/claude/hooks/ files/claude/skills/*/scripts/ も
       # 実行されるものなので同じ静的解析にかける。nixfmt と同じく find で
-      # 拾うので、置き場所が増えてもここを直さなくてよい。
+      # 拾うので、置き場所が増えてもここを直さなくてよい。CI が流す
+      # .github/scripts/ の *.sh (runner の exe の Release を置く script) も見る。
       #
       # NOTE: `bash -c` の中に set -e は置かない。置くと shfmt が落ちた時点で
       #       shellcheck が走らず、1 回の CI で片方の指摘しか見えなくなる。
@@ -191,7 +194,7 @@ jobs:
         run: |
           nix develop ./nix --command bash -c '
             set -uo pipefail
-            mapfile -t files < <(find nix -type f -name "*.sh" | sort)
+            mapfile -t files < <(find nix .github/scripts -type f -name "*.sh" | sort)
             printf "checking %s\n" "${files[@]}"
             rc=0
             shfmt -d "${files[@]}" || rc=1
