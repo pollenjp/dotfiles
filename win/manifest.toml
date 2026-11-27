@@ -152,3 +152,8 @@ hint = "PowerShell で Install-Fzf -Check を打つと、固定した版との�
 src = "starship/Install-Starship.ps1"
 dst = "%USERPROFILE%/.config/powershell/Install-Starship.ps1"
 hint = "PowerShell で Install-Starship -Check を打つと、固定した版との差が分かる (runner の dotfiles apply が winget の portable を入れて揃える。MSI の starship が入っていれば何も入れずに外し方を出す)"
+
+[[files]]
+src = "codex/Install-Codex.ps1"
+dst = "%USERPROFILE%/.config/powershell/Install-Codex.ps1"
+hint = "PowerShell で Install-Codex -Check を打つと、固定した版との差と、codex と打てるか (WinGet\\Links の symlink) が分かる (runner の dotfiles apply が入れるのはホストの値の [tools] windowsCodex が on のマシンだけ。開発者モードが off なら winget を UAC で昇格して打つ)"
