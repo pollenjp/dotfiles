@@ -123,3 +123,5 @@ if ($script:Failures -gt 0) {
     exit 1
 }
 Write-Host 'すべて通った'
+# 明示して 0 で終える (Actions の pwsh の段は、script の後に最後の $LASTEXITCODE (試しに流した子の 2 など) で終わらせる)
+exit 0
