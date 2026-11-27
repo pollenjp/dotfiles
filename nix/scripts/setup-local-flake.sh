@@ -50,12 +50,13 @@
 #   initial = dotfiles.lib.mkHome {
 #     username = "<$USER>";  system = "<private-host.sh system>";  group = "minimum";
 #     wsl = { enable = true; windowsUserName = "<private-host.sh windows-user か --windows-user>"; windowsFiles.enable = true;
-#             windowsFiles.{claudeCode,herdr,claudeAccounts,claudeDesktop,ntn}.enable = true; };
+#             windowsFiles.{claudeCode,herdr,claudeAccounts,claudeDesktop,ntn,openssh}.enable = true; };
 #     claude = { enable = true; privateSkills.enable = true; };
 #     modules = [ { dotfiles.{herdr,herdr.hub,herdrCore,ccPages,ntn,git.identity}.enable = true; } ];
 #   };
 #
-# 道具は、設定グループの既定が personal (ADR 057) だったときに入っていたものと同じ (minimum に足す。ADR 109)。
+# 道具は、設定グループの既定が personal (ADR 057) だったときに入っていたものと同じ (minimum に足す。ADR 109)。Windows の OpenSSH を
+# 固定した版に入れ替える道具 (windowsFiles.openssh) は、前はどのグループでも入れていたので足す (dotfiles-private に登録するホストは全部 on)。
 #
 # setup はローカル flake の一番上のホストを既定の対象ホストにするので、initial で当たる。dotfiles-private に登録して merge
 # したら、--force で作り直して外す (initial のほかに手で足した値の無い雛形なので、作り直せば clone の nix/ を読む形になる)。
@@ -290,6 +291,8 @@ initial_block() {
             windowsFiles.claudeAccounts.enable = true;
             windowsFiles.claudeDesktop.enable = true;
             windowsFiles.ntn.enable = true;
+            # Windows の OpenSSH を固定した版に入れ替える (minimum では既定で off。登録するホストは on にする)
+            windowsFiles.openssh.enable = true;
           };
           claude = {
             enable = true;

@@ -58,7 +58,8 @@
 # そのうえで wsl.windowsFiles.typeClipboard.enable = true にすると、Windows に自作の type-clipboard を
 # 固定した版で入れる (minimum では既定で入れない。入れるのは `~/dotfiles/setup --update` の bootstrap。win/README.md の「type-clipboard」)。
 # Windows の道具 (wsl.windowsFiles.<道具>.enable) は、グループ all のマシンでだけ既定で入る (minimum のマシンは使うものを true にする):
-# ntn と Claude Code と herdr (winget などで固定した版。win/README.md の「ntn」「Claude Code」「herdr」)・Tailscale (VPN の道具。
+# ntn と Claude Code と herdr (winget などで固定した版。win/README.md の「ntn」「Claude Code」「herdr」)・OpenSSH (固定した版への入れ替え。
+# minimum のマシンは Windows に初めからある OpenSSH のまま。win/README.md の「OpenSSH」)・Tailscale (VPN の道具。
 # win/README.md の「Tailscale」)・sshd (OpenSSH Server。PC に外から入る口で、鍵は wsl.windowsFiles.sshd.authorizedKeys。Tailscale と
 # localhost からだけ、鍵でだけ入れる。win/README.md の「sshd」)・type-clipboard。T3 Code と Claude Desktop (MSIX) と claude-personal・
 # claude-work は Windows の runner だけが入れる (Windows のホストの値の [tools]。win/README.md の「T3 Code」「Claude Desktop」)。

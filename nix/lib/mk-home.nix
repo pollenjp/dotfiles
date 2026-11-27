@@ -27,6 +27,7 @@
   #     windowsFiles.typeClipboard.enable = true;   # Windows に自作の type-clipboard を固定した版で入れる (既定は入れない)
   #     windowsFiles.ntn.enable = false;          # Windows に ntn を入れない (既定は winget で固定した版を入れる)
   #     windowsFiles.claudeCode.enable = false;   # Windows に Claude Code を入れない (既定は winget で固定した版を入れる)
+  #     windowsFiles.openssh.enable = true;       # Windows の OpenSSH を winget で固定した版に入れ替える (既定は入れない。Windows の OpenSSH のまま)
   #     windowsFiles.tailscale.enable = true;     # Windows に Tailscale を winget で固定した版で入れる (既定は入れない)
   #     windowsFiles.sshd.enable = true;          # Windows に sshd を入れ、Tailscale から鍵でだけ入れる (既定は入れない)
   #     windowsFiles.sshd.authorizedKeys = [ "from=\"100.64.0.1\" ssh-ed25519 AAAA… phone" ];   # その鍵 (例は作り物。実機の鍵は dotfiles-private に書く)

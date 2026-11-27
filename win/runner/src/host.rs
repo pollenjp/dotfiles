@@ -1088,7 +1088,7 @@ mod tests {
     }
 
     /// runner が手順の gate で読む道具 (Nix の lib/groups.nix の runnerTools と同じ。最後の privateRepos は runner だけが読む道具)
-    const RUNNER_TOOLS: [&str; 17] = [
+    const RUNNER_TOOLS: [&str; 18] = [
         "windowsClaudeCode",
         "windowsHerdr",
         "windowsT3Code",
@@ -1101,6 +1101,7 @@ mod tests {
         "opReasonSshRelay",
         "windowsNtn",
         "windowsCodex",
+        "windowsOpenssh",
         "windowsTailscale",
         "windowsSshd",
         "windowsTypeClipboard",
@@ -1212,6 +1213,17 @@ mod tests {
         let h = host("").unwrap();
         assert!(!h.tool("windowsSshd"));
         assert_eq!(h.tool_origin("windowsSshd"), "グループ minimum の既定");
+    }
+
+    /// windowsOpenssh (OpenSSH を固定した版に入れ替える) は minimum では off (Windows に初めからある OpenSSH のまま)。使うホストが [tools] に書く
+    #[test]
+    fn windows_openssh_is_a_known_tool_that_hosts_turn_on() {
+        let h = host("[tools]\nwindowsOpenssh = true\n").unwrap();
+        assert!(h.tool("windowsOpenssh"));
+        assert_eq!(h.tool_origin("windowsOpenssh"), "ホストの値");
+        let h = host("").unwrap();
+        assert!(!h.tool("windowsOpenssh"));
+        assert_eq!(h.tool_origin("windowsOpenssh"), "グループ minimum の既定");
     }
 
     #[test]

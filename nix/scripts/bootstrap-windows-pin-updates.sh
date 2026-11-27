@@ -24,7 +24,7 @@
 # ## 対象
 #
 #   名前                    固定した版                                   新しい版を出す口
-#   openssh                 win/openssh/Install-OpenSSH.ps1              check-winget-version.sh --json
+#   openssh                 win/openssh/Install-OpenSSH.ps1              check-winget-version.sh --json (group.json の tools.windowsOpenssh)
 #   herdr                   win/herdr/Install-Herdr.ps1                  check-winget-version.sh --json
 #   google-japanese-input   win/google-japanese-input/Install-*.ps1      check-winget-version.sh --json
 #   ntn                     win/ntn/Install-Ntn.ps1                      check-winget-version.sh --json (windows-files.json の ntn)
@@ -50,6 +50,8 @@
 #    (欄が無い前の世代は true と読む)。herdr・herdr-app・herdr-core は、~/.local/state/dotfiles/group.json (設定グループ。
 #    home/modules/group.nix) の tools.windowsHerdr (dotfiles.wsl.windowsFiles.herdr.enable) が false なら確かめない (ファイル・欄が
 #    無い前の世代は true と読む。windows-files.json に欄を足すと、今までのホストのそのファイルまで変わるので group.json に置いた)。
+#    openssh も同じく、group.json の tools.windowsOpenssh (dotfiles.wsl.windowsFiles.openssh.enable) が false なら確かめない (ファイル・欄が
+#    無い前の世代は true と読む。前はどのマシンでも入れていた)。
 #    tailscale は group.json の tools.windowsTailscale (dotfiles.wsl.windowsFiles.tailscale.enable) が true のときだけ確かめる (前は
 #    どのグループでも既定が off だったので、ファイル・欄が無い前の世代は false と読む)。codex も同じく group.json の tools.windowsCodex
 #    (dotfiles.wsl.windowsFiles.codex.enable) が true のときだけ確かめる (入れるのは Windows の runner の手順 codex だけ。WSL の setup は
@@ -456,6 +458,12 @@ if [[ -r ${group_file} ]]; then
   windows_herdr=$(jq -r 'if (.tools | type) == "object" and (.tools | has("windowsHerdr")) then .tools.windowsHerdr | tostring else "true" end' \
     "${group_file}" 2>/dev/null) || windows_herdr=true
 fi
+# openssh も herdr と同じく group.json の tools.windowsOpenssh で決める (minimum では既定で off。ファイル・欄が無い前の世代は入れる)
+windows_openssh=true
+if [[ -r ${group_file} ]]; then
+  windows_openssh=$(jq -r 'if (.tools | type) == "object" and (.tools | has("windowsOpenssh")) then .tools.windowsOpenssh | tostring else "true" end' \
+    "${group_file}" 2>/dev/null) || windows_openssh=true
+fi
 # tailscale は group.json の tools.windowsTailscale が true のときだけ (minimum では既定で off。ファイル・欄が無い前の世代は入れない)
 windows_tailscale=false
 if [[ -r ${group_file} ]]; then
@@ -488,6 +496,9 @@ for n in "${all_names[@]}"; do
   case ${n} in
     herdr | herdr-app | herdr-core)
       [[ ${windows_herdr} != false ]] || continue
+      ;;
+    openssh)
+      [[ ${windows_openssh} != false ]] || continue
       ;;
     tailscale)
       [[ ${windows_tailscale} == true ]] || continue

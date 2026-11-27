@@ -8,7 +8,7 @@
 //! - herdr-app に見送っていない新しい版があれば、続きの行の末尾に keys.json の注意を 2 行。herdr-core だけ・herdr-app は見送った版だけ・windowsHerdr が
 //!   false なら添えない
 //! - 新しい版が無い・見送った版だけなら「無い」の 1 行で ✔
-//! - 名前の on/off: windowsNtn・windowsClaudeCode・windowsHerdr (herdr・herdr-app・herdr-core)・windowsTailscale・windowsCodex (既定は off) と、bootstrap の 4 つと
+//! - 名前の on/off: windowsNtn・windowsClaudeCode・windowsHerdr (herdr・herdr-app・herdr-core)・windowsOpenssh・windowsTailscale・windowsCodex (既定は off) と、bootstrap の 4 つと
 //!   ghq・fzf・starship は Windows の ghq に dotfiles の clone があるときだけ。同じものを入れる手順と同じ switch (ghq・fzf・starship を入れる手順は
 //!   いつも on の Windows にしか無い手順で、bootstrap の clone の runner が流す)
 //! - 確かめられない名前はわけを添えて 1 行出して failed (ほかの名前の新しい版は知らせる。わけは最初の名前のもの): API の失敗 (gh の stderr)・404・一覧で
@@ -318,7 +318,7 @@ impl World {
         std::fs::create_dir_all(t.path().join("home")).unwrap();
         let mut w = World {
             t,
-            host: "group = \"minimum\"\n[tools]\nwindowsClaudeCode = true\nwindowsHerdr = true\nwindowsNtn = true\n"
+            host: "group = \"minimum\"\n[tools]\nwindowsClaudeCode = true\nwindowsHerdr = true\nwindowsNtn = true\nwindowsOpenssh = true\n"
                 .to_string(),
             env: Vec::new(),
             no_gh: false,
@@ -649,7 +649,7 @@ fn keys_json_note_follows_only_a_herdr_app_update() {
     // windowsHerdr が false なら herdr・herdr-app・herdr-core を確かめない (ntn・Claude Code は確かめる)
     let mut w = World::new();
     w.host =
-        "[tools]\nwindowsHerdr = false\nwindowsClaudeCode = true\nwindowsNtn = true\n".to_string();
+        "[tools]\nwindowsHerdr = false\nwindowsClaudeCode = true\nwindowsNtn = true\nwindowsOpenssh = true\n".to_string();
     w.set_contents("openssh", dirs(&["10.1.0.0", "10.2.0.0"]));
     w.set_tags("herdr-app", &["v0.1.15", "v0.1.16"]);
     let r = w.run(CHECK);
@@ -693,7 +693,7 @@ fn nothing_newer_is_ok() {
 
 // ------------------------------------------------------------------ 名前の on/off
 
-/// ntn・Claude Code は windowsNtn・windowsClaudeCode が false なら確かめない。tailscale・codex は windowsTailscale・windowsCodex が true のときだけ。bootstrap の 4 つと
+/// ntn・Claude Code は windowsNtn・windowsClaudeCode が false なら確かめない。openssh・tailscale・codex は windowsOpenssh・windowsTailscale・windowsCodex が true のときだけ。bootstrap の 4 つと
 /// ghq・fzf・starship は Windows の ghq に dotfiles の clone があるときだけ
 #[test]
 fn names_follow_the_host_switches() {
@@ -706,7 +706,7 @@ fn names_follow_the_host_switches() {
     };
     let mut w = World::new();
     w.host =
-        "[tools]\nwindowsNtn = false\nwindowsClaudeCode = false\nwindowsHerdr = true\n".to_string();
+        "[tools]\nwindowsNtn = false\nwindowsClaudeCode = false\nwindowsHerdr = true\nwindowsOpenssh = true\n".to_string();
     assert_eq!(
         checked(&w),
         vec![
@@ -715,7 +715,7 @@ fn names_follow_the_host_switches() {
             contents_call("google-japanese-input"),
         ]
     );
-    w.host = "[tools]\nwindowsTailscale = true\nwindowsCodex = true\nwindowsClaudeCode = true\nwindowsHerdr = true\nwindowsNtn = true\n"
+    w.host = "[tools]\nwindowsOpenssh = true\nwindowsTailscale = true\nwindowsCodex = true\nwindowsClaudeCode = true\nwindowsHerdr = true\nwindowsNtn = true\n"
         .to_string();
     w.bootstrapped();
     assert_eq!(
@@ -725,17 +725,11 @@ fn names_follow_the_host_switches() {
             .map(|s| contents_call(s.name))
             .collect::<Vec<_>>()
     );
-    // グループ minimum のまま (道具を足さない) なら、herdr も ntn も Claude Code も入れない
+    // グループ minimum のまま (道具を足さない) なら、OpenSSH (Windows に初めからあるもののまま) も herdr も ntn も Claude Code も入れない
     let mut w = World::new();
     w.host = "group = \"minimum\"\n".to_string();
-    assert_eq!(
-        checked(&w),
-        vec![
-            contents_call("openssh"),
-            contents_call("google-japanese-input"),
-        ]
-    );
-    assert_eq!(selected_of(&w), vec!["openssh", "google-japanese-input"]);
+    assert_eq!(checked(&w), vec![contents_call("google-japanese-input")]);
+    assert_eq!(selected_of(&w), vec!["google-japanese-input"]);
 }
 
 fn selected_of(w: &World) -> Vec<&'static str> {
@@ -758,6 +752,7 @@ fn selected_of(w: &World) -> Vec<&'static str> {
 fn name_switches_match_the_install_steps() {
     for (name, step) in [
         ("herdr", "herdr"),
+        ("openssh", "openssh"),
         ("ntn", "ntn"),
         ("claude-code", "claude-code"),
         ("tailscale", "tailscale"),
@@ -775,9 +770,7 @@ fn name_switches_match_the_install_steps() {
             other => panic!("{name}: {other:?}"),
         }
     }
-    for name in ["openssh", "google-japanese-input"] {
-        assert_eq!(name_gate(name), NameGate::Always);
-    }
+    assert_eq!(name_gate("google-japanese-input"), NameGate::Always);
     for name in ["git", "gh", "pwsh", "vs-buildtools", "rustup"] {
         assert_eq!(name_gate(name), NameGate::Bootstrapped);
     }
@@ -1645,7 +1638,7 @@ fn reads_the_real_repo_files() {
             roots: Roots::from_home(t.path()),
             state_dir: t.path().join("state"),
             host: parse(
-                "[tools]\nwindowsTailscale = true\nwindowsCodex = true\nwindowsClaudeCode = true\nwindowsHerdr = true\nwindowsNtn = true\n",
+                "[tools]\nwindowsOpenssh = true\nwindowsTailscale = true\nwindowsCodex = true\nwindowsClaudeCode = true\nwindowsHerdr = true\nwindowsNtn = true\n",
                 Path::new("h.toml"),
                 groups,
             )
@@ -1906,7 +1899,7 @@ exit "${rc}"
             .unwrap();
             std::fs::write(
                 d.join("group.json"),
-                json!({"group": "minimum", "tools": {"windowsHerdr": herdr, "windowsTailscale": opt_in, "windowsCodex": opt_in}, "version": 2})
+                json!({"group": "minimum", "tools": {"windowsHerdr": herdr, "windowsOpenssh": herdr, "windowsTailscale": opt_in, "windowsCodex": opt_in}, "version": 2})
                     .to_string(),
             )
             .unwrap();
@@ -1918,10 +1911,10 @@ exit "${rc}"
             }
         }
 
-        /// 同じ状態の、runner のホストの値 (`opt_in` は tailscale と codex の switch)
+        /// 同じ状態の、runner のホストの値 (`opt_in` は tailscale と codex の switch。openssh の switch は `herdr` に合わせる)
         fn host(ntn: bool, claude: bool, herdr: bool, opt_in: bool) -> String {
             format!(
-                "[tools]\nwindowsNtn = {ntn}\nwindowsClaudeCode = {claude}\nwindowsHerdr = {herdr}\nwindowsTailscale = {opt_in}\nwindowsCodex = {opt_in}\n"
+                "[tools]\nwindowsNtn = {ntn}\nwindowsClaudeCode = {claude}\nwindowsHerdr = {herdr}\nwindowsOpenssh = {herdr}\nwindowsTailscale = {opt_in}\nwindowsCodex = {opt_in}\n"
             )
         }
 

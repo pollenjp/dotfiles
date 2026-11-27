@@ -78,7 +78,7 @@ Google 日本語入力・ntn・Claude Code・Tailscale・ghq・fzf・starship・
 | --- | --- |
 | `ntn`・`claude-code` | setup が揃える。exe が動いていると (Windows の Claude Code の会話を開いている・ntn が動いている) ⚠ で止まるので、閉じてから `Install-Ntn`・`Install-ClaudeCode` か `bootstrap-windows-*.sh --apply` |
 | `herdr` | 差が ⚠ で出る。herdr の外の PowerShell で `hsvstop` を打ち、`herdr --remote` の窓も閉じてから `Install-Herdr` |
-| `openssh` | 差が ⚠ で出る。Windows で動いている `ssh.exe` (herdr の remote など) を閉じてから `Install-OpenSSH` か `bootstrap-windows-openssh.sh --apply` (UAC が 1 回出る)。sshd を入れたマシン (`windowsSshd`) では Server も一緒に入れ直るので、続けて `Install-Sshd` か `bootstrap-windows-sshd.sh --apply` で揃える (上げ直した MSI が 22 番の受信の許可を有効に戻す。SSH でつないだ会話は入れ直す間に切れる) |
+| `openssh` | 差が ⚠ で出る (固定した版に入れ替えるホスト (`windowsOpenssh`) だけ。off のホストは Windows に初めからある OpenSSH のまま)。Windows で動いている `ssh.exe` (herdr の remote など) を閉じてから `Install-OpenSSH` か `bootstrap-windows-openssh.sh --apply` (UAC が 1 回出る)。sshd を入れたマシン (`windowsSshd`) では Server も一緒に入れ直るので、続けて `Install-Sshd` か `bootstrap-windows-sshd.sh --apply` で揃える (上げ直した MSI が 22 番の受信の許可を有効に戻す。SSH でつないだ会話は入れ直す間に切れる) |
 | `google-japanese-input` | 差が ⚠ で出る。日本語入力を使っているアプリをできるだけ閉じてから `Install-GoogleJapaneseInput` (UAC の確認が出る) |
 | `tailscale` | 入っている版の方が新しければ揃っている扱い (※ だけ)。古ければ差が ⚠ で出るので、Tailscale の自動更新を待つか `Install-Tailscale` (UAC の確認が出て、上げる間 Tailscale の接続が少しの間切れる)。新しいマシンは setup が固定した版で入れる |
 | `ghq`・`fzf` | WSL の setup は入れない (Windows の runner の手順 `ghq`・`fzf` だけが入れる)。受け持ちによらず、Windows で `dotfiles --self-update apply` (clone を進めてから流す。`--steps ghq,fzf` で絞れる) を流すと揃える。exe が動いていると (別の端末の cdrepo の選ぶ画面など) ⚠ で止まるので、閉じてから `Install-Ghq`・`Install-Fzf` |

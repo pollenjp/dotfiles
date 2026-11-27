@@ -133,6 +133,16 @@ PowerShell。bootstrap を流した窓は PATH が古い) で、clone の `dotfi
 dotfiles apply
 ```
 
+- **前に bootstrap を流した PC は、先に clone を進める。** bootstrap は既にある clone を進めないので、前に流したときの古い clone が残る。launcher の無い
+  古い clone の `dotfiles` 関数は直せず (古いまま動き、runner を cargo run で build する)、Build Tools の無い PC では落ちる。bootstrap は古い clone を
+  見つけると次に打つコマンドの頭に進める 1 行を出すので、それを先に打つ。手で進めるなら、`dotfiles.ps1` を読み込む前に:
+
+  ```powershell
+  git -C "$HOME\ghq\github.com\pollenjp\dotfiles" pull --ff-only
+  ```
+
+  (`-Private` で揃えた PC は origin が ssh の URL なので、`& "$HOME\ghq\github.com\pollenjp\dotfiles\win\powershell\Invoke-DotfilesSelfUpdate.ps1"`
+  で gh の資格情報で進める。[clone を進める](#clone-を進める-dotfiles---self-update))。進めた後は PowerShell 7 の新しい窓で読み込み直す
 - 初めての `dotfiles apply` は、clone に合う runner の exe を GitHub の Release から落とす (github.com と release-assets.githubusercontent.com に
   届くこと。[runner の exe (Release)](#runner-の-exe-release))。プロキシの内側の PC は、Windows のプロキシの設定 (PowerShell の `Invoke-WebRequest` が
   使う) を先に入れる
@@ -145,7 +155,7 @@ dotfiles apply
 
 | 終了コード | 意味 |
 | --- | --- |
-| 0 | 直すことが無い |
+| 0 | 直すことが無い (古い clone の ⚠ は知らせるだけで、0 のまま) |
 | 3 | 入っていない・無いものだけ (引数なしで流せば揃う。締めの行は「入っていない・無いものがある → 引数なしで流すと揃える」) |
 | 1 | ほかに直すことがある (表の ⚠ の行を見る)。足りない・ずれているもの (pin・Build Tools の部品・rustup の設定と既定の host・gh のログイン) は引数なしで流せば直り (締めの行は「足りないもの・ずれているものがある → 引数なしで流すと直す」)、bootstrap では直らない差は ※ の手順で直す。Ctrl+C で止めた・揃えきれなかったときも |
 | 2 | winget が無い (Microsoft Store の「アプリ インストーラー」を入れる)・思わぬ例外 |
@@ -195,6 +205,12 @@ dotfiles apply
      バイト列がずれる
    - あるディレクトリと clone には触らない (取得もしない)。git の repo でない・origin が別の repo・`core.autocrlf` が `true` なら ⚠ で
      知らせる (退けて流し直すと clone し直す)。origin は ssh と https のどちらの URL でもよい (既定の形で clone した後に `-Private` で流してもよい)
+   - dotfiles の clone が古ければ ⚠ で知らせる (知らせるだけで、終了コードと締めの行には数えない)。古いのは、runner の launcher
+     (`win\powershell\Invoke-DotfilesRunner.ps1`) が無い clone (その clone の `dotfiles` 関数は runner を cargo run で build して起こし、Build Tools の
+     無い PC では `link.exe` が無くて落ちる) と、origin の既定の branch の先頭の commit を HEAD が含まない clone。先頭は `git ls-remote` で読むだけで、
+     clone の ref も作業ツリーも変えない (dotfiles は public なので、どの形でも資格情報なしの HTTPS で読む。つながらなければ見ない)。揃ったときに出す
+     次に打つコマンドの頭に、進める 1 行 (clone にある `Invoke-DotfilesSelfUpdate.ps1`。無ければ `git -C <clone> pull --ff-only`) を足す
+     ([bootstrap の後に打つ](#bootstrap-の後に打つ))
 5. (既定の形だけ) 手元のホストの値 `%USERPROFILE%\.config\dotfiles\host.toml` も dotfiles-private の clone も無ければ、clone の雛形
    `win/templates/host.minimum.toml` を写す (あれば上書きしない。dotfiles-private の clone がある PC は、ホストの値をそこから引くので写さない)
 6. 揃え終えたら (終了コード 0。初めから揃っていたときも)、次に打つコマンドを出す ([bootstrap の後に打つ](#bootstrap-の後に打つ))。`-Check` では
@@ -560,7 +576,7 @@ item = "op://<vault の ID>/<項目の ID>/<欄の ID>"   # 元の値の 1Passwo
 ```
 
 - 書けるのは `group`・`[tools]`・`[runner] enable`・`[opReason] sshRelayMode`・`[sshd]` (`authorizedKeys`・`allowUsers`・`allowFrom`)・`[t3Code] clearClaudeEntrypoint`・`[claude.notion]` (`profile`・`routes`・`override`・`tokens`) だけ。道具の名前は `group.json` の `tools` と同じ
-  (runner が使うのは `windowsClaudeCode`・`windowsClaudeAccounts`・`windowsClaudeDesktop`・`windowsHerdr`・`windowsNtn`・`windowsCodex`・`windowsTypeClipboard`・`windowsTailscale`・`windowsSshd`・`windowsT3Code`・`claudePrivateSkills`・`herdrHub`・`devTracker`・`gitIdentity` と、
+  (runner が使うのは `windowsClaudeCode`・`windowsClaudeAccounts`・`windowsClaudeDesktop`・`windowsHerdr`・`windowsNtn`・`windowsCodex`・`windowsTypeClipboard`・`windowsOpenssh`・`windowsTailscale`・`windowsSshd`・`windowsT3Code`・`claudePrivateSkills`・`herdrHub`・`devTracker`・`gitIdentity` と、
   `op-reason` の on/off の `onePassword`、SSH の中継の `opReasonSshRelay`、runner だけが読む `privateRepos`)。知らないキー・名前・`sshRelayMode` の知らない値・`authorizedKeys` の読めない値・
   `allowUsers`・`allowFrom` の書けない値は runner が止める (終了コード 2)
 - 道具の既定は設定グループで決まる (dotfiles-private の ADR 109)。グループは道具の集合で、`minimum` (既定) では runner が使う道具は全部 false、
@@ -570,7 +586,7 @@ item = "op://<vault の ID>/<項目の ID>/<欄の ID>"   # 元の値の 1Passwo
   `company` なら `windowsClaudeCode`・`windowsHerdr` と、足していた道具 ([`nix/README.md` の「前のグループから移す」](../nix/README.md#前のグループから移す))
 - 受け持ちが WSL のホストは、WSL の Nix の値で on にした道具と同じ値を `[tools]` に書く (Nix の `wsl.windowsFiles.claudeCode.enable` なら
   `windowsClaudeCode`、`claude.privateSkills.enable` なら `claudePrivateSkills`、`claude.devTracker.enable` なら `devTracker`、`onePassword.enable` なら
-  `onePassword`、`git.identity.enable` なら `gitIdentity`、`wsl.windowsFiles.tailscale.enable` なら `windowsTailscale` など)
+  `onePassword`、`git.identity.enable` なら `gitIdentity`、`wsl.windowsFiles.openssh.enable` なら `windowsOpenssh`、`wsl.windowsFiles.tailscale.enable` なら `windowsTailscale` など)
 - `windowsClaudeAccounts` (claude-personal・claude-work) は初回の apply で UAC の確認が出る手順 ([後述](#claude-personalclaude-work))。
   `windowsClaudeDesktop` (Claude Desktop) も入れるときに UAC の確認が出る (WSL の setup には Claude Desktop の手順が無いので、受け持ちによらず
   TOML にだけ書く。[後述](#claude-desktop))
@@ -588,8 +604,9 @@ item = "op://<vault の ID>/<項目の ID>/<欄の ID>"   # 元の値の 1Passwo
   書き (1Password の `onePassword = true` も要る)、WSL の Nix の値にも `dotfiles.opReason.sshRelay.enable = true` を書く。モードは
   `[opReason] sshRelayMode` (書かなければ per-call。WSL の `dotfiles.opReason.sshRelay.mode` と同じ値にする)。書かなければ、runner は中継の task と
   `IdentityAgent` のファイルを置かない (前に置いたものは消す。[後述](#ssh-の中継))
-- `windowsTailscale`・`windowsSshd`・`windowsTypeClipboard` を書かなければ、`tailscale`・`sshd`・`type-clipboard` の行は off
-  ([Tailscale](#tailscale)・[sshd](#sshd)・[type-clipboard](#type-clipboard))
+- `windowsOpenssh`・`windowsTailscale`・`windowsSshd`・`windowsTypeClipboard` を書かなければ、`openssh`・`tailscale`・`sshd`・`type-clipboard` の行は off
+  ([OpenSSH](#openssh)・[Tailscale](#tailscale)・[sshd](#sshd)・[type-clipboard](#type-clipboard))。`openssh` が off なら Windows に初めからある OpenSSH の
+  まま使う (固定した版に入れ替えない)
 - `[sshd] authorizedKeys` は sshd に入れる公開鍵 (Nix の `wsl.windowsFiles.sshd.authorizedKeys` と同じ意味。[鍵の置き方](#鍵の置き方))。使うのは受け持ちが
   runner のホストだけで、runner の手順 `sshd` が Windows の `%LOCALAPPDATA%\dotfiles\sshd\authorized_keys` に写しを置く。書かなければ null で、写しを
   置かない (前の写しは消す)。`[]` は鍵 0 本 (誰も入れない)。1 つの文字列が authorized_keys の 1 行 (前に `from="…"` を付けてよい) で、改行を含む値・
@@ -707,8 +724,8 @@ item = "op://<vault の ID>/<項目の ID>/<欄の ID>"   # 元の値の 1Passwo
      なり、1 で外した道具の switch を `# tool:` に持つ手順 (`tailscale`・`sshd` など) は ↷ (このホストでは off) になる。Windows の exe は呼ばない
   5. Windows の `dotfiles apply --dry-run`。WSL と同じ手順は ✔ (「同じです」「揃っています」、記録がまだ無い手順は「記録だけ作ります」を添える) になり、
      直すことの行は `powertoys` の「Keyboard Manager に default.json を読み直させる」1 つだけ (記録が無いので一度読み直させる。終了コードは 1)。ps1 の
-     手順は、入っていて固定した版なら何もしない (版がずれていれば揃える・知らせる。入っていない道具は入れ、Google 日本語入力・OpenSSH・Tailscale を
-     入れるときは UAC の確認が出る)。見てから `dotfiles apply`
+     手順は、入っていて固定した版なら何もしない (版がずれていれば揃える・知らせる。入っていない道具は入れ、Google 日本語入力・OpenSSH (`windowsOpenssh`
+     のホスト)・Tailscale を入れるときは UAC の確認が出る)。見てから `dotfiles apply`
   6. `dotfiles check` が 0 (直すことはありません) になること。記録は `%LOCALAPPDATA%\dotfiles\state\` に、WSL と同じ名前と形でできる
 - 戻すとき: 切り替えた PR のうち、ホストの値の commit (と、それに合わせて出し直した生成物の commit) だけを revert する PR を merge する (PR 全体を戻すと、
   同じ PR に入れた文書や古さの直しまで戻る)。両方の clone を同じ commit に進め、Windows で runner が作った記録 (`%LOCALAPPDATA%\dotfiles\state\` の WSL と
@@ -724,7 +741,7 @@ item = "op://<vault の ID>/<項目の ID>/<欄の ID>"   # 元の値の 1Passwo
 
 | order | id | すること | on/off | runner |
 | --- | --- | --- | --- | --- |
-| 5 | `bootstrap` | `bootstrap/Install-Bootstrap.ps1 -Check` (確かめるだけ。揃えるのは人が bootstrap を流す。`privateRepos` のホストは `-Check -Private` で、gh とそのログイン・3 つの clone も確かめる。ほかは gh を使わない既定の形 (dotfiles の clone と手元のホストの値) を確かめる。[bootstrap](#bootstrap-新しい-windows-で最初に流す)) | いつも | 有る (Windows だけ) |
+| 5 | `bootstrap` | `bootstrap/Install-Bootstrap.ps1 -Check` (確かめるだけ。揃えるのは人が bootstrap を流す。`privateRepos` のホストは `-Check -Private` で、gh とそのログイン・3 つの clone も確かめる。ほかは gh を使わない既定の形 (dotfiles の clone と手元のホストの値) を確かめる。dotfiles の clone が origin の既定の branch より古ければ、終了コード 0 でも `dotfiles --self-update` で進めるよう · で知らせる。[bootstrap](#bootstrap-新しい-windows-で最初に流す)) | いつも | 有る (Windows だけ) |
 | 50 | `claude-env` | Claude Code の `%USERPROFILE%\.claude\settings.json` の `env` に、Claude の git を無署名・GitHub は gh の資格情報 (HTTPS) で通す設定を足す ([後述](#claude-skills-と-windows-のハブ-w0-2)) | `windowsClaudeCode` | 有る (Windows だけ) |
 | 50 | `claude-files` | dotfiles の `CLAUDE.md` (冒頭を Windows のものに)・skill・agent・command を `%USERPROFILE%\.claude\` へ置き (ディレクトリは junction、ファイルはコピー)、hook の口 (runner の exe の写し `hooks\dotfiles-claude.exe`) を写す ([後述](#claude-code-の設定)) | `windowsClaudeCode` | 有る (Windows だけ) |
 | 50 | `claude-footer-links` | `settings.json` の `footerLinksRegexes` を `nix/files/claude/footer-links.json` にする | `windowsClaudeCode` | 有る (Windows だけ) |
@@ -747,7 +764,7 @@ item = "op://<vault の ID>/<項目の ID>/<欄の ID>"   # 元の値の 1Passwo
 | 94 | `starship-init` | `$PROFILE` (pwsh に聞く `CurrentUserCurrentHost`) に、starship を起こす 1 行 (`Get-Command starship` で囲む) を、`dotfiles.ps1` を読む行より前に足す (無ければ末尾に。新しい PC では、続く `powershell-profile` がその後ろに足す)。starship の init の行 (手で書いた行も) があれば何もせず、`dotfiles.ps1` を読む行より後ろにあれば前へ移すよう知らせる。足した後で消した 1 行は足し直さない (`--force` で足す)。差し込むときは前の中身を `%LOCALAPPDATA%\dotfiles\state\starship-init\backup\` へ写す。記録は `%LOCALAPPDATA%\dotfiles\state\starship-init.added.json` ([starship](#starship)) | いつも | 有る (Windows だけ) |
 | 95 | `google-ime-install` | `Install-GoogleJapaneseInput.ps1`: 入っていなければ入れる (UAC)。ずれは知らせるだけ | いつも | 有る |
 | 95 | `powershell-profile` | `$PROFILE` (pwsh に聞く `CurrentUserCurrentHost`) に `dotfiles.ps1` を読む 1 行を足す。読む行があれば何もせず、足した後で消した 1 行は足し直さない (`--force` で足す)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-powershell-profile.json` ([PowerShell](#powershell)) | いつも | 有る |
-| 96 | `openssh` | `Install-OpenSSH.ps1`: 入っていなければ入れる (UAC)。ずれは知らせるだけ。`onePassword` が off のホストは `-NoOnePassword` を付けて流し、1Password の SSH agent の案内を出さない ([OpenSSH](#openssh)) | いつも | 有る |
+| 96 | `openssh` | `Install-OpenSSH.ps1`: 入っていなければ入れる (UAC)。ずれは知らせるだけ。`onePassword` が off のホストは `-NoOnePassword` を付けて流し、1Password の SSH agent の案内を出さない ([OpenSSH](#openssh)) | `windowsOpenssh` | 有る |
 | 96 | `sshd` | `Install-Sshd.ps1`: 入っていなければ OpenSSH の MSI に Server を足して揃える (UAC)。ずれは知らせるだけ。受け持ちが runner のホストでは、先にホストの値の `[sshd] authorizedKeys` から鍵の写しを、`allowUsers`・`allowFrom` からユーザーと送り元の写しを置く (受け持ちが WSL のホストは、鍵の写しは WSL の setup が置き、ユーザーと送り元は既定) | `windowsSshd` | 有る |
 | 96 | `tailscale` | `Install-Tailscale.ps1`: 入っていなければ入れる (UAC)。古いときは知らせるだけ (入っている版の方が新しければ揃っている扱い) | `windowsTailscale` | 有る |
 | 97 | `claude-code` | `Install-ClaudeCode.ps1`: 入れる・揃える (PATH のずれは知らせるだけ) | `windowsClaudeCode` | 有る |
@@ -1297,8 +1314,8 @@ WSL と違うもの:
 - `~/.gitconfig` が無いと、`git config --global` (gh の `auth setup-git` なども) はここの `config` に書き、次の `dotfiles check` が衝突で知らせる。Windows だけの
   設定は `~/.gitconfig` に書く (`git config --file "$HOME\.gitconfig" <キー> <値>`)。git は `~/.config/git/config` の後に `~/.gitconfig` を読むので同じキーは
   `~/.gitconfig` が勝ち、`~/.gitconfig` があれば `git config --global` もそこへ書く。`~/.gitconfig` がある間は、締めの表の ※ にそう添える
-- 入れたての Windows 11 には Windows の機能の版 (`System32\OpenSSH`) が既定で入っていて、winget の版は同じ apply の手順 `openssh` (order 96) が後から
-  入れる。そこで apply は、`openssh` の後に、置いた `config` (記録どおりのもの) の `core.sshCommand` が今選ぶ `ssh.exe` と違えば `git-config` をもう一度
+- 入れたての Windows 11 には Windows の機能の版 (`System32\OpenSSH`) が既定で入っていて、winget の版は同じ apply の手順 `openssh` (order 96。
+  `windowsOpenssh` が on のホストだけ。off のホストは Windows の機能の版のまま) が後から入れる。そこで apply は、`openssh` の後に、置いた `config` (記録どおりのもの) の `core.sshCommand` が今選ぶ `ssh.exe` と違えば `git-config` をもう一度
   流す (見出しに「(openssh の後に流し直す)」と出て、締めの表の git-config の行は「openssh の後に流し直した: 」の行に置き換わる)。受け持ちが runner のホストなら、入れたての Windows でも
   1 回の apply で揃う。順は 50 のまま (ハブを作る `hc-hub` (60) の `pjp hub init` の commit を、ここで書く名前とメールにする。ADR 066)。check と dry-run は
   流し直さないので、Windows の機能の版を選んだときは、その行に「apply の手順 openssh (96) が winget の版を入れた後に書き直す」と添える
@@ -2975,6 +2992,16 @@ WSL の `ssh` は Windows の `ssh.exe` (`C:\Program Files\OpenSSH`) を呼ん�
 つなぐ ([ADR 004](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/004_nix_wsl_ssh_wrapper_20260811T124616JST/README.md))。その OpenSSH の版を、
 winget の `Microsoft.OpenSSH.Preview` で固定する。固定する版は
 `openssh/Install-OpenSSH.ps1` の `-Version` の既定値 (今は `10.4.0.0`) の 1 か所だけに書く。
+
+固定した版に入れ替えるのは、道具の switch `windowsOpenssh` が on のホストだけ (Windows の runner はホストの値の `[tools] windowsOpenssh = true`、
+WSL の setup は Nix の `wsl.windowsFiles.openssh.enable = true`)。グループ `all` では on、`minimum` では off。Windows には OpenSSH (Windows の機能。
+`C:\Windows\System32\OpenSSH`) が初めから入っていて、WSL の `ssh` の wrapper (`ssh.exe` を PATH で引く) も runner の `git-config` が書く
+`core.sshCommand` も、固定した版が無ければそれを使う。版を上げるのは minimum の役目にしない (入れるときに UAC の確認が出て、Windows Installer の
+不調な PC では落ちる)。off のホストでは、runner の手順 `openssh`・WSL の `bootstrap-windows-openssh.sh` は流れず (↷)、`pin-updates` も OpenSSH の
+新しい版を確かめない。`Install-OpenSSH.ps1` は off のホストにも配る (手で `Install-OpenSSH -Check` を打てる)。off に戻しても、入れた版は消さない
+(外すなら `winget pin remove --id Microsoft.OpenSSH.Preview` の後に `winget uninstall --id Microsoft.OpenSSH.Preview`。sshd を入れたホストでは先に
+[sshd を止める・外す](#sshd-を止める外す))。sshd ([sshd](#sshd)) は固定した版の MSI に Server を足すので、`windowsSshd` を on にするホストは
+`windowsOpenssh` も on にする。
 
 | 打つもの | すること |
 | --- | --- |
@@ -4971,12 +4998,14 @@ SSH で直につなぐのに使う (Herdr のアプリは各マシンの herdr-c
 
 - setup が入れるのは `dotfiles.wsl.windowsFiles.sshd.enable = true` のマシンだけ。PC に外から入る口を開ける。既定は
   グループ all の win/ を配るマシンだけ true (minimum では入れるホストが書く。[`nix/README.md` の「設定グループ」](../nix/README.md#設定グループ))。入る経路の Tailscale も入れる
-  ([Tailscale](#tailscale))。入れるホストは、dotfiles-private に登録したホストのファイルか、`~/dotfiles/flake.nix` に足したホストの `wsl` に書く
+  ([Tailscale](#tailscale))。sshd は dotfiles が固定した OpenSSH の MSI に足すので、OpenSSH を固定した版に入れ替える switch
+  (`windowsFiles.openssh.enable`・runner の `windowsOpenssh`) も on にする ([OpenSSH](#openssh))。入れるホストは、dotfiles-private に登録したホストのファイルか、`~/dotfiles/flake.nix` に足したホストの `wsl` に書く
   (鍵の例は作り物。実機の鍵と IP は dotfiles-private に書く):
 
   ```nix
   wsl = {
     windowsFiles.enable = true;
+    windowsFiles.openssh.enable = true;
     windowsFiles.tailscale.enable = true;
     windowsFiles.sshd.enable = true;
     # 入れる端末の公開鍵。authorized_keys の 1 行を 1 つの文字列で書く (null なら dotfiles は鍵を置かない。空の list なら 0 本で、誰も入れない)
@@ -4986,7 +5015,7 @@ SSH で直につなぐのに使う (Herdr のアプリは各マシンの herdr-c
   };
   ```
 
-  Windows の runner では、ホストの値の `[tools]` に `windowsSshd = true` を書き、受け持ちを runner に切り替えたホストでは鍵を `[sshd] authorizedKeys` に
+  Windows の runner では、ホストの値の `[tools]` に `windowsSshd = true` (と `windowsOpenssh = true`) を書き、受け持ちを runner に切り替えたホストでは鍵を `[sshd] authorizedKeys` に
   書く ([ホストの値](#ホストの値))
 - sshd は、dotfiles が winget で固定した OpenSSH (`Install-OpenSSH.ps1` が入れる `C:\Program Files\OpenSSH`。[OpenSSH](#openssh)) の MSI に、Server の
   機能を足して入れる。Windows の機能 (System32) の OpenSSH Server とは二重にしない (入っていれば揃えずに止まり、外し方を出す)

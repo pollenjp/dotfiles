@@ -470,7 +470,14 @@ mod tests {
         }
         assert_eq!(
             tooled,
-            vec!["op-reason", "sshd", "tailscale", "herdr-app", "herdr"]
+            vec![
+                "op-reason",
+                "openssh",
+                "sshd",
+                "tailscale",
+                "herdr-app",
+                "herdr"
+            ]
         );
     }
 

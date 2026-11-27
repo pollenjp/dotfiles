@@ -237,7 +237,8 @@ pub const SPECS: &[Ps1Spec] = &[
         windows_only: false,
         order: 96,
         title: "OpenSSH を固定した版で入れる (ずれていても揃えない)",
-        gate: Gate::Always,
+        // Windows には OpenSSH (System32) が初めから入っているので、固定した版に入れ替えるのは使うホストだけ (minimum では off)
+        gate: Gate::Tool("windowsOpenssh"),
         script: "win/openssh/Install-OpenSSH.ps1",
         command: "Install-OpenSSH",
         subject: "Windows の OpenSSH",
@@ -311,7 +312,7 @@ pub const SPECS: &[Ps1Spec] = &[
         output_fixes: &[
             (
                 "OpenSSH が入っていない → 先に Install-OpenSSH",
-                "sshd は OpenSSH の MSI に足すので、先に OpenSSH を入れる (PowerShell で Install-OpenSSH -IfMissing。Windows に UAC の確認が出る)",
+                "sshd は dotfiles が固定した OpenSSH の MSI に足すので、先に OpenSSH を入れる (ホストの値の [tools] に windowsOpenssh = true を書いて dotfiles apply を流すか、PowerShell で Install-OpenSSH -IfMissing。Windows に UAC の確認が出る)",
             ),
             (
                 "Windows の機能の OpenSSH Server が入っている",
@@ -1800,6 +1801,7 @@ mod tests {
     //!   渡す (受け持ちが WSL のホストの check も同じ)。ほかの手順には渡さない。版は揃っていて中継だけが違えば (ps1 の「SSH の中継が
     //!   揃っていない」)、行と前に出す行を中継の字にする。手で打つ -Check にも中継のモードを添える。前に出す行は手順の字 (無い手順は型の字と
     //!   待つ秒数)、-Check の時間切れに winget の見込みを添えない。WSL の script との突き合わせは `op_reason_parity`
+    //! - openssh は道具の switch (windowsOpenssh) で on/off する (minimum では off。Windows に初めからある OpenSSH のまま)
     //! - openssh は、1Password を使わないホスト (道具の switch onePassword が off) では -Check にも入れる流れにも -NoOnePassword を渡し、入れた後の
     //!   1Password の行を出さず、手で打つ直し方のコマンドにも -NoOnePassword を添える。on のホストは渡さず、入れた後に 1Password の行を出す
     //! - ghq・fzf・starship は Windows にしか無い手順で、いつも on。ntn と同じく 3 は -IfMissing で入れ、「→ … で揃える」なら引数なしで揃え、
@@ -3568,6 +3570,7 @@ mod tests {
     #[test]
     fn openssh_leaves_out_1password_on_hosts_without_it() {
         let s = spec("openssh");
+        assert_eq!(s.gate, Gate::Tool("windowsOpenssh"));
         let missing = (
             3,
             vec![

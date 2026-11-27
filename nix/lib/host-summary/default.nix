@@ -782,7 +782,7 @@ let
   winBase = [
     {
       key = "winAlways";
-      label = "いつも流す手順 (OpenSSH・Windows Terminal・PowerShell・Google 日本語入力・PowerToys など)";
+      label = "いつも流す手順 (Windows Terminal・PowerShell・Google 日本語入力・PowerToys など)";
       short = "いつも流す手順";
     }
   ];
