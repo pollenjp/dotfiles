@@ -484,7 +484,7 @@ Test-Case 'winget を打つほかの ps1 の Invoke-Winget は、この ps1 と�
         }) -join ' '
 }
 # Invoke-Winget を持つ ps1 の数 (増えた・減ったら、ここと win/README.md の「Install-OpenSSH.ps1 を書くときの注意」を直す)
-Test-Case 'Invoke-Winget を持つ ps1 は 14 本 (bootstrap と、同じ本文の 13 本)' 14 {
+Test-Case 'Invoke-Winget を持つ ps1 は 15 本 (bootstrap と、同じ本文の 14 本)' 15 {
     @($winScripts | Where-Object { $null -ne (Get-FunctionBody -Path $_.FullName -Name 'Invoke-Winget') }).Count
 }
 

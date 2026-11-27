@@ -1088,7 +1088,7 @@ mod tests {
     }
 
     /// runner が手順の gate で読む道具 (Nix の lib/groups.nix の runnerTools と同じ。最後の privateRepos は runner だけが読む道具)
-    const RUNNER_TOOLS: [&str; 16] = [
+    const RUNNER_TOOLS: [&str; 17] = [
         "windowsClaudeCode",
         "windowsHerdr",
         "windowsT3Code",
@@ -1100,6 +1100,7 @@ mod tests {
         "onePassword",
         "opReasonSshRelay",
         "windowsNtn",
+        "windowsCodex",
         "windowsTailscale",
         "windowsSshd",
         "windowsTypeClipboard",

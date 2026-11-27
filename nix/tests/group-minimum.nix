@@ -120,10 +120,11 @@ let
       ok =
         !(hasFile minimumPort ".config/cc-pages/config.toml") && !(hasUnit minimumPort "cc-pages.service");
     }
-    (noneOf "minimum の外の package (herdr・ntn・herdr-core・pjp-agent-link・claude-account)" (
+    (noneOf "minimum の外の package (herdr・ntn・codex・herdr-core・pjp-agent-link・claude-account)" (
       builtins.filter (hasPackage minimum) [
         "herdr"
         "ntn"
+        "codex"
         "herdr-core"
         "pjp-agent-link"
         "claude-account"

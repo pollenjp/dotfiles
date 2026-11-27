@@ -12,6 +12,7 @@
 #   dotfiles.wsl.windowsFiles.enable             repo 直下の win/ を Windows 側へ配るか
 #   dotfiles.wsl.windowsFiles.typeClipboard.enable  Windows に自作の type-clipboard を固定した版で入れるか (既定は all だけ on。win/ を配るマシン)
 #   dotfiles.wsl.windowsFiles.ntn.enable         Windows に ntn (Notion の CLI) を winget で固定した版で入れるか (既定は all だけ on。win/ を配るマシン)
+#   dotfiles.wsl.windowsFiles.codex.enable       Windows に Codex CLI を winget で固定した版で入れるか (runner だけ。既定は all だけ on。UAC の確認が出ることがある)
 #   dotfiles.wsl.windowsFiles.claudeCode.enable  Windows に Claude Code を winget で固定した版で入れるか (既定は all だけ on。win/ を配るマシン)
 #   dotfiles.wsl.windowsFiles.claudeAccounts.enable  Windows の runner が claude-personal・claude-work を用意するか (既定は all だけ on。UAC の確認が出る)
 #   dotfiles.wsl.windowsFiles.claudeDesktop.enable  Windows に Claude Desktop を winget の MSIX で入れるか (runner だけ。既定は all だけ on。UAC の確認が出る)
@@ -47,6 +48,7 @@
 #   dotfiles.ccPages.port                        cc-pages のビューアが待ち受ける port (null なら cc-pages の既定の 7777)
 #   dotfiles.ntn.enable                          ntn (Notion CLI) を入れるか (既定は all だけ on)
 #   dotfiles.ntn.keyring                         ntn (Notion CLI) の config.json の keyring (null なら触らない。false で token を auth.json に置く)
+#   dotfiles.codex.enable                        Codex CLI (OpenAI のコーディング エージェントの CLI。nixpkgs の codex) を入れるか (既定は all だけ on)
 #   dotfiles.herdr.enable                        herdr (包み・ssh 先の agent の固定名・設定・abbr) を入れるか (既定は all だけ on)
 #   dotfiles.herdr.hub.enable                    herdr の集約ハブ ~/h を setup が作るか (既定は all だけ on)
 #   dotfiles.herdrCore.enable                    herdr-core (hc) を入れるか (既定は all だけ on。Linux。herdr-app が SSH でつなぐ machine の側に要る)
@@ -892,6 +894,21 @@ in
     '';
   };
 
+  options.dotfiles.codex.enable = lib.mkOption {
+    type = lib.types.bool;
+    default = config.dotfiles.group == "all";
+    defaultText = lib.literalExpression ''config.dotfiles.group == "all"'';
+    example = true;
+    description = ''
+      Codex CLI (OpenAI のコーディング エージェントの CLI。nixpkgs の `codex`) を入れるか。既定はグループで決まる (all なら on、minimum なら
+      off)。minimum のホストで入れるなら true を書く。
+
+      true のとき home.packages に nixpkgs の codex を入れる (版は nixpkgs の pin に従う。`codex` の自己更新では上がらない)。設定とログイン
+      (`~/.codex`) は dotfiles では扱わない (codex を起こして手でログインする)。Windows の Codex CLI は `wsl.windowsFiles.codex.enable`
+      (Windows の runner のホストの値では `[tools] windowsCodex`)。
+    '';
+  };
+
   options.dotfiles.herdr = {
     enable = lib.mkOption {
       type = lib.types.bool;
@@ -1278,6 +1295,25 @@ in
         `CLAUDE_CODE_ENTRYPOINT=""` を渡すかはホストの値の `[t3Code] clearClaudeEntrypoint` (win/README.md の「T3 Code」)。
 
         false に戻しても、入れたものと書いた設定は消さない (runner が見なくなるだけ)。
+      '';
+    };
+
+    windowsFiles.codex.enable = lib.mkOption {
+      type = lib.types.bool;
+      default = config.dotfiles.group == "all" && config.dotfiles.wsl.windowsFiles.enable;
+      defaultText = lib.literalExpression ''config.dotfiles.group == "all" && config.dotfiles.wsl.windowsFiles.enable'';
+      example = true;
+      description = ''
+        Windows に Codex CLI (OpenAI のコーディング エージェントの CLI。winget の `OpenAI.Codex` の portable) を dotfiles が固定した版で入れ、
+        `codex` と打てる `%LOCALAPPDATA%\Microsoft\WinGet\Links\codex.exe` (winget の symlink) を揃えるマシンか。既定はグループで決まる (all なら
+        win/ を配るマシンで on、minimum なら off)。minimum のホストで入れるなら true を書く。
+
+        読むのは Windows の runner だけ (手順 `codex`。WSL の setup に同じ手順は無い)。値は `~/.local/state/dotfiles/group.json` の
+        `tools.windowsCodex` に落ちるが、WSL の setup は使わない。Windows の runner では、ホストの値 (dotfiles-private の `win/hosts/*.toml`) の
+        `[tools]` に `windowsCodex = true` を書く。開発者モードが off の PC では、入れる・入れ直すときに winget を UAC で昇格して打つ
+        (win/README.md の「Codex CLI」)。
+
+        false に戻しても、入れたものは消さない (runner が見なくなるだけ。消し方は win/README.md)。
       '';
     };
 

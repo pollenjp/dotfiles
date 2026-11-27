@@ -5,8 +5,8 @@
 //! 引かない形で写した。移し方は dotfiles-private の docs/adr/060_win_runner_core_* の spec §8 の 6。
 //!
 //! - 確かめる名前は WSL と同じ順 (`NAMES`)。on/off は、WSL の記録 (windows-files.json の ntn・claudeCode、group.json の tools.windowsHerdr・
-//!   windowsTailscale) の代わりに、同じものを入れる手順と同じ道具の switch (ntn は windowsNtn、claude-code は windowsClaudeCode、herdr・herdr-app・
-//!   herdr-core は windowsHerdr、tailscale は windowsTailscale)。bootstrap の 5 つ (git・gh・pwsh・vs-buildtools・rustup) と、runner の手順 ghq・fzf・
+//!   windowsTailscale・windowsCodex) の代わりに、同じものを入れる手順と同じ道具の switch (ntn は windowsNtn、claude-code は windowsClaudeCode、herdr・
+//!   herdr-app・herdr-core は windowsHerdr、tailscale は windowsTailscale、codex は windowsCodex)。bootstrap の 5 つ (git・gh・pwsh・vs-buildtools・rustup) と、runner の手順 ghq・fzf・
 //!   starship が入れる ghq・fzf・starship は、WSL と同じく Windows の ghq に dotfiles の clone がある (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles\.git`。
 //!   bootstrap を流した) ときだけ
 //! - GitHub は Windows の gh で読む (`gh api`。HTTP の crate を足さない)。herdr-app・herdr-core は、版ごとの Windows の成果物が releases.herdr.dev に
@@ -54,6 +54,7 @@ pub const NAMES: &[&str] = &[
     "ghq",
     "fzf",
     "starship",
+    "codex",
     "git",
     "gh",
     "pwsh",
@@ -107,6 +108,7 @@ pub fn name_gate(name: &str) -> NameGate {
         "claude-code" => NameGate::Tool("windowsClaudeCode"),
         "herdr" | "herdr-app" | "herdr-core" => NameGate::Tool("windowsHerdr"),
         "tailscale" => NameGate::Tool("windowsTailscale"),
+        "codex" => NameGate::Tool("windowsCodex"),
         "git" | "gh" | "pwsh" | "vs-buildtools" | "rustup" | "ghq" | "fzf" | "starship" => {
             NameGate::Bootstrapped
         }

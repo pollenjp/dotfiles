@@ -1351,6 +1351,8 @@ pwsh.exe -NoProfile -Command '$env:USERNAME'
 | `dotfiles.herdr.hub.enable` | setup の bootstrap-herdr-hub（`~/h`） |
 | `dotfiles.ntn.enable` | ntn の package と `ntn.json`・setup の bootstrap-ntn・bootstrap-path-shadow |
 | `wsl.windowsFiles.ntn.enable` | Windows の ntn |
+| `dotfiles.codex.enable` | Codex CLI (OpenAI のコーディング エージェントの CLI。nixpkgs の `codex`) の package |
+| `wsl.windowsFiles.codex.enable` | Windows の Codex CLI の新しい版の知らせ (入れるのは Windows の runner の手順 `codex` で、Windows のホストの値の `[tools] windowsCodex`。[`win/README.md` の「Codex CLI」](../win/README.md#codex-cli)) |
 | `wsl.windowsFiles.tailscale.enable`・`wsl.windowsFiles.sshd.enable`・`wsl.windowsFiles.typeClipboard.enable` | Windows の Tailscale・sshd・type-clipboard（`windowsFiles.enable` のマシンだけで効く） |
 | `dotfiles.git.identity.enable` | git の名前とメール（`user.name`・`user.email`・pollenjp-sub の includes） |
 
