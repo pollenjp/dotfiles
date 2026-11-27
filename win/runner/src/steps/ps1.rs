@@ -917,15 +917,17 @@ pub const SPECS: &[Ps1Spec] = &[
         alerts: &[],
     },
     // Codex CLI (OpenAI のコーディング エージェントの CLI。Windows にしか無い手順。WSL の setup には無い)。道具の switch windowsCodex で on/off
-    // (minimum では off)。winget の portable を固定した版で入れ、版のずれも揃える (Policy::Sync)。codex と打てるのは winget が WinGet\Links に
-    // 置く symlink だけなので、開発者モードが off なら ps1 が winget を UAC で昇格して打ち (UAC の確認が 1 回出る)、symlink の無い形 (手で
-    // winget install を打った) は入れ直す。管理者でなく開発者モードも off なら、ps1 は入れずに 1 を返し、締めの行は「→ ※ の手順で直す」だけに
-    // なる。その行の印で直し方を出す (dotfiles-private の docs/adr/118_codex_cli_*)
+    // (minimum では off)。winget の portable を固定した版で入れ、版のずれも揃える (Policy::Sync)。ps1 は winget を昇格せずに打つ (UAC を出さない)。
+    // codex と打てる形は、winget が WinGet\Links に置く symlink か、開発者モードが off のときに winget 1.30 が置き場所に置く codex.exe の hardlink の
+    // どちらでもよく、どちらも無い形は入れ直す。hardlink の形では、同梱の rg の置き場所 (codex-path) をユーザーの PATH に足す。昇格した会話で
+    // winget が 1.30 以降 (user スコープの portable を断る) か、開発者モードが off で winget が 1.29 以前 (codex と打てる形を作れない) なら、ps1 は
+    // 入れずに 1 を返し、締めの行は「→ ※ の手順で直す」だけになる。その行の印で直し方を出す (dotfiles-private の docs/adr/118_codex_cli_*・
+    // 120_codex_cli_without_uac_*)
     Ps1Spec {
         id: "codex",
         windows_only: true,
         order: 97,
-        title: "Codex CLI を固定した版 (portable) に揃え、codex と打てる symlink を置く",
+        title: "Codex CLI を固定した版 (portable) に揃え、codex と打てる形 (winget の symlink か hardlink) を置く",
         gate: Gate::Tool("windowsCodex"),
         script: "win/codex/Install-Codex.ps1",
         command: "Install-Codex",
@@ -933,33 +935,39 @@ pub const SPECS: &[Ps1Spec] = &[
         package: "Codex CLI (winget の OpenAI.Codex)",
         header: Header::Contains("Codex CLI (winget の OpenAI.Codex"),
         check_secs: 120,
-        // zip は約 200 MB (展開して約 600 MB)。UAC の確認を押すまでの間も待つ
+        // zip は約 200 MB (展開して約 600 MB)
         install_secs: 1800,
         policy: Policy::Sync,
-        // 開発者モードが off の PC では、winget を UAC で昇格して打つ (on なら出ない)
-        uac: true,
+        // winget は昇格せずに打つ (winget 1.30 は、昇格した会話からの user スコープの portable を断る)
+        uac: false,
         ok_text: "Windows の Codex CLI は、dotfiles で固定した版に揃っています。",
         installed: &[
-            "Windows に Codex CLI を入れました (固定した版と pin と、codex と打つ WinGet\\Links の symlink が揃っています)。新しい PowerShell から codex と打てます (herdr-app の中の端末なら herdr-app を上げ直してから)。ログインは codex を起こして手でする。",
+            "Windows に Codex CLI を入れました (固定した版と pin と、codex と打てる形 (WinGet\\Links の symlink か、置き場所の codex.exe の hardlink) が揃っています)。新しい PowerShell から codex と打てます (herdr-app の中の端末なら herdr-app を上げ直してから)。ログインは codex を起こして手でする。",
         ],
         synced: &[
-            "Windows の Codex CLI を揃えました (固定した版と pin と、codex と打つ WinGet\\Links の symlink が揃っています)。",
+            "Windows の Codex CLI を揃えました (固定した版と pin と、codex と打てる形 (WinGet\\Links の symlink か、置き場所の codex.exe の hardlink) が揃っています)。",
         ],
         manual_fix: &[
             "PATH のずれは揃える手順では直らない。上の ※ の行の手順で直す (win/README.md の「Codex CLI」)",
         ],
         sync_fix: &[
-            "揃えるには PowerShell で Install-Codex を打つか、dotfiles apply --steps codex を流し直す (開発者モードが off なら UAC の確認が出る。SSH の会話では出せないので、デスクトップの端末で流す。入れ替えるときは、動いている codex を先に終わらせる)",
+            "揃えるには、昇格していない PowerShell で Install-Codex を打つか、dotfiles apply --steps codex を流し直す (入れ替えるときは、動いている codex を先に終わらせる)",
         ],
         releases_file: false,
         ssh_relay: false,
         sshd_keys: false,
         one_password: false,
         missing_blocked: None,
-        output_fixes: &[(
-            "winget が codex の symlink を作れない",
-            "このアカウントは管理者でなく、開発者モードも off なので、winget は codex の symlink を作れない (入れても codex と打てない)。管理者に開発者モードを on にしてもらい (設定 > システム > 開発者向け)、dotfiles apply --steps codex を流し直す (win/README.md の「Codex CLI」)",
-        )],
+        output_fixes: &[
+            (
+                "昇格した PowerShell では winget が codex を入れない",
+                "winget 1.30 は、昇格した会話 (UAC で昇格した PowerShell・管理者として実行した端末) から user スコープの portable を入れる・外すのを断る。昇格していない PowerShell (デスクトップの普通の端末) で dotfiles apply --steps codex を流し直す (win/README.md の「Codex CLI」)",
+            ),
+            (
+                "winget が古く、codex と打てる形を作れない",
+                "winget が 1.29 以前で開発者モードも off なので、入れても codex と打てない (winget は symlink を作れず、1.30 からの codex.exe の hardlink も作らない)。Microsoft Store で「アプリ インストーラー」を更新して winget を 1.30 以降にするか、開発者モードを on にして (設定 > システム > 開発者向け。管理者が要る)、dotfiles apply --steps codex を流し直す (win/README.md の「Codex CLI」)",
+            ),
+        ],
         install_notice: None,
         sync_notice: None,
         check_hang: None,
@@ -1806,9 +1814,9 @@ mod tests {
     //!   1Password の行を出さず、手で打つ直し方のコマンドにも -NoOnePassword を添える。on のホストは渡さず、入れた後に 1Password の行を出す
     //! - ghq・fzf・starship は Windows にしか無い手順で、いつも on。ntn と同じく 3 は -IfMissing で入れ、「→ … で揃える」なら引数なしで揃え、
     //!   PATH のずれだけなら知らせる。fzf・starship は MSI の締めの行 (「→ ※ の手順で直す」だけ) なら打たずに知らせ、MSI の外し方を出す
-    //! - codex は Windows にしか無い手順で、道具の switch (windowsCodex) で on/off。fzf と同じく入れる・揃える (codex と打つ symlink が無い形も
-    //!   「→ Install-Codex で揃える」で揃える) が、入れる・揃える前に UAC を知らせる。winget が symlink を作れない締めの行 (「→ ※ の手順で直す」
-    //!   だけ) なら打たずに知らせ、開発者モードの手を出す
+    //! - codex は Windows にしか無い手順で、道具の switch (windowsCodex) で on/off。fzf と同じく入れる・揃える (codex と打てる形が無い形・
+    //!   同梱の rg の置き場所が PATH に無い形も「→ Install-Codex で揃える」で揃える)。UAC は出さない。winget を打てない締めの行 (昇格した会話・
+    //!   古い winget。「→ ※ の手順で直す」だけ) なら打たずに知らせ、その印ごとの直し方を出す
     //! - claude-desktop は Windows にしか無い手順で、道具の switch (windowsClaudeDesktop) で on/off。3 は UAC を先に知らせて -IfMissing で
     //!   入れ (固定した版が winget に無ければ打たない)、1 は知らせるだけ。旧来の exe の Claude が残っている (締めの行。入っていなくても 1) なら、
     //!   check も apply もその外し方の行にして何も打たない。仮想マシン プラットフォームが off (出力の印) なら、状態の表が出たときだけ
@@ -2200,17 +2208,17 @@ mod tests {
     }
 
     /// codex: 道具の switch (windowsCodex) で on/off の Windows にしか無い手順。fzf と同じく 3 は -IfMissing で入れ、「→ Install-Codex で揃える」
-    /// (版・pin のずれと、codex と打つ symlink が無い形) なら引数なしで揃え、PATH のずれだけなら知らせる。開発者モードが off の PC では ps1 が
-    /// winget を UAC で昇格して打つので、入れる・揃える前に UAC を知らせる。winget が symlink を作れない (管理者でなく開発者モードも off) なら、
-    /// ps1 は入れずに 1 を返し、締めの行は「→ ※ の手順で直す」だけになる。runner は打たずに知らせ、開発者モードの手を出す
+    /// (版・pin のずれと、codex と打てる形が無い形・同梱の rg の置き場所が PATH に無い形) なら引数なしで揃え、PATH のずれだけなら知らせる。
+    /// ps1 は winget を昇格せずに打つので、UAC は知らせない。winget を打てない (昇格した会話で winget が 1.30 以降・開発者モードが off で winget が
+    /// 1.29 以前) なら、ps1 は入れずに 1 を返し、締めの行は「→ ※ の手順で直す」だけになる。runner は打たずに知らせ、印ごとの直し方を出す
     #[test]
-    fn codex_syncs_with_uac_and_reports_when_the_symlink_cannot_be_made() {
+    fn codex_syncs_without_uac_and_reports_when_winget_cannot_make_the_alias() {
         let s = spec("codex");
         assert!(s.windows_only);
         assert_eq!(s.gate, Gate::Tool("windowsCodex"));
         assert_eq!(s.order, 97);
         assert_eq!(s.policy, Policy::Sync);
-        assert!(s.uac);
+        assert!(!s.uac);
         // minimum のホストでは off (使うホストが [tools] windowsCodex = true を書く)
         let minimum = crate::host::parse(
             "group = \"minimum\"\n",
@@ -2222,7 +2230,7 @@ mod tests {
             s.gate.off_reason(&minimum).unwrap(),
             "このホストでは off (windowsCodex = false。グループ minimum の既定)"
         );
-        // 3: UAC を先に知らせて -IfMissing で入れ、新しい PowerShell から codex と打てると添える
+        // 3: -IfMissing で入れ (UAC は知らせない)、新しい PowerShell から codex と打てると添える
         let sys1 = sys(
             (
                 3,
@@ -2240,47 +2248,35 @@ mod tests {
             out.contains("Windows に Codex CLI (winget の OpenAI.Codex) が入っていないので、固定した版を入れます (Install-Codex.ps1 -IfMissing。1800 秒まで待ちます)。"),
             "{out}"
         );
-        assert!(out.contains("UAC の確認が出ます"), "{out}");
+        assert!(!out.contains("UAC"), "{out}");
         assert!(
             out.contains("新しい PowerShell から codex と打てます"),
             "{out}"
         );
-        // 1 (codex と打つ symlink が無い形): 引数なしで揃える (ps1 が入れ直す)
-        let sys2 = sys(
-            (
-                1,
-                vec![
-                    header_line(s),
-                    "⚠️ codex と打てない (WinGet\\Links に codex.exe の symlink が無い) → Install-Codex で揃える ⚠️".into(),
-                ],
-            ),
-            (0, vec![]),
-        );
-        let (o, out, calls) = run("codex", &sys2, APPLY);
-        assert_eq!(o, vec![Outcome::new(Kind::Ok, "揃えた")]);
-        assert_eq!(ends(&calls), vec!["-Check", ""]);
-        assert!(out.contains("Windows の Codex CLI を揃えました"), "{out}");
-        // check と dry-run は -Check だけを打つ
-        let sys2_check = sys(
-            (
-                1,
-                vec![
-                    header_line(s),
-                    "⚠️ codex と打てない (WinGet\\Links に codex.exe の symlink が無い) → Install-Codex で揃える ⚠️".into(),
-                ],
-            ),
-            (0, vec![]),
-        );
-        let (o, _, calls) = run("codex", &sys2_check, Mode::Check);
-        assert_eq!(o[0].kind, Kind::Fix);
-        assert_eq!(ends(&calls), vec!["-Check"]);
+        // 1 (codex と打てる形が無い形・同梱の rg の置き場所が PATH に無い形): 引数なしで揃える (ps1 が入れ直す・PATH に足す)
+        for line in [
+            "⚠️ codex と打てない (WinGet\\Links の symlink も、置き場所の codex.exe の hardlink も無い・違う) → Install-Codex で揃える ⚠️",
+            "⚠️ codex が同梱の rg を引けない (置き場所の codex-path が PATH に無い) → Install-Codex で揃える ⚠️",
+        ] {
+            let sys2 = sys((1, vec![header_line(s), line.into()]), (0, vec![]));
+            let (o, out, calls) = run("codex", &sys2, APPLY);
+            assert_eq!(o, vec![Outcome::new(Kind::Ok, "揃えた")]);
+            assert_eq!(ends(&calls), vec!["-Check", ""]);
+            assert!(out.contains("Windows の Codex CLI を揃えました"), "{out}");
+            assert!(!out.contains("UAC"), "{out}");
+            // check と dry-run は -Check だけを打つ
+            let sys2_check = sys((1, vec![header_line(s), line.into()]), (0, vec![]));
+            let (o, _, calls) = run("codex", &sys2_check, Mode::Check);
+            assert_eq!(o[0].kind, Kind::Fix);
+            assert_eq!(ends(&calls), vec!["-Check"]);
+        }
         // 1 (PATH のずれだけ): 知らせるだけ
         let sys3 = sys(
             (
                 1,
                 vec![
                     header_line(s),
-                    "⚠️ PATH の codex が winget の symlink ではない → ※ の手順で直す ⚠️".into(),
+                    "⚠️ PATH の codex が winget のものではない → ※ の手順で直す ⚠️".into(),
                 ],
             ),
             (0, vec![]),
@@ -2296,36 +2292,43 @@ mod tests {
                     .to_string()
             ]
         );
-        // winget が symlink を作れない: 打たずに知らせ、開発者モードの手を出す (check も apply も)
-        let blocked = (
-            1,
-            vec![
-                header_line(s),
-                "⚠ winget が codex の symlink を作れない (このアカウントは管理者でなく、開発者モードも off)。入れても codex と打てないので、Install-Codex は入れない".into(),
-                "⚠️ winget が codex の symlink を作れない (管理者でなく、開発者モードも off) → ※ の手順で直す ⚠️".into(),
-            ],
-        );
-        for mode in [Mode::Check, APPLY] {
-            let sys4 = sys(blocked.clone(), (0, vec![]));
-            let (o, _, calls) = run("codex", &sys4, mode);
-            assert_eq!(o.len(), 1);
-            assert_eq!(o[0].kind, Kind::Manual);
-            assert_eq!(
-                o[0].text,
-                "winget が codex の symlink を作れない (Install-Codex -Check の ※ の行。runner は直さない)"
-            );
-            assert_eq!(ends(&calls), vec!["-Check"]);
-            assert_eq!(o[0].notes.len(), 1);
-            assert!(
-                o[0].notes[0].contains("開発者モードを on"),
-                "{:?}",
-                o[0].notes
-            );
-            assert!(
-                o[0].notes[0].contains("dotfiles apply --steps codex"),
-                "{:?}",
-                o[0].notes
-            );
+        // winget を打てない (昇格した会話・古い winget): 打たずに知らせ、印ごとの直し方を出す (check も apply も)
+        let cases = [
+            (
+                vec![
+                    header_line(s),
+                    "⚠ 昇格した PowerShell では winget が codex を入れない (winget 1.30.310 は、昇格した会話から user スコープの portable を入れる・外すのを断る)。Install-Codex は winget を打たない".into(),
+                    "⚠️ 昇格した PowerShell では winget が codex を入れない (winget 1.30 から) → ※ の手順で直す ⚠️".into(),
+                ],
+                "昇格した PowerShell では winget が codex を入れない (Install-Codex -Check の ※ の行。runner は直さない)",
+                "昇格していない PowerShell",
+            ),
+            (
+                vec![
+                    header_line(s),
+                    "⚠ winget が古く、codex と打てる形を作れない (winget 1.29.380 は symlink を作れないときに codex.exe の hardlink を作らず、開発者モードも off)。入れても codex と打てないので、Install-Codex は入れない".into(),
+                    "⚠️ winget が古く、codex と打てる形を作れない (winget 1.29 以前で、開発者モードも off) → ※ の手順で直す ⚠️".into(),
+                ],
+                "winget が古く、codex と打てる形を作れない (Install-Codex -Check の ※ の行。runner は直さない)",
+                "アプリ インストーラー",
+            ),
+        ];
+        for (lines, text, fix) in cases {
+            for mode in [Mode::Check, APPLY] {
+                let sys4 = sys((1, lines.clone()), (0, vec![]));
+                let (o, _, calls) = run("codex", &sys4, mode);
+                assert_eq!(o.len(), 1);
+                assert_eq!(o[0].kind, Kind::Manual);
+                assert_eq!(o[0].text, text);
+                assert_eq!(ends(&calls), vec!["-Check"]);
+                assert_eq!(o[0].notes.len(), 1);
+                assert!(o[0].notes[0].contains(fix), "{:?}", o[0].notes);
+                assert!(
+                    o[0].notes[0].contains("dotfiles apply --steps codex"),
+                    "{:?}",
+                    o[0].notes
+                );
+            }
         }
     }
 

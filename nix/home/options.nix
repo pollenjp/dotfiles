@@ -12,7 +12,7 @@
 #   dotfiles.wsl.windowsFiles.enable             repo 直下の win/ を Windows 側へ配るか
 #   dotfiles.wsl.windowsFiles.typeClipboard.enable  Windows に自作の type-clipboard を固定した版で入れるか (既定は all だけ on。win/ を配るマシン)
 #   dotfiles.wsl.windowsFiles.ntn.enable         Windows に ntn (Notion の CLI) を winget で固定した版で入れるか (既定は all だけ on。win/ を配るマシン)
-#   dotfiles.wsl.windowsFiles.codex.enable       Windows に Codex CLI を winget で固定した版で入れるか (runner だけ。既定は all だけ on。UAC の確認が出ることがある)
+#   dotfiles.wsl.windowsFiles.codex.enable       Windows に Codex CLI を winget で固定した版で入れるか (runner だけ。既定は all だけ on。UAC の確認は出ない)
 #   dotfiles.wsl.windowsFiles.claudeCode.enable  Windows に Claude Code を winget で固定した版で入れるか (既定は all だけ on。win/ を配るマシン)
 #   dotfiles.wsl.windowsFiles.claudeAccounts.enable  Windows の runner が claude-personal・claude-work を用意するか (既定は all だけ on。UAC の確認が出る)
 #   dotfiles.wsl.windowsFiles.claudeDesktop.enable  Windows に Claude Desktop を winget の MSIX で入れるか (runner だけ。既定は all だけ on。UAC の確認が出る)
@@ -1332,13 +1332,12 @@ in
       example = true;
       description = ''
         Windows に Codex CLI (OpenAI のコーディング エージェントの CLI。winget の `OpenAI.Codex` の portable) を dotfiles が固定した版で入れ、
-        `codex` と打てる `%LOCALAPPDATA%\Microsoft\WinGet\Links\codex.exe` (winget の symlink) を揃えるマシンか。既定はグループで決まる (all なら
+        `codex` と打てる形 (winget が置く `%LOCALAPPDATA%\Microsoft\WinGet\Links\codex.exe` の symlink か、置き場所の `codex.exe` の hardlink) を揃えるマシンか。既定はグループで決まる (all なら
         win/ を配るマシンで on、minimum なら off)。minimum のホストで入れるなら true を書く。
 
         読むのは Windows の runner だけ (手順 `codex`。WSL の setup に同じ手順は無い)。値は `~/.local/state/dotfiles/group.json` の
         `tools.windowsCodex` に落ちるが、WSL の setup は使わない。Windows の runner では、ホストの値 (dotfiles-private の `win/hosts/*.toml`) の
-        `[tools]` に `windowsCodex = true` を書く。開発者モードが off の PC では、入れる・入れ直すときに winget を UAC で昇格して打つ
-        (win/README.md の「Codex CLI」)。
+        `[tools]` に `windowsCodex = true` を書く。winget は昇格せずに打つ (UAC の確認は出ない。win/README.md の「Codex CLI」)。
 
         false に戻しても、入れたものは消さない (runner が見なくなるだけ。消し方は win/README.md)。
       '';

@@ -65,7 +65,7 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs
 | `tailscale/Install-Tailscale.ps1` | `%USERPROFILE%\.config\powershell\Install-Tailscale.ps1` | Tailscale を winget の `Tailscale.Tailscale` (machine スコープの MSI) で、固定した版で入れる (入っていないときだけ。入れた後は Tailscale の自動更新に任せる)。PowerShell の `Install-Tailscale` から呼ぶ。setup が入れるのは `dotfiles.wsl.windowsFiles.tailscale.enable = true` (minimum では既定で false) のマシンだけ ([後述](#tailscale)) |
 | `t3-code/Install-T3Code.ps1` | `%USERPROFILE%\.config\powershell\Install-T3Code.ps1` | T3 Code を winget の `T3Tools.T3Code` (user スコープ) で、固定した版で入れる (入っていないときだけ。入れた後は T3 Code の自動更新に任せる)。PowerShell の `Install-T3Code` から呼ぶ。入れるのは runner の `t3-code` で、ホストの値の `[tools] windowsT3Code = true` (minimum では既定で false) のマシンだけ ([後述](#t3-code)) |
 | `claude-desktop/Install-ClaudeDesktop.ps1` | `%USERPROFILE%\.config\powershell\Install-ClaudeDesktop.ps1` | Claude Desktop (Claude のデスクトップ版) を winget の `Anthropic.Claude` の MSIX (`--installer-type msix`) で、固定した版で入れる (入っていないときだけ。管理者の権限で入れるので UAC の確認が 1 回出る。入れた後は Claude Desktop の自動更新に任せる)。PowerShell の `Install-ClaudeDesktop` から呼ぶ。入れるのは runner の `claude-desktop` で、ホストの値の `[tools] windowsClaudeDesktop` が on (既定はグループ all だけ) のマシンだけ ([後述](#claude-desktop)) |
-| `codex/Install-Codex.ps1` | `%USERPROFILE%\.config\powershell\Install-Codex.ps1` | OpenAI の Codex CLI を winget の `OpenAI.Codex` の portable で固定した版に揃え、`codex` と打てる `WinGet\Links` の symlink を winget に作らせる (開発者モードが off なら winget を UAC で昇格して打つ)。PowerShell の `Install-Codex` から呼ぶ。入れて揃えるのは runner の `codex` で、ホストの値の `[tools] windowsCodex` が on (既定はグループ all だけ) のマシンだけ ([後述](#codex-cli)) |
+| `codex/Install-Codex.ps1` | `%USERPROFILE%\.config\powershell\Install-Codex.ps1` | OpenAI の Codex CLI を winget の `OpenAI.Codex` の portable で固定した版に揃え、`codex` と打てる形 (`WinGet\Links` の symlink か、置き場所の `codex.exe` の hardlink) を winget に作らせる (winget は昇格せずに打つ。UAC を出さない)。PowerShell の `Install-Codex` から呼ぶ。入れて揃えるのは runner の `codex` で、ホストの値の `[tools] windowsCodex` が on (既定はグループ all だけ) のマシンだけ ([後述](#codex-cli)) |
 | `claude-code/CLAUDE.windows.md` | (配らない。runner の `claude-files` の手順が、`nix/files/claude/CLAUDE.md` の冒頭をこれに差し替えて `%USERPROFILE%\.claude\CLAUDE.md` を作る) | Windows の Claude Code の CLAUDE.md の冒頭 (runner が配ること・直し方) ([後述](#claude-code-の設定)) |
 | `claude-code/skip-skills.txt` | (配らない。runner の `claude-files` の手順が読む) | Windows の Claude Code に張らない dotfiles の skill (Nix・そのマシンの `~/dotfiles` を前提にするもの) ([後述](#claude-code-の設定)) |
 | `claude-code/t3/settings.json` | `%USERPROFILE%\.claude\t3\settings.json` (manifest では配らず、runner の `claude-t3` の手順が置く) | T3 Code の会話だけの Claude の設定。T3 の Launch arguments の `--settings` が読む (herdr と hc のハブ・子の skill を off・`pjp-t3-hub` を on にする `skillOverrides`) ([後述](#claude-code-の設定)) |
@@ -619,7 +619,7 @@ item = "op://<vault の ID>/<項目の ID>/<欄の ID>"   # 元の値の 1Passwo
   名前、`allowFrom` は IPv4・IPv6 のアドレスか CIDR (範囲の頭のアドレスで書く) だけで、ほかは runner が止める。受け持ちが WSL のホストは既定のまま
   (TOML に書いても使わない。Nix の値には無い)。実機のユーザー名と端末の IP は dotfiles-private にだけ書く
 - `windowsCodex` は、Codex CLI を入れるホストが `[tools]` に `windowsCodex = true` を書く (WSL の setup には Codex CLI の手順が無いので、受け持ちに
-  よらず TOML にだけ書く。書かなければ `codex` の行は off。開発者モードが off の PC では入れるときに UAC の確認が出る。[後述](#codex-cli))
+  よらず TOML にだけ書く。書かなければ `codex` の行は off。UAC の確認は出ない。[後述](#codex-cli))
 - `windowsT3Code` は、T3 Code を入れるホストが `[tools]` に `windowsT3Code = true` を書く (WSL の setup には T3 Code の
   手順が無いので、受け持ちによらず TOML にだけ書く。書かなければ `t3-code`・`t3-code-settings` の行は off。[後述](#t3-code))。Claude に
   `CLAUDE_CODE_ENTRYPOINT=""` を渡すかは `[t3Code] clearClaudeEntrypoint` (書かなければ false で、`t3-code-settings` が settings.json からその要素を外す)
@@ -769,7 +769,7 @@ item = "op://<vault の ID>/<項目の ID>/<欄の ID>"   # 元の値の 1Passwo
 | 96 | `tailscale` | `Install-Tailscale.ps1`: 入っていなければ入れる (UAC)。古いときは知らせるだけ (入っている版の方が新しければ揃っている扱い) | `windowsTailscale` | 有る |
 | 97 | `claude-code` | `Install-ClaudeCode.ps1`: 入れる・揃える (PATH のずれは知らせるだけ) | `windowsClaudeCode` | 有る |
 | 97 | `claude-desktop` | `Install-ClaudeDesktop.ps1`: 入っていなければ MSIX を入れる (昇格した Windows PowerShell の winget で。UAC の確認が 1 回出る)。古いときは知らせるだけ (入っている版の方が新しければ揃っている扱い)。旧来の exe の Claude が残っていれば、入れずに外し方を知らせ (UAC も出さない)、仮想マシン プラットフォームが off なら Cowork が使えないことを `·` で知らせる ([Claude Desktop](#claude-desktop)) | `windowsClaudeDesktop` | 有る (Windows だけ) |
-| 97 | `codex` | `Install-Codex.ps1`: 入れる・揃える (winget の portable。`codex` と打てる `WinGet\Links` の symlink が無い形は入れ直す。開発者モードが off なら winget を UAC で昇格して打つ。管理者でなく開発者モードも off なら入れずに知らせる。PATH のずれは知らせるだけ。[Codex CLI](#codex-cli)) | `windowsCodex` | 有る (Windows だけ) |
+| 97 | `codex` | `Install-Codex.ps1`: 入れる・揃える (winget の portable を昇格せずに入れる。`codex` と打てる形 (`WinGet\Links` の symlink か、置き場所の `codex.exe` の hardlink) が無い形は入れ直し、hardlink の形では同梱の rg の置き場所をユーザーの PATH に足す。昇格した会話で winget が 1.30 以降か、開発者モードが off で winget が 1.29 以前なら入れずに知らせる。PATH のずれは知らせるだけ。[Codex CLI](#codex-cli)) | `windowsCodex` | 有る (Windows だけ) |
 | 97 | `fzf` | `Install-Fzf.ps1`: 入れる・揃える (winget の portable。PATH のずれは知らせるだけ。MSI の fzf が入っていれば入れずに、外し方を知らせる。[ghq・fzf](#ghqfzf)) | いつも | 有る (Windows だけ) |
 | 97 | `ghq` | `Install-Ghq.ps1`: 入れる・揃える (PATH のずれは知らせるだけ。[ghq・fzf](#ghqfzf)) | いつも | 有る (Windows だけ) |
 | 97 | `herdr-app` | `Install-HerdrApp.ps1 -IfMissing`: 入れる・揃える (下げない。`-ReleasesFile` に clone の `nix/pkgs/herdr-core/releases.json`) | `windowsHerdr` | 有る |
@@ -4896,7 +4896,7 @@ Windows の版とは揃えない)。
 
 | 道具 | winget の ID | 固定した版 (`-Version` の既定値) | 置き場所 (`%LOCALAPPDATA%\Microsoft\WinGet\` の下) |
 | --- | --- | --- | --- |
-| Codex CLI | `OpenAI.Codex` | `0.170.0` | 本体は `Packages\OpenAI.Codex_Microsoft.Winget.Source_8wekyb3d8bbwe\codex-x86_64-pc-windows-msvc.exe` (arm64 は `codex-aarch64-pc-windows-msvc.exe`。同じ所に helper の `codex-command-runner.exe`・`codex-windows-sandbox-setup.exe` と `codex-resources\`・`codex-path\rg.exe`)。`codex` の名前は `Links\codex.exe` (本体への symlink。winget が置く) |
+| Codex CLI | `OpenAI.Codex` | `0.170.0` | 本体は `Packages\OpenAI.Codex_Microsoft.Winget.Source_8wekyb3d8bbwe\codex-x86_64-pc-windows-msvc.exe` (arm64 は `codex-aarch64-pc-windows-msvc.exe`。同じ所に helper の `codex-command-runner.exe`・`codex-windows-sandbox-setup.exe` と `codex-resources\`・`codex-path\rg.exe`)。`codex` の名前は `Links\codex.exe` (本体への symlink) か、置き場所の `codex.exe` (本体の hardlink。winget 1.30 から)。どちらも winget が置く ([次の節](#codex-と打てる形-winget-の-symlink-か-hardlink)) |
 
 - 入れて揃えるのは Windows の runner の手順 `codex` (order 97。Windows にしか無い手順で、WSL の setup には無い)。minimum では既定で入れず、入れるホストは
   dotfiles-private のホストの値 (`win/hosts/<ユーザー>@<PC>.toml`) に書く (受け持ちが WSL のホストは、WSL の Nix の値にも `wsl.windowsFiles.codex.enable = true`
@@ -4910,41 +4910,54 @@ Windows の版とは揃えない)。
 - ログイン (codex を起こして手でする) と設定 (`%USERPROFILE%\.codex`) は dotfiles では扱わない
 - 入れた後は、新しい PowerShell を開くと `codex` と打てる (winget がユーザーの PATH に足すのは、これから開く PowerShell の分。herdr-app の中の端末なら
   herdr-app を上げ直してから)
-- 消すなら PowerShell で `winget pin remove --id OpenAI.Codex --exact` の後に `winget uninstall --id OpenAI.Codex --exact` を打つ (昇格は要らない)。
-  switch を off にしても runner は消さない
+- 消すなら PowerShell で、先にユーザーの環境変数 `Path` から `...\OpenAI.Codex_Microsoft.Winget.Source_8wekyb3d8bbwe\codex-path` の行
+  (hardlink の形で `Install-Codex` が足したもの。[次の節](#codex-と打てる形-winget-の-symlink-か-hardlink)) を外し、`winget pin remove --id OpenAI.Codex --exact` の後に
+  `winget uninstall --id OpenAI.Codex --exact` を打つ (昇格は要らない)。`codex-path` の行を残したまま uninstall すると、winget が置き場所の部分だけを
+  抜いて `\codex-path` の行が残る (ドライブの直下を指すので、それも外す)。switch を off にしても runner は消さない
 
 | 打つもの | すること |
 | --- | --- |
-| `Install-Codex -Check` (PowerShell) | 差を出すだけ。揃っていれば終了コード 0、差があれば 1、入っていなければ 3 (winget が symlink を作れない PC では、入っていなくても 1) |
-| `Install-Codex` (PowerShell) | 揃える (入れる・入れ替える (上げる・下げる)・symlink の無い形を入れ直す・pin を足す) |
-| `dotfiles apply --steps codex` (PowerShell) | runner の手順で揃える (`windowsCodex` が on のホストだけ。入っていなければ入れ、版か pin か symlink がずれていれば揃える。PATH のずれは知らせるだけ) |
+| `Install-Codex -Check` (PowerShell) | 差を出すだけ。揃っていれば終了コード 0、差があれば 1、入っていなければ 3 (winget を打てない会話・入れても `codex` と打てない PC では、入っていなくても 1) |
+| `Install-Codex` (PowerShell。昇格していないもの) | 揃える (入れる・入れ替える (上げる・下げる)・`codex` と打てる形の無い形を入れ直す・pin を足す・hardlink の形なら同梱の rg の置き場所を PATH に足す) |
+| `dotfiles apply --steps codex` (PowerShell) | runner の手順で揃える (`windowsCodex` が on のホストだけ。入っていなければ入れ、版か pin か `codex` と打てる形か同梱の rg の PATH がずれていれば揃える。PATH のずれは知らせるだけ) |
 | `nix/scripts/check-winget-version.sh codex` (WSL・CI) | 固定した版を winget の版の一覧と比べる。GitHub Actions の `winget-versions` が週 1 回流し、新しい版が winget に載って 30 日たつと落ちて知らせる ([後述](#codex-cli-の新しい版が出たとき)) |
 
-揃えるときにすることは [ghq・fzf](#ghqfzf) と同じ (取得を確かめてから外して入れ、pin を足し、読み直す)。違うのは、`codex` と打てる symlink を
-見ることと、そのために winget を昇格して打つこと (次の節)。
+揃えるときにすることは [ghq・fzf](#ghqfzf) と同じ (取得を確かめてから外して入れ、pin を足し、読み直す)。違うのは、`codex` と打てる形と同梱の rg を
+見ること (次の節)。
 
-### codex と打てる形 (winget の symlink)
+### codex と打てる形 (winget の symlink か hardlink)
 
-winget の portable は、`codex` という名前 (manifest の `PortableCommandAlias`) を `WinGet\Links` の symlink でだけ付ける。昇格していない winget は、
-開発者モードが off だと symlink を作れず、そのときは symlink の代わりに置き場所をユーザーの PATH に足すだけにする (それでも「Command line alias added:
-codex」と出す。winget の `PortableInstaller.cpp`)。置き場所の exe の名前は `codex-x86_64-pc-windows-msvc.exe` なので、その形では `codex` と打っても
-見つからない (`codex-x86_64-pc-windows-msvc` とは打てる)。ふつうの PC (開発者モードが off) で手で `winget install OpenAI.Codex` を打つと、この形になる
-(winget-pkgs の manifest は、0.23.0 から全部の版が `PortableCommandAlias: codex` を持つ。別名が無い版があったわけではない)。
+winget の portable は、`codex` という名前 (manifest の `PortableCommandAlias`) を次のどちらかの形で付ける (winget の `PortableFlow.cpp`・
+`PortableInstaller.cpp`)。`Install-Codex` はどちらでも揃ったとみなす (dotfiles-private の ADR 120 (`docs/adr/120_codex_cli_without_uac_*`))。
 
-- `Install-Codex` は、開発者モードが off なら winget を昇格した Windows PowerShell (System32 のもの) で打ち、symlink を winget に作らせる。UAC の確認が入れる・
-  入れ直すときの 1 回だけ出る (昇格した側の窓は隠すので、終わるまで winget の出力は出ない)。開発者モードが on か、もう昇格した会話なら、そのまま打つ
-- 昇格しても同じユーザーなので、置き場所・symlink・pin はこのユーザーのもの。入れた後の `winget list`・`pin`・`uninstall` は昇格せずに打てる。昇格した
-  側のアカウントが違えば (UAC で別のアカウントの資格情報を入れたなど) 知らせる
-- symlink の無い形で入っていれば (前に手で winget install を打ったなど)、`-Check` が「codex と打てない」と出し、`Install-Codex` が同じ版を外してから入れ
-  直す。外す・入れるを 1 回の昇格で打つので、UAC を断れば何も変えない。入れ直した後も、前の形で winget がユーザーの PATH に足した置き場所の行が
-  残ることがある (テスト用の VM で残った)。置き場所に `codex.exe` は無いので `codex` の解決には効かない。消すなら、ユーザーの環境変数 `Path` から
-  `...\WinGet\Packages\OpenAI.Codex_Microsoft.Winget.Source_8wekyb3d8bbwe` の行を外す
-- 管理者でないアカウントで開発者モードも off なら、UAC で別のアカウントに昇格すると置き場所がそのアカウントのものになるので、昇格しない。入れても
-  `codex` と打てないので、`Install-Codex` は入れずに止まり、開発者モードを on にする手 (設定 > システム > 開発者向け。管理者が要る) を出す (runner は
-  知らせるだけ)
-- hardlink や名前を替えた写し (`codex.exe`) は作らない。codex は自分の置き場所の判定 (同梱の `rg.exe` と `codex-resources` を使うか) を、実体の exe の
-  パスと名前 (zip の `codex-package.json` の `entrypoint`) で行う。symlink は実体へたどるが、hardlink はたどらないので判定が外れ、同梱の rg を使わずに
-  PATH の rg を探す (`codex doctor` の search provider が bundled でなく system になる)。sandbox の helper も、実体の隣で探す
+| 形 | いつ | `codex` と打つと引かれるもの |
+| --- | --- | --- |
+| symlink | winget が symlink を作れるとき (開発者モードが on か、昇格した winget) | `WinGet\Links\codex.exe` (置き場所の本体への symlink) |
+| hardlink | winget 1.30 から、symlink を作れないとき (昇格していない winget で、開発者モードが off)。winget は `Links` の代わりに置き場所をユーザーの PATH に足す | 置き場所の `codex.exe` (本体の hardlink。winget 1.30 は symlink を作れるときも置く) |
+
+- winget は昇格せずに打つ (UAC の確認は出ない)。会社の PC (管理者のアカウント・開発者モードが off) では hardlink の形で入る。新しい PowerShell の
+  `Get-Command codex` の Source は `%LOCALAPPDATA%\Microsoft\WinGet\Packages\OpenAI.Codex_Microsoft.Winget.Source_8wekyb3d8bbwe\codex.exe` になる
+- winget 1.30 は、昇格した会話 (UAC で昇格した PowerShell・管理者として実行した端末) から user スコープの portable を入れる・外すのを
+  `0x8A15007D` (「ユーザー スコープ内にインストールされたパッケージの管理者コンテキストからは許可されていません」) で断る。`Install-Codex` は
+  昇格した会話で winget が 1.30 以降なら winget を打たずに止まり、昇格していない PowerShell で打ち直す手を出す (runner は知らせるだけ)
+- winget 1.29 以前は hardlink を作らず、symlink を作れないと置き場所を PATH に足すだけにする (それでも「Command line alias added: codex」と出す)。
+  置き場所の exe の名前は `codex-x86_64-pc-windows-msvc.exe` なので、その形では `codex` と打っても見つからない。昇格していない会話で開発者モードが
+  off で winget が 1.29 以前なら、`Install-Codex` は入れずに止まり、Microsoft Store で「アプリ インストーラー」を更新する (winget を 1.30 以降にする) か
+  開発者モードを on にする手を出す (runner は知らせるだけ)。winget の版は `winget --version` で見る
+- `codex` と打てる形の無い形で入っていれば (winget 1.29 以前で入れたなど)、`-Check` が「codex と打てない」と出し、`Install-Codex` が同じ版を外してから
+  入れ直す。`WinGet\Links\codex.exe` がほかを指していても入れ直す (winget が消してから作り直す)
+- 同梱の rg: codex は自分の置き場所の判定 (同梱の `codex-path\rg.exe` と `codex-resources` を使うか) を、実体の exe の名前が置き場所の
+  `codex-package.json` の `entrypoint` と同じかで行う (codex の `codex-rs/install-context`)。symlink は実体へたどるので当たるが、hardlink の `codex.exe` は
+  名前が違うので外れ、codex は rg を PATH から探す (`codex doctor` の search provider が bundled でなく system になる)。そこで PATH の `codex` が
+  置き場所の `codex.exe` なら、`Install-Codex` が置き場所の `codex-path` をユーザーの PATH の末尾に足す (`-Check` の「同梱の rg」の行)。codex が
+  子のシェルに渡す PATH にも入るので、codex の中の `rg` もそれを引く。`codex-resources` の中の voice は hardlink の形では使えない見込み
+- `winget uninstall` は置き場所を PATH の文字列から部分一致で抜くので、`codex-path` の行を残したまま外すと、置き場所の部分だけが抜けて
+  `\codex-path` (ドライブの直下。普通のユーザーもフォルダを作れるので、別のユーザーが置いた exe を引きうる) に化けて残る (テスト用の VM で見た)。
+  `Install-Codex` は外す・入れ直す (入れ替え・relink) 前に自分の `codex-path` の行を外し、入れた後に足し直す。化けた行が残っていれば、`-Check` の
+  「化けた PATH の行」が ⚠ になり、`Install-Codex` (runner の手順 `codex`) が取り除く
+- sandbox の helper (`codex-command-runner.exe`・`codex-windows-sandbox-setup.exe`) と `codex-code-mode-host.exe` は、codex が exe の隣で探す。
+  置き場所の直下にあるので、どちらの形でも見つかる
+- 名前を替えた写しや `.cmd` の shim は自分では作らない (`.cmd` の shim は Ctrl+C で「バッチ ジョブを終了しますか」が出て、引数の引用符も崩れる)
 - winget の manifest の依存 (`BurntSushi.ripgrep.MSVC`・`Microsoft.VCRedist.2015+.x64`) は入れない (`--skip-dependencies`)。codex の exe は VC++ の
   ランタイムを使わず (CRT を静的に持つ)、rg は同梱のもの (`codex-path\rg.exe`) を使う。VCRedist は machine に入るので、入れると開発者モードの PC でも
   UAC の確認が出る
@@ -4968,8 +4981,8 @@ winget-pkgs に載った日 (GitHub の release には winget に載らない版
    `PortableCommandAlias: codex` と helper の 2 つが残っているかも見る
 2. `codex/Install-Codex.ps1` の `-Version` の既定値と、上の道具の表の版を新しい版 (公開から 7 日たったもの) にし、`Install-Codex.Tests.ps1` を流して PR を
    出す (`winget-versions` が、書いた版が winget にあるかを確かめる)
-3. merge したら、Windows で `dotfiles --self-update apply --steps codex` (clone を進めてから流す) を流す。外してから入れ直すので、開発者モードが off なら
-   UAC の確認が 1 回出る。codex が動いていて止まったら、終わらせてから `Install-Codex`
+3. merge したら、Windows で `dotfiles --self-update apply --steps codex` (clone を進めてから流す) を流す。外してから入れ直す (UAC の確認は出ない。
+   昇格していない PowerShell で流す)。codex が動いていて止まったら、終わらせてから `Install-Codex`
 4. `-Check` が「揃っている」になり、新しい PowerShell で `codex --version` が新しい版を出し、`codex doctor` の search provider が bundled のままかを確かめる
 
 見送るとき: `codex/skipped-versions.txt` に「版 理由」を 1 行足して commit する。版を戻すときは `-Version` を前の版にすれば、runner が下げる。
@@ -4977,18 +4990,18 @@ winget-pkgs に載った日 (GitHub の release には winget に載らない版
 ### Install-Codex.ps1 を書くときの注意
 
 - `dotfiles.ps1` と同じく **BOM 付きの UTF-8** で保存する
-- 副作用の無い関数 (版の読み方・symlink の見分け・winget を昇格して打つかの決め方・plan・winget の引数・状態の表・締めの行・昇格した側に渡す本文) と、
-  winget・昇格・プロセスを偽物に差し替えた流れは `codex/Install-Codex.Tests.ps1` で確かめる。昇格した側に渡す本文は、偽の winget を置いて今の
-  PowerShell で実際に流し、止まる所と終了コードを確かめる (昇格はしない)。Linux の pwsh で流す:
+- 副作用の無い関数 (版の読み方・winget の版の読み方・symlink と hardlink の見分け・winget を打てるかの決め方・plan・winget の引数・同梱の rg の PATH・
+  状態の表・締めの行) と、winget・PATH・プロセスを偽物に差し替えた流れは `codex/Install-Codex.Tests.ps1` で確かめる。昇格して winget を打つ道を
+  足さない (試験が `RunAs` の無いことを確かめる)。Linux の pwsh で流す:
 
   ```sh
   nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/codex/Install-Codex.Tests.ps1
   ```
 
 - runner の `runner/src/steps/ps1.rs` は、終了コードと、状態の表の見出し (`Codex CLI (winget の OpenAI.Codex`) と、締めの行の文言
-  (`→ Install-Codex で入れる`・`→ Install-Codex で揃える`・`→ ※ の手順で直す`) と印 (`winget が codex の symlink を作れない`) で分かれる。変えるときは
+  (`→ Install-Codex で入れる`・`→ Install-Codex で揃える`・`→ ※ の手順で直す`) と印 (`昇格した PowerShell では winget が codex を入れない`・`winget が古く、codex と打てる形を作れない`) で分かれる。変えるときは
   向こうも直す (runner の試験が ps1 の字と突き合わせる)
-- winget・UAC・プロセスに触る本物の部分は、実機で `-Check` と本番を打って確かめる
+- winget・token (昇格の見分け)・PATH・プロセスに触る本物の部分は、実機で `-Check` と本番を打って確かめる
 
 ## sshd
 

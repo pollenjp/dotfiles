@@ -288,9 +288,9 @@ function Install-Fzf { & "$HOME\.config\powershell\Install-Fzf.ps1" @args }
 function Install-Starship { & "$HOME\.config\powershell\Install-Starship.ps1" @args }
 
 # Windows の Codex CLI (winget の OpenAI.Codex の portable) を、dotfiles で固定した版に揃える。中身は同じ場所へ配る Install-Codex.ps1
-# (win/README.md の「Codex CLI」)。-Check なら確かめるだけ。codex と打てるのは winget が WinGet\Links に置く symlink だけなので、開発者モードが
-# off なら winget を UAC で昇格して打ち、symlink が無い形で入っていれば入れ直す。入れ替えが要るときは、動いている codex を先に終わらせる
-# (動いていると止まる)。dotfiles apply (runner の手順 codex。ホストの値の [tools] windowsCodex が on のマシンだけ) でも揃える。
+# (win/README.md の「Codex CLI」)。-Check なら確かめるだけ。winget は昇格せずに打つ (UAC を出さない)。codex と打てる形は、winget が
+# WinGet\Links に置く symlink か、開発者モードが off のときに winget 1.30 が置き場所に置く codex.exe の hardlink のどちらでもよく、どちらも
+# 無い形で入っていれば入れ直す。入れ替えが要るときは、動いている codex を先に終わらせる (動いていると止まる)。dotfiles apply (runner の手順 codex。ホストの値の [tools] windowsCodex が on のマシンだけ) でも揃える。
 function Install-Codex { & "$HOME\.config\powershell\Install-Codex.ps1" @args }
 
 # ghq の repo を fzf で選び、その repo へ移る。WSL の fish の function と bash の function の cdrepo (nix/home/modules/fish.nix・bash.nix) と
