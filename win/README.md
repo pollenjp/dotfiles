@@ -1741,7 +1741,9 @@ nix/scripts/bootstrap-windows-files.sh --dry-run   # 判定だけ見る
 - 配り先の `/mnt/c/Users/<名前>` は `dotfiles.wsl.windowsUserName` で決まる
 - 配るのは setup を流した checkout の作業ツリー。commit していない変更も配られる
 - 置いたファイルをアプリが読み直すとは限らない。書き換えたときは manifest の `hint` が出る
-  (Orca なら「設定 → キーボードショートカット → ディスクから再読み込み」)
+  (Orca なら「設定 → キーボードショートカット → ディスクから再読み込み」)。runner の手順 `files` は、`runnerHint` があればそちらを出す
+  (`hint` が WSL の setup の手 (`setup --update`・`bootstrap-windows-*.sh` など) を指す項に、runner の手で書く。WSL の無いホストにも出るため。
+  runner が出す案内に WSL の手が残っていないかは、runner の試験が本物の manifest で確かめる)
 
 ## ファイルを足す
 
@@ -1755,10 +1757,14 @@ nix/scripts/bootstrap-windows-files.sh --dry-run   # 判定だけ見る
 src = "orca/keybindings.json"                  # win/ からの相対パス
 dst = "%USERPROFILE%/.orca/keybindings.json"   # Windows 側の置き先
 hint = "Orca の設定 → キーボードショートカット → 「ディスクから再読み込み」"   # 任意
+# runnerHint = "…"   # 任意。runner が hint の代わりに出す文 (hint が WSL の setup の手を指すとき)
 ```
 
 - `dst` は `%USERPROFILE%` / `%APPDATA%` / `%LOCALAPPDATA%` のどれかで始める。区切りは `/`
-- 書けるキーは `src` / `dst` / `hint` / `base` だけ。`..` と `\` は書けない
+- 書けるキーは `src` / `dst` / `hint` / `runnerHint` / `base` だけ。`..` と `\` は書けない
+- `hint` は WSL の setup (`bootstrap-windows-files.sh`) と runner の両方が出す。`setup --update`・`bootstrap-windows-*.sh`・`dotfiles.wsl.*` を書くなら、
+  runner の手 (dotfiles apply の手順の名前と、on/off を決めるホストの値の `[tools]`) で `runnerHint` も書く (runner の試験が、runner の出す案内に
+  WSL の手が残っていると落ちる)
 - `base = "nix"` の表だけ、`src` は repo 直下の `nix/` からの相対パスになる (既定は `"win"`)。Linux の home-manager も同じファイルを
   読むときに使う (home-manager からは `nix/` しか見えないので、1 か所は `nix/` に置く。今は herdr の固定した版の `releases.json` と、
   [starship](#starship) の `starship.toml`)。`src` は `win/` の外なので、[`.github/workflows/win-runner.yml`](../.github/workflows/win-runner.yml) の

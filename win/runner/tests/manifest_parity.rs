@@ -96,6 +96,13 @@ fn fixtures_are_judged_the_same() {
             )
         ),
         format!(
+            "{}hint = \"h\"\nrunnerHint = \"r\"\n",
+            file(
+                "orca/keybindings.json",
+                "%USERPROFILE%/.orca/keybindings.json"
+            )
+        ),
+        format!(
             "{}{}base = \"nix\"\nsrc = \"pkgs/herdr-core/releases.json\"\ndst = \"%LOCALAPPDATA%/r.json\"\n",
             file("herdr/config.toml", "%APPDATA%/herdr/config.toml"),
             "[[files]]\n"
@@ -111,6 +118,10 @@ fn fixtures_are_judged_the_same() {
         ),
         "[[files]]\nsrc = \"orca/keybindings.json\"\n".to_string(),
         "[[files]]\nsrc = 1\ndst = \"%USERPROFILE%/a\"\n".to_string(),
+        format!(
+            "{}runnerHint = 1\n",
+            file("orca/keybindings.json", "%USERPROFILE%/a")
+        ),
         format!(
             "{}base = \"etc\"\n",
             file("orca/keybindings.json", "%USERPROFILE%/a")

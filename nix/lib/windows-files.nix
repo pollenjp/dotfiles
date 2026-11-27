@@ -20,6 +20,7 @@
 #         repoPath = "win/orca/keybindings.json";             # repo からの相対パス (案内用)
 #         dst = "/mnt/c/Users/<名前>/.orca/keybindings.json"; # 置き先 (絶対パス)
 #         hint = "…";                                         # 置き先を書き換えたときに出す文。無ければ null
+#         runnerHint = "…";                                   # Windows の runner が hint の代わりに出す文。無ければ null (WSL は読まない)
 #       }
 #     ];
 #   }
@@ -89,6 +90,7 @@ let
           "src"
           "dst"
           "hint"
+          "runnerHint"
           "base"
         ]
       ) (builtins.attrNames f);
@@ -108,7 +110,7 @@ let
     if !builtins.isAttrs f then
       fail "${at}: [[files]] の表で書いてください"
     else if unknown != [ ] then
-      fail "${at}: 知らないキーがあります: ${concat unknown} (書けるのは src / dst / hint / base)"
+      fail "${at}: 知らないキーがあります: ${concat unknown} (書けるのは src / dst / hint / runnerHint / base)"
     else if !(f ? src && f ? dst) then
       fail "${at}: src と dst は必須です"
     else if
@@ -116,10 +118,11 @@ let
         builtins.isString f.src
         && builtins.isString f.dst
         && builtins.isString (f.hint or "")
+        && builtins.isString (f.runnerHint or "")
         && builtins.isString (f.base or "")
       )
     then
-      fail "${at}: src / dst / hint / base は文字列で書いてください"
+      fail "${at}: src / dst / hint / runnerHint / base は文字列で書いてください"
     else if base != "win" && base != "nix" then
       fail "${at}: base は \"win\" (既定) か \"nix\" で書いてください: ${base}"
     else if hasBackslash f.src then
@@ -142,6 +145,7 @@ let
         repoPath = "${base}/${f.src}";
         dst = "${roots.${root}}/${rest}";
         hint = f.hint or null;
+        runnerHint = f.runnerHint or null;
       };
 
   files = builtins.genList (i: toFile (i + 1) (builtins.elemAt entries i)) (builtins.length entries);
