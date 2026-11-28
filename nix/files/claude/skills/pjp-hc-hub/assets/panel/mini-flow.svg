@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="80" viewBox="0 0 200 80"
+     font-family="'Yu Gothic UI', 'Meiryo UI', Meiryo, 'Segoe UI', sans-serif">
+  <title>雛形 mini-flow: 段 A → 段 B → 段 C の流れ。済んだ段は緑、いまの段は青、まだの段は灰</title>
+  <!-- panel のミニ絵の雛形 (pjp-hc-hub の references/panel-figures.md の「ミニ絵」)。字だけを替えて使う。
+       箱の字は、名前 (11 px・太字) が全角 4 字まで、状態 (10 px) が全角 5 字まで (半角は 2 字で全角 1 字)。
+       動き (marks) は付けない -->
+  <rect width="200" height="80" fill="#1e2228"/>
+
+  <!-- 段をつなぐ矢印 -->
+  <line x1="61" y1="40" x2="65" y2="40" stroke="#5c6370" stroke-width="2"/>
+  <polygon points="65,36 71,40 65,44" fill="#5c6370"/>
+  <line x1="129" y1="40" x2="133" y2="40" stroke="#5c6370" stroke-width="2"/>
+  <polygon points="133,36 139,40 133,44" fill="#5c6370"/>
+
+  <!-- 段 A: 済んだ (緑) -->
+  <rect x="4" y="20" width="56" height="40" rx="6" fill="#26352a" stroke="#98c379" stroke-width="1.5"/>
+  <text x="32" y="36" text-anchor="middle" font-size="11" font-weight="700" fill="#d7dae0">段 A</text>
+  <text x="32" y="52" text-anchor="middle" font-size="10" fill="#98c379">済んだ</text>
+
+  <!-- 段 B: いま (青) -->
+  <rect x="72" y="20" width="56" height="40" rx="6" fill="#263445" stroke="#61afef" stroke-width="2"/>
+  <text x="100" y="36" text-anchor="middle" font-size="11" font-weight="700" fill="#61afef">段 B</text>
+  <text x="100" y="52" text-anchor="middle" font-size="10" fill="#9aa2ae">いま</text>
+
+  <!-- 段 C: まだ (灰) -->
+  <rect x="140" y="20" width="56" height="40" rx="6" fill="#2c323c" stroke="#5c6370"/>
+  <text x="168" y="36" text-anchor="middle" font-size="11" font-weight="700" fill="#d7dae0">段 C</text>
+  <text x="168" y="52" text-anchor="middle" font-size="10" fill="#9aa2ae">まだ</text>
+</svg>

@@ -1,0 +1,47 @@
+# ハブと子の道具 (pjp hub・pjp child・pjp mark・pjp pack) と入口 pjp の workspace (dotfiles-private の ADR 124)。使い方と配り方は
+# nix/README.md と win/README.md の「ハブと子の道具 (pjp-tools)」、この workspace の README.md。
+#
+# Linux は default.nix の package (home には modules/pjp-tools.nix が入れる)、Windows は CI (.github/workflows/pjp-tools-release.yml) が
+# この workspace の git の tree の hash ごとの Release に置いた exe を、runner の手順 pjp-tools が確かめて置く (合う Release が無く cargo が
+# あれば手元で作る)。OS の違い (パス・プロセス・ロック・時刻・文字コード) は crates/pjp-core に閉じる
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2024"
+# rust-toolchain.toml の版 (Windows の rustup と CI) と nixpkgs (nix/flake.lock) の rustc に合わせる
+rust-version = "1.99"
+publish = false
+
+# 版は公開から 7 日以上たったものに限る (Cargo.lock の間接の依存も。cargo には猶予の設定が無いので、足す・上げるときに
+# crates.io の公開日時を見て、新しすぎる版は cargo update -p <名前> --precise <前の版> で下げる)。C のコンパイラが要る依存と
+# HTTP・TLS の crate は入れない (外とのやりとりは hc・git・gh などの CLI を呼ぶ)
+[workspace.dependencies]
+pjp-core = { path = "crates/pjp-core" }
+pjp-hc-child = { path = "crates/pjp-hc-child" }
+libc = "0.2.191"
+# preserve_order: object のキーを書いた順に持つ (出力の順と、エラーに並べる名前の順を書いた順に合わせる。入る indexmap 2.14.2 は
+# 2026-09-05、foldhash 0.2.0 は 2025-08-23 の公開)
+serde_json = { version = "1.0.154", features = ["preserve_order"] }
+# 読むだけ (hub.toml・Cargo.toml・pack の JSON の元)。書き出し (display) は使わない。preserve_order は serde_json と同じわけ
+toml = { version = "1.2.1", default-features = false, features = ["std", "parse", "serde", "preserve_order"] }
+windows-sys = { version = "0.61.2", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    # 秘密のファイルの DACL を本人だけにする・読む (pjp_core::fs の set_owner_only・access_of)
+    "Win32_Security_Authorization",
+    "Win32_System_Console",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
+
+[workspace.lints.rust]
+# unsafe は pjp-core の sys (OS の FFI) だけに置く。そこだけ #![expect(unsafe_code, reason = "…")] で外す
+unsafe_code = "deny"
+
+# 配る exe は CI がこの profile で作る。速さより、作り直しの短さを取る (道具はほとんどの時間 hc・git を待っていて、最適化の差は
+# 出ない。runner と同じ)
+[profile.release]
+opt-level = 1
+incremental = true

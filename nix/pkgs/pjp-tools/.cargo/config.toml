@@ -1,0 +1,6 @@
+# MSVC の C ランタイムを静的にリンクする。Release に置く exe を、Visual C++ の再頒布可能パッケージ (vcruntime140.dll) の無い Windows
+# (Build Tools を入れない minimum の PC) でも起こせるようにする (win/runner/.cargo/config.toml と同じ)。環境変数 RUSTFLAGS を置くと、ここの
+# rustflags は丸ごと無視されるので、CI では RUSTFLAGS を置かない。Release の exe の CI (.github/workflows/pjp-tools-release.yml) が
+# dumpbin /dependents で確かめる
+[target.'cfg(all(target_os = "windows", target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]

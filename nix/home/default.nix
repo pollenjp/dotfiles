@@ -19,6 +19,7 @@
     ./modules/bash.nix
     ./modules/direnv.nix
     ./modules/claude.nix
+    ./modules/pjp-tools.nix
     ./modules/cc-pages.nix
     ./modules/dev-tracker-inbox.nix
     ./modules/windows-files.nix

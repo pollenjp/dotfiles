@@ -197,6 +197,8 @@
           googleIme = pkgs.callPackage ./pkgs/pjp-google-ime { };
           ghqPull = pkgs.callPackage ./pkgs/pjp-ghq-pull { };
           claudeSelector = pkgs.callPackage ./pkgs/claude-selector { };
+          # ハブと子の道具 (pjp hub・child・mark・pack) と入口 pjp (pkgs/pjp-tools。dotfiles-private の ADR 124)
+          pjpTools = pkgs.callPackage ./pkgs/pjp-tools { };
           # WSL の op (1Password CLI の wrapper。自作の OSS の op-reason を Release の版と SHA-256 で固定したもの)。配布物は Linux だけ
           opReason = pkgs.callPackage ./pkgs/op-reason { };
           unittest =
@@ -735,6 +737,26 @@
           # claude-selector (cs) の package そのもの。build の中で cargo test を流す (何を確かめるかは
           # pkgs/claude-selector/tests/*.rs の先頭)。macOS (aarch64-darwin) でも build と test を通すので全 system
           claude-selector-test = claudeSelector;
+          # ハブと子の道具の workspace の cargo fmt --check と cargo clippy --workspace --all-targets -- -D warnings (claude-selector-lint と
+          # 同じ形)
+          pjp-tools-lint = pjpTools.overrideAttrs (old: {
+            pname = "pjp-tools-lint";
+            nativeBuildInputs = old.nativeBuildInputs ++ [
+              pkgs.clippy
+              pkgs.rustfmt
+            ];
+            buildPhase = ''
+              runHook preBuild
+              (cd pkgs/pjp-tools && cargo fmt --all --check && cargo clippy --workspace --all-targets --offline -- -D warnings)
+              runHook postBuild
+            '';
+            doCheck = false;
+            installPhase = ''
+              touch $out
+            '';
+          });
+          # ハブと子の道具の package そのもの。build の中で cargo test を流す (何を確かめるかは各 crate の試験の先頭)。全 system
+          pjp-tools-test = pjpTools;
           # ntn (pkgs/ntn) の package そのもの。build の installCheck が `ntn --version` を版と照らす。配布物は system
           # ごとに違うので、macOS (aarch64-darwin) でも build する (全 system)
           ntn-test = pkgs.callPackage ./pkgs/ntn { };
@@ -1175,6 +1197,12 @@
           #   nix run ./nix#claude-selector -- -c
           claude-selector = pkgs.callPackage ./pkgs/claude-selector { };
 
+          # ハブと子の道具 (pjp hub・child・mark・pack) と入口 pjp (pkgs/pjp-tools)。home には modules/pjp-tools.nix が、hc が入るホストと
+          # claude-skills の道具を使うホストに入れる。switch せずに試すなら (端末で):
+          #
+          #   nix run ./nix#pjp-tools -- --version
+          pjp-tools = pkgs.callPackage ./pkgs/pjp-tools { };
+
           # Notion の CLI (ntn)。nixpkgs に無いので、公式の配布物を版と sha256 で固定する (pkgs/ntn)。
           # home には modules/packages.nix が入れる。switch せずに試すなら:
           #
@@ -1271,6 +1299,20 @@
               # テストが bare の remote と clone を作る git と、repo の一覧を読む ghq
               pkgs.git
               pkgs.ghq
+            ];
+          };
+
+          # ハブと子の道具 (pkgs/pjp-tools。Rust の workspace) を直すときの道具 (pjp-ghq-pull と同じく mkShell)。試験はハブを一時
+          # ディレクトリに作るので git も入れる。nix/pkgs/pjp-tools の中で:
+          #
+          #   nix develop ../..#pjp-tools --command cargo test --workspace
+          pjp-tools = pkgs.mkShell {
+            packages = [
+              pkgs.cargo
+              pkgs.rustc
+              pkgs.clippy
+              pkgs.rustfmt
+              pkgs.git
             ];
           };
 

@@ -1,0 +1,53 @@
+name: pjp-tools
+
+# ハブと子の道具の workspace (nix/pkgs/pjp-tools。Rust) を Windows で確かめる (dotfiles-private の docs/adr/124_*)。Linux と macOS は nix の
+# checks (pjp-tools-test が build の中で cargo test を流し、pjp-tools-lint が fmt と clippy を見る。nix.yml)。
+#
+# - Windows: MSVC (windows-latest の既定の host。bootstrap が入れるのと同じ) で、Windows のパス・プロセス (Job Object)・junction と、
+#   hc・herdr-app の Windows の形の口を確かめる。toolchain は workspace の rust-toolchain.toml (runner の手順 pjp-tools が手元で作るときと同じ)
+# - pjp-hc-hub の試験は skill の図の雛形 (nix/files/claude/skills/pjp-hc-hub/assets/panel) も読むので、それを変えた PR でも流す
+on:
+  push:
+    branches: [main]
+    paths:
+      - "nix/pkgs/pjp-tools/**"
+      - "nix/files/claude/skills/pjp-hc-hub/assets/panel/**"
+      - ".github/workflows/pjp-tools.yml"
+  pull_request:
+    paths:
+      - "nix/pkgs/pjp-tools/**"
+      - "nix/files/claude/skills/pjp-hc-hub/assets/panel/**"
+      - ".github/workflows/pjp-tools.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: windows (msvc)
+    runs-on: windows-latest
+    # 固まったジョブが分を食いつぶさないようにする (既定は 360 分)
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: nix/pkgs/pjp-tools
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # 版と components (rustfmt・clippy) は rust-toolchain.toml から rustup が入れる
+      - name: toolchain (rust-toolchain.toml)
+        run: rustup toolchain install
+
+      - name: clippy
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+
+      # 1 つの test の束が落ちても、残りの束も流す (Windows の落ち方は手元で流せないので、1 回の run で全部を見る)
+      - name: test
+        run: cargo test --locked --workspace --no-fail-fast

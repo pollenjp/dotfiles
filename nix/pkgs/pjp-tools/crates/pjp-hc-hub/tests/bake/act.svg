@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="460" height="300" viewBox="0 0 460 300"
+     font-family="'Yu Gothic UI', 'Meiryo UI', Meiryo, 'Segoe UI', sans-serif">
+  <title>雛形 act: 手順の 1 枚。ユーザーがする所 (① ②)、依頼の通り道 (登場物 A → 主役 → 登場物 C)、見ること</title>
+  <!-- panel の図の雛形 (pjp-hc-hub の references/panel-figures.md)。字を替え、要らない箱を消して使う。
+       marks は assets/panel/sections.json の節 act。箱や線を動かしたら、marks の座標も同じに替える -->
+  <rect width="460" height="300" fill="#1e2228"/>
+
+  <!-- ユーザーがする所 (黄)。marks の pulse を同じ x・y・w・h で重ねる -->
+  <rect x="140" y="14" width="180" height="70" rx="8" fill="#3a3222" stroke="#e5c07b" stroke-width="1.5"/>
+  <text x="230" y="36" text-anchor="middle" font-size="12" fill="#e5c07b">どこで (窓・画面の名前)</text>
+  <text x="230" y="64" text-anchor="middle" font-size="15" font-weight="700" fill="#f2e6d2">① 押すもの</text>
+
+  <rect x="330" y="14" width="124" height="70" rx="8" fill="#3a3222" stroke="#e5c07b" stroke-width="1.5"/>
+  <text x="392" y="36" text-anchor="middle" font-size="12" fill="#e5c07b">どこで</text>
+  <text x="392" y="60" text-anchor="middle" font-size="15" font-weight="700" fill="#f2e6d2">② すること</text>
+  <text x="392" y="77" text-anchor="middle" font-size="11" fill="#9aa2ae">補足</text>
+
+  <!-- 操作がかかわる登場物へ点線 -->
+  <line x1="230" y1="84" x2="230" y2="118" stroke="#e5c07b" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <line x1="392" y1="84" x2="392" y2="118" stroke="#e5c07b" stroke-width="1.5" stroke-dasharray="4 3"/>
+
+  <!-- 登場物 (名前・役目・今の状態の 3 行) -->
+  <rect x="8" y="118" width="120" height="68" rx="8" fill="#2c323c" stroke="#5c6370"/>
+  <text x="68" y="140" text-anchor="middle" font-size="13" font-weight="700" fill="#d7dae0">登場物 A</text>
+  <text x="68" y="158" text-anchor="middle" font-size="12" fill="#d7dae0">役目</text>
+  <text x="68" y="176" text-anchor="middle" font-size="11" fill="#9aa2ae">今の状態</text>
+
+  <!-- 主役 = いま見る所 (青) -->
+  <rect x="170" y="118" width="120" height="68" rx="8" fill="#263445" stroke="#61afef" stroke-width="2"/>
+  <text x="230" y="140" text-anchor="middle" font-size="14" font-weight="700" fill="#61afef">主役</text>
+  <text x="230" y="158" text-anchor="middle" font-size="12" fill="#d7dae0">役目</text>
+  <text x="230" y="176" text-anchor="middle" font-size="11" fill="#9aa2ae">今の状態</text>
+
+  <!-- 3 行目の色で状態を見せる (黄 = 気をつける) -->
+  <rect x="332" y="118" width="120" height="68" rx="8" fill="#2c323c" stroke="#5c6370"/>
+  <text x="392" y="140" text-anchor="middle" font-size="13" font-weight="700" fill="#d7dae0">登場物 C</text>
+  <text x="392" y="158" text-anchor="middle" font-size="12" fill="#d7dae0">役目</text>
+  <text x="392" y="176" text-anchor="middle" font-size="11" fill="#e5c07b">今の状態</text>
+
+  <!-- 依頼の通り道。marks の flow を同じ線の上に置く (箱の間は 42 px) -->
+  <line x1="128" y1="152" x2="170" y2="152" stroke="#5c6370" stroke-width="2"/>
+  <line x1="290" y1="152" x2="332" y2="152" stroke="#5c6370" stroke-width="2"/>
+  <text x="149" y="143" text-anchor="middle" font-size="10" fill="#9aa2ae">依頼</text>
+  <text x="311" y="143" text-anchor="middle" font-size="10" fill="#9aa2ae">依頼</text>
+
+  <!-- 見ること (ユーザーが見て確かめる所と、済んだら次に起きること) -->
+  <rect x="8" y="208" width="444" height="80" rx="8" fill="#23272e" stroke="#3e4451"/>
+  <text x="22" y="230" font-size="13" font-weight="700" fill="#d7dae0">見ること</text>
+  <text x="22" y="252" font-size="12" fill="#9aa2ae">・ユーザーが見て確かめる所 (画面に出る名前など)</text>
+  <text x="22" y="274" font-size="12" fill="#9aa2ae">・済んだら次に起きること (私が R2 を打つ など)</text>
+  <g id="pjp-marks">
+    <!-- pjp hub bake: panel.json の節の marks を CSS の動きに焼いた写し (チケットに上げる。panel には載せない) -->
+    <style>
+      @keyframes pjp-mk-0 { 0% { stroke-dashoffset: 60.542px } 100% { stroke-dashoffset: 19.771px } }
+      .pjp-mk-0 { animation: pjp-mk-0 1.274s linear infinite }
+      @keyframes pjp-mk-1 { 0% { stroke-dashoffset: 60.542px } 100% { stroke-dashoffset: 19.771px } }
+      .pjp-mk-1 { animation: pjp-mk-1 1.274s linear infinite }
+      @keyframes pjp-mk-2 { 0%, 100% { opacity: 0.15 } 50% { opacity: 1 } }
+      .pjp-mk-2 { animation: pjp-mk-2 1.6s ease-in-out infinite }
+      @keyframes pjp-mk-3 { 0%, 100% { opacity: 0.15 } 50% { opacity: 1 } }
+      .pjp-mk-3 { animation: pjp-mk-3 1.6s ease-in-out infinite }
+      @media (prefers-reduced-motion: reduce) { .pjp-mk { animation: none !important } }
+    </style>
+    <defs>
+      <clipPath id="pjp-mk-0-clip"><rect x="128" y="147" width="42" height="10"/></clipPath>
+      <clipPath id="pjp-mk-1-clip"><rect x="290" y="147" width="42" height="10"/></clipPath>
+    </defs>
+    <line class="pjp-mk pjp-mk-0" x1="128" y1="152" x2="170" y2="152" style="fill: none; stroke: #61afef; stroke-width: 8px; stroke-linecap: round; stroke-dasharray: 0 40.771px; stroke-dashoffset: 19.771px; clip-path: url(#pjp-mk-0-clip); opacity: 1"/>
+    <line class="pjp-mk pjp-mk-1" x1="290" y1="152" x2="332" y2="152" style="fill: none; stroke: #61afef; stroke-width: 8px; stroke-linecap: round; stroke-dasharray: 0 40.771px; stroke-dashoffset: 19.771px; clip-path: url(#pjp-mk-1-clip); opacity: 1"/>
+    <rect class="pjp-mk pjp-mk-2" x="141" y="15" width="178" height="68" rx="7" style="fill: none; stroke: #e5c07b; stroke-width: 2px; opacity: 1"/>
+    <rect class="pjp-mk pjp-mk-3" x="331" y="15" width="122" height="68" rx="7" style="fill: none; stroke: #e5c07b; stroke-width: 2px; opacity: 1"/>
+  </g>
+</svg>

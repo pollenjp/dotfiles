@@ -1,0 +1,32 @@
+[package]
+name = "pjp-hc-hub"
+version = "0.1.0"
+description = "pjp hub (init・check・guard・hello): herdr-app と hc のハブ (pjp-hc-hub) を作る・守る・会話の始めに点検する"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+# bin は下に並べたものだけ (pjp hub hello は、この表に pjp-hubd があるかで見回り役を立てるかを決める)
+autobins = false
+
+[lib]
+name = "pjp_hc_hub"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pjp-hub"
+path = "src/main.rs"
+
+# 見回り役 pjp hubd (bin pjp-hubd) は spec の W2-3 でここに足す。足すと、pjp hub hello がハブの会話の始めに立てるようになる
+
+[dependencies]
+pjp-core.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+
+# pjp hub hello の手元の WSL の見分けと足し方の文を、pjp child new --on wsl のもの (pjp-hc-child) と突き合わせるテストだけに
+# 使う。pjp hub の exe は hook の guard と同じなので、pjp-hc-child を直すたびに作り直さないよう、本体の依存にはしない
+[dev-dependencies]
+pjp-hc-child.workspace = true
+
+[lints]
+workspace = true
