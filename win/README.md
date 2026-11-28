@@ -2892,6 +2892,9 @@ portable の置き場所は ID ごとに分かれる (`%LOCALAPPDATA%\Microsoft\
 - どちらのパッケージも置き場所をユーザーの PATH に足すので、両方ある間は PATH で先の方の herdr が引かれる。
   後から入れた `Herdr.Herdr` は後ろに足されるので、Preview の herdr が引かれる (`-Check` の「PATH の herdr」が ⚠ になり、
   「Preview を外せば直る」と ※ の行に出る。2026-11-09 にこの PC で確かめた)
+- 開発者モードが on のときに Preview を入れた PC では、`WinGet\Links\herdr.exe` が Preview を指す symlink のことがある。`-Check` は symlink の
+  指す先を読み、「PATH の herdr」に `<Links のパス> → <Preview の herdr.exe> (Herdr.Herdr.Preview のもの)` と出して、同じく「Preview を外せば直る」と
+  添える (winget の portable のもの (`WinGet\Links` の symlink) とは読まない)
 - `Herdr.Herdr` を並べて入れると、winget は Preview を `Herdr.Herdr` として数える (`winget list` の Preview の行の Id が
   `Herdr.Herdr` になり、`winget list --id Herdr.Herdr.Preview --exact` では見つからない。winget v1.29.380)。
   そこで Preview は、winget が Preview の「アプリ」の項目 (ARP) に書いた product code で外す

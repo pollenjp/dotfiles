@@ -8,7 +8,7 @@ PowerShell では dotfiles.ps1 の Install-Herdr から呼ぶ (win/README.md の
 
 中身は winget の portable の道具の共通の枠 (win/winget/WingetPortable.ps1。win/README.md の「winget の portable の道具」) で、ここは herdr の表と、
 前の Herdr.Herdr.Preview を見る custom の関数を持つ。PATH で引かれる herdr は、置き場所 (開発者モードが off) と WinGet\Links の symlink
-(開発者モードが on) のどちらも winget のものとして読む。
+(開発者モードが on) のどちらも winget のものとして読む。WinGet\Links の symlink が Herdr.Herdr.Preview を指せば、Preview のものと読む。
 
 herdr は portable (zip) のパッケージで、管理者無しで %LOCALAPPDATA%\Microsoft\WinGet\Packages の
 下に入る。herdr server が動いている間は herdr.exe を置き換えられないので、入れ替えが要るときに
@@ -103,14 +103,14 @@ function Get-HerdrPreviewDir {
     "$($dir.Substring(0, $dir.LastIndexOf('\')))\$previewProductCode"
 }
 
-# ③ PATH で引かれる herdr が Herdr.Herdr.Preview の置き場所のものなら preview (表の PathTexts の字で出す)
+# ③ PATH で引かれる herdr が Herdr.Herdr.Preview の置き場所のもの (置き場所を PATH に足した形か、WinGet\Links の symlink が Preview を指す形)
+# なら preview (表の PathTexts の字で出す)
 function Get-HerdrPathKind {
-    param($Tool, [string]$Resolved)
-    if (-not $Resolved) { return $null }
-    $cut = $Resolved.LastIndexOf('\')
-    if ($cut -lt 0) { return $null }
-    # -eq は大文字小文字を区別しない (Windows のパスと同じ)
-    if ($Resolved.Substring(0, $cut) -eq (Get-HerdrPreviewDir -Tool $Tool)) { return 'preview' }
+    param($Tool, [string]$Resolved, [string]$LinkTarget)
+    $previewDir = Get-HerdrPreviewDir -Tool $Tool
+    foreach ($path in @($Resolved, $LinkTarget)) {
+        if (Test-PortableUnder -Path $path -Root $previewDir) { return 'preview' }
+    }
     $null
 }
 
@@ -160,7 +160,7 @@ function Format-HerdrPreviewRow {
 function Format-HerdrPreviewNotes {
     param($Tool, $State)
     if (($State.PathKind -eq 'preview') -and ($State.Plan -ne 'install')) {
-        @{ Text = "※ PATH で先に引かれる herdr は $previewId のもの。Preview を外せば直る (外すと置き場所が消え、ユーザーの PATH に残る行は飛ばされる)"; Warn = $false }
+        @{ Text = "※ PATH で先に引かれる herdr は $previewId のもの。Preview を外せば直る (外すと置き場所と、WinGet\Links の Preview の symlink (あれば) が消え、ユーザーの PATH に残る行は飛ばされる)"; Warn = $false }
     }
 }
 

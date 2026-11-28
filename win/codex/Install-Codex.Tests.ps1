@@ -199,8 +199,8 @@ function New-State {
     param([hashtable]$Change = @{})
     $s = [ordered]@{
         Exists = $true; Installed = $V; Exe = $Exe; Plan = 'none'; Direction = 'same'; Pinned = $true
-        Versions = $versions; Latest = $versions[0]; PathResolved = $Link; PathKind = 'links'; BusyCount = 0; MsiExe = $null
-        WingetVersion = $w130; Elevated = $false; Route = 'direct'
+        Versions = $versions; Latest = $versions[0]; PathResolved = $Link; PathLinkTarget = $null; PathKind = 'links'; BusyCount = 0
+        MsiExe = $null; WingetVersion = $w130; Elevated = $false; Route = 'direct'
         ExeName = $ExeName; LinkState = 'ok'; LinkTarget = $Exe; HardlinkState = 'ok'; AliasState = 'symlink'; RgState = 'na'; MangledPath = 0
         DeveloperMode = $false
     }

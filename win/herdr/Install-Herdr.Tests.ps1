@@ -10,10 +10,12 @@
 #   - 表: パッケージ ID は Herdr.Herdr (版の知らせが読む $packageId の行)、herdr.exe は置き場所の直下。portable を名指しする
 #   - herdr.exe --version の出力 (herdr <版>) から版を拾う (版は文字列のまま比べる)
 #   - PATH で引かれる herdr: 置き場所 (開発者モードが off) と WinGet\Links の symlink (開発者モードが on) のどちらも winget のものとして読む。
-#     Herdr.Herdr.Preview の置き場所のものは preview、herdr update で入ったものは other (揃える手順では直らないので ※ の手順で直す)
+#     Herdr.Herdr.Preview の置き場所のもの (WinGet\Links の symlink が Preview を指すものも) は preview、herdr update で入ったものは other
+#     (揃える手順では直らないので ※ の手順で直す)
 #   - Herdr.Herdr.Preview が残っていれば、終了コードは 1 (Herdr.Herdr が入っていなければ 3 で、並べて入れる)・表に ⚠ の行・締めの行に外す手順。
 #     入れ替えるときは先に Preview を外させる (winget が Preview を Herdr.Herdr として数えるため)。Preview は外さない
 #   - 状態の表の見出しと行・締めの行 (WSL の bootstrap-windows-herdr.sh と runner が読む字)・昇格した PowerShell の締めの行
+#   - 本物の Get-PortableState に herdr の表を渡し (葉だけ偽物)、WinGet\Links の symlink の指す先で links と preview を読み分ける
 #   - 流れ: 入っていなければ入れて pin を足す。動いている herdr があれば・Preview が残っていて入れ替えが要れば、何も変えずに止まる
 #
 # BOM 付きの UTF-8 で保存すること (win/README.md の「dotfiles.ps1 を書くときの注意」)。
@@ -112,21 +114,28 @@ Test-Case '取得だけを確かめる winget download の引数 (portable を�
 
 # PATH で引かれる herdr.exe がどこのものか
 Test-Case '%VAR% を展開してから見る' 'C:\B\herdr.exe' { $env:TKT112_HERDR_TEST = 'C:\B'; Resolve-PortableOnPath -PathValue '%TKT112_HERDR_TEST%' -Names @('herdr.exe') -Exists { param($p) $p -eq 'C:\B\herdr.exe' } }
-function Get-PathKind { param([string]$Resolved) Get-PortablePathKind -Resolved $Resolved -ExeDir $Pkg -LinksDir $Links -Custom (Get-HerdrPathKind -Tool $T -Resolved $Resolved) }
+function Get-PathKind {
+    param([string]$Resolved, [string]$LinkTarget)
+    Get-PortablePathKind -Resolved $Resolved -ExeDir $Pkg -LinksDir $Links -Custom (Get-HerdrPathKind -Tool $T -Resolved $Resolved -LinkTarget $LinkTarget) -LinkTarget $LinkTarget -PackageDir $Pkg
+}
 Test-Case 'winget の置き場所のもの (開発者モードが off) なら package' 'package' { Get-PathKind "$Pkg\herdr.exe" }
 Test-Case '大文字小文字が違っても package' 'package' { Get-PathKind "$($Pkg.ToUpper())\herdr.exe" }
 Test-Case 'WinGet\Links の symlink (開発者モードが on) も winget のもの (links)' 'links' { Get-PathKind "$Links\herdr.exe" }
 Test-Case 'Herdr.Herdr.Preview の置き場所のものなら preview' 'preview' { Get-PathKind "$PreviewPkg\herdr.exe" }
 Test-Case 'herdr update で入ったものなら other' 'other' { Get-PathKind 'C:\Users\u\AppData\Local\Programs\Herdr\bin\herdr.exe' }
 Test-Case '見つからなければ none' 'none' { Get-PathKind $null }
+# WinGet\Links の symlink の指す先 (Herdr.Herdr.Preview を開発者モードが on で入れた PC は、Preview の symlink が WinGet\Links に残る)
+Test-Case 'WinGet\Links の symlink が Herdr.Herdr の置き場所を指せば links' 'links' { Get-PathKind "$Links\herdr.exe" "$Pkg\herdr.exe" }
+Test-Case 'WinGet\Links の symlink が Herdr.Herdr.Preview の置き場所を指せば preview' 'preview' { Get-PathKind "$Links\herdr.exe" "$PreviewPkg\herdr.exe" }
+Test-Case 'WinGet\Links の symlink がほかを指せば other' 'other' { Get-PathKind "$Links\herdr.exe" 'C:\Users\u\AppData\Local\Programs\Herdr\bin\herdr.exe' }
 
 # 状態の既定 (揃っている)。テストごとに一部を差し替える
 function New-State {
     param([hashtable]$Change = @{})
     $s = [ordered]@{
         Exists = $true; Installed = $V; Exe = "$Pkg\herdr.exe"; Plan = 'none'; Direction = 'same'; Pinned = $true
-        Versions = $versions; Latest = $versions[0]; PathResolved = "$Pkg\herdr.exe"; PathKind = 'package'; BusyCount = 0; MsiExe = $null
-        WingetVersion = [version]'1.30.310'; Elevated = $false; Route = 'direct'; PreviewExists = $false
+        Versions = $versions; Latest = $versions[0]; PathResolved = "$Pkg\herdr.exe"; PathLinkTarget = $null; PathKind = 'package'; BusyCount = 0
+        MsiExe = $null; WingetVersion = [version]'1.30.310'; Elevated = $false; Route = 'direct'; PreviewExists = $false
     }
     foreach ($k in $Change.Keys) { $s[$k] = $Change[$k] }
     [pscustomobject]$s
@@ -138,6 +147,8 @@ $linksForm = @{ PathKind = 'links'; PathResolved = "$Links\herdr.exe" }
 $previewLeft = @{ PreviewExists = $true }
 # Herdr.Herdr.Preview が残っていて、PATH でも Preview の herdr が先に引かれる (Herdr.Herdr を後から並べて入れたとき)
 $previewOnPath = @{ PreviewExists = $true; PathKind = 'preview'; PathResolved = "$PreviewPkg\herdr.exe" }
+# Herdr.Herdr.Preview が残っていて、WinGet\Links の Preview の symlink が先に引かれる (Preview を開発者モードが on で入れたとき)
+$previewViaLink = @{ PreviewExists = $true; PathKind = 'preview'; PathResolved = "$Links\herdr.exe"; PathLinkTarget = "$PreviewPkg\herdr.exe" }
 # Herdr.Herdr は入っておらず、Herdr.Herdr.Preview だけがある (Preview から移る前の PC)
 $previewOnly = @{ Exists = $false; Installed = $null; Exe = $null; Plan = 'install'; Direction = 'unknown'; Pinned = $false; PathKind = 'preview'; PathResolved = "$PreviewPkg\herdr.exe"; PreviewExists = $true }
 $herdrUpdate = @{ PathKind = 'other'; PathResolved = 'C:\Users\u\AppData\Local\Programs\Herdr\bin\herdr.exe' }
@@ -179,8 +190,11 @@ Test-Case 'Links の symlink の形は ⚠ にしない (開発者モードが o
 Test-Case 'Preview が残っていれば、PATH の行の後に ⚠ の行を足す' '⚠ 前の Preview    : Herdr.Herdr.Preview が残っている → 外す' { (Get-Rows (New-State $previewLeft))[6].Text }
 Test-Case 'Preview が残っているだけなら、ほかの行は ⚠ にしない' 1 { @((Get-Rows (New-State $previewLeft)) | Where-Object { $_.Warn }).Count }
 Test-Case 'PATH で Preview の herdr が先なら、その場所を ⚠ で出す' "⚠ PATH の herdr   : $PreviewPkg\herdr.exe (Herdr.Herdr.Preview のもの)" { (Get-Rows (New-State $previewOnPath))[5].Text }
-Test-Case 'PATH で Preview の herdr が先なら、Preview を外せば直ると ※ で添える' '※ PATH で先に引かれる herdr は Herdr.Herdr.Preview のもの。Preview を外せば直る (外すと置き場所が消え、ユーザーの PATH に残る行は飛ばされる)' { (Get-Rows (New-State $previewOnPath))[-1].Text }
+Test-Case 'PATH で Preview の herdr が先なら、Preview を外せば直ると ※ で添える' '※ PATH で先に引かれる herdr は Herdr.Herdr.Preview のもの。Preview を外せば直る (外すと置き場所と、WinGet\Links の Preview の symlink (あれば) が消え、ユーザーの PATH に残る行は飛ばされる)' { (Get-Rows (New-State $previewOnPath))[-1].Text }
 Test-Case 'PATH で Preview の herdr が先でも、「PATH から外す」とは言わない' 0 { @((Get-Rows (New-State $previewOnPath)) | Where-Object { $_.Text -like '*PATH から外す*' }).Count }
+Test-Case 'WinGet\Links の symlink が Preview を指せば、指す先も ⚠ で出し、Preview を外せば直ると ※ で添える (WinGet\Links を PATH から外させない)' "⚠ PATH の herdr   : $Links\herdr.exe → $PreviewPkg\herdr.exe (Herdr.Herdr.Preview のもの)|True|0" {
+    $r = Get-Rows (New-State $previewViaLink); "$($r[5].Text)|$($r[-1].Text -like '※ PATH で先に引かれる herdr は Herdr.Herdr.Preview のもの*')|$(@($r | Where-Object { $_.Text -like '*PATH から外す*' }).Count)"
+}
 # Herdr.Herdr が入っていない間は、Preview を外せと読める行を出さない (入れる前に外すと herdr が無くなる)
 Test-Case 'Herdr.Herdr が入っていなくて Preview だけがあるときは、Preview の行を「入れてから外す」にする' '⚠ 前の Preview    : Herdr.Herdr.Preview が残っている → Herdr.Herdr を入れてから外す' { (Get-Rows (New-State $previewOnly))[6].Text }
 Test-Case 'Herdr.Herdr が入っていなければ、PATH で Preview の herdr が引かれても ⚠ にしない' "  PATH の herdr   : $PreviewPkg\herdr.exe (Herdr.Herdr.Preview のもの)" { (Get-Rows (New-State $previewOnly))[5].Text }
@@ -220,6 +234,41 @@ Test-Case 'Preview の置き場所に herdr.exe が無ければ、残ってい�
 New-Item -ItemType File -Force -Path "$previewRoot\$PreviewProductCode\herdr.exe" | Out-Null
 Test-Case 'Preview の置き場所に herdr.exe があれば、残っている' 'True' { (Read-HerdrState -Tool $previewTool -State (New-State)).PreviewExists }
 Remove-Item -LiteralPath $previewRoot -Recurse -Force
+
+# 本物の Get-PortableState に herdr の表を渡し、葉 (ファイルの有無・Join-Path・exe の版・winget・PATH・symlink・昇格・動いている exe) だけを
+# 偽物にして、herdr の custom の口 (PathKind・ReadState) が状態に入るかを見る。偽物は Get-WiredHerdrState の中で定義し、外に漏らさない
+function Get-WiredHerdrState {
+    param([hashtable]$World = @{})
+    $wired = @{ Files = @("$Pkg\herdr.exe"); PathValue = "C:\Windows;$Pkg"; Links = @{} }
+    foreach ($k in $World.Keys) { $wired[$k] = $World[$k] }
+    function Test-Path { param([string]$LiteralPath, [string]$PathType) $wired.Files -contains $LiteralPath }
+    function Join-Path { param([Parameter(Position = 0)][string]$Path, [Parameter(Position = 1)][string]$ChildPath) "$($Path.TrimEnd('\'))\$ChildPath" }
+    function Get-PortableInstalledVersion { param($Exe, $Pattern) $V }
+    function Invoke-Winget {
+        param([string[]]$Arguments)
+        $lines = switch ($Arguments[0]) {
+            '--version' { @('v1.30.310') }
+            'pin' { @("herdr $Id $V winget Pinning") }
+            'show' { @('Version', '-------', $V, $Older) }
+            default { @() }
+        }
+        [pscustomobject]@{ ExitCode = 0; Lines = @($lines) }
+    }
+    function Get-PortablePathValue { $wired.PathValue }
+    function Get-PortableLinkTarget { param($Path) $wired.Links[$Path] }
+    function Test-WingetElevated { $false }
+    function Get-PortableBusyProcess { param($Tool) @() }
+    Get-PortableState -Tool $T -Target $V
+}
+$wiredLinks = @("$Pkg\herdr.exe", "$Links\herdr.exe")
+Test-Case '本物の Get-PortableState: 開発者モードが on の PC (WinGet\Links の symlink が Herdr.Herdr を指す) は links で揃い' 'links False 0' {
+    $s = Get-WiredHerdrState @{ Files = $wiredLinks; PathValue = "$Links;C:\Windows"; Links = @{ "$Links\herdr.exe" = "$Pkg\herdr.exe" } }
+    "$($s.PathKind) $($s.PreviewExists) $(Get-PortableExitCode -Tool $T -State $s)"
+}
+Test-Case '本物の Get-PortableState: WinGet\Links の symlink が Preview を指せば preview と読み、Preview が残っているので 1' "preview True 1|⚠ PATH の herdr   : $Links\herdr.exe → $PreviewPkg\herdr.exe (Herdr.Herdr.Preview のもの)" {
+    $s = Get-WiredHerdrState @{ Files = $wiredLinks + @("$PreviewPkg\herdr.exe"); PathValue = "$Links;$Pkg"; Links = @{ "$Links\herdr.exe" = "$PreviewPkg\herdr.exe" } }
+    "$($s.PathKind) $($s.PreviewExists) $(Get-PortableExitCode -Tool $T -State $s)|$((Get-Rows $s)[5].Text)"
+}
 
 # ---------------------------------------------------------------------------
 # 入口から流れまで (Start-WingetPortable に herdr の表を渡す)。Windows に触る関数を偽物に差し替えて、打つ winget の順と、

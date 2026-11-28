@@ -118,8 +118,8 @@ function New-State {
     param([hashtable]$Change = @{})
     $s = [ordered]@{
         Exists = $true; Installed = $V; Exe = "$Pkg\claude.exe"; Plan = 'none'; Direction = 'same'; Pinned = $true
-        Versions = $versions; Latest = $versions[0]; PathResolved = "$Pkg\claude.exe"; PathKind = 'package'; BusyCount = 0; MsiExe = $null
-        WingetVersion = [version]'1.30.310'; Elevated = $false; Route = 'direct'; AutoUpdate = $null
+        Versions = $versions; Latest = $versions[0]; PathResolved = "$Pkg\claude.exe"; PathLinkTarget = $null; PathKind = 'package'; BusyCount = 0
+        MsiExe = $null; WingetVersion = [version]'1.30.310'; Elevated = $false; Route = 'direct'; AutoUpdate = $null
     }
     foreach ($k in $Change.Keys) { $s[$k] = $Change[$k] }
     [pscustomobject]$s
