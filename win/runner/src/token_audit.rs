@@ -435,11 +435,16 @@ pub fn audit(home: &Path, io: &mut AuditIo) -> i32 {
             }
         } else {
             let reg_mode = if DEFAULT_ACCOUNTS.contains(&name.as_str()) {
-                Some(Mode::Subscription)
+                None
             } else {
                 registry.accounts.get(name).copied()
             };
             match reg_mode {
+                // 既定のアカウント (personal・work) は remove も add も断るので、打っても通らない手を出さない (Linux の cmd_audit と同じ文)
+                None if DEFAULT_ACCOUNTS.contains(&name.as_str()) => fix.push(
+                    "既定のアカウント (subscription。dotfiles が作る) で、token を置かない (宣言から外すか、別の名前で claude-account add <名前> --mode token を打って宣言し直す)"
+                        .to_string(),
+                ),
                 None => {
                     missing_setup = format!(
                         "登録が無い (claude-account add {name} --mode token を打ってから claude-account set-token {name})"

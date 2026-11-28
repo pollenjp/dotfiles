@@ -13,9 +13,9 @@
 //!   比べず単体の試験で見る)
 //! - claude-tokens.json の中身 (ホストの値の [claude.tokens]) が、同じ宣言の Linux の nix/lib/claude-tokens.nix の stateText と同じバイト列
 //!   (宣言なし・label を省く (アカウントの名前)・. _ - のある呼び名・item の null・セクションのある参照)。宣言を止めるか通すかが、同じ宣言の
-//!   claude-tokens.nix の assertions と同じ (名前の形・32 字・sk-ant-・account・selector・label の形・64 字・item の形)。違うのは素の claude の
-//!   default だけ (Nix は通し、Windows は止める。Windows の素の claude は token を読まない)。表でない値・label が文字列でない・知らないキーは
-//!   Nix の型が見るので、ここでは比べず単体の試験で見る
+//!   claude-tokens.nix の assertions と同じ (名前の形・32 字・sk-ant-・account・selector・label の形・64 字・item の形と、tokens や名前ごとの値が
+//!   表でない・知らないキー・label が文字列でない。Nix の option の型は anything で、形は assertions だけが見る)。違うのは素の claude の
+//!   default だけ (Nix は通し、Windows は止める。Windows の素の claude は token を読まない)
 //!
 //! - 既定のアカウントの名前 (steps::claude_accounts::DEFAULT_ACCOUNTS) が、Linux の claude.nix が sandbox のホストに書く claude-accounts.json と
 //!   同じ並び (claude-account の既定の personal・work)
@@ -413,8 +413,8 @@ fn claude_tokens_nix(expr: &str) -> serde_json::Value {
 /// claude の token の宣言 1 つ (名前・label・item)
 type ClaudeTokenDecl<'a> = (&'a str, Option<&'a str>, Option<&'a str>);
 
-/// claude の token の宣言を、ホストの値の TOML と Nix の attrset にする (Nix の側の label は、省いたらアカウントの名前。
-/// home/options.nix の default = name と同じ)
+/// claude の token の宣言を、ホストの値の TOML と Nix の attrset にする (どちらも、省いた label・item は書かない。Nix の側は stateText が
+/// label をアカウントの名前、item を null で補う)
 fn claude_token_decls(decls: &[ClaudeTokenDecl]) -> (String, String) {
     let mut toml_text = String::new();
     let mut nix = String::from("{ ");
@@ -426,12 +426,14 @@ fn claude_token_decls(decls: &[ClaudeTokenDecl]) -> (String, String) {
         if let Some(i) = item {
             toml_text.push_str(&format!("item = {}\n", toml_str(i)));
         }
-        nix.push_str(&format!(
-            "{} = {{ label = {}; item = {}; }}; ",
-            nix_str(name),
-            nix_str(label.unwrap_or(name)),
-            item.map_or("null".to_string(), nix_str)
-        ));
+        let mut body = String::new();
+        if let Some(l) = label {
+            body.push_str(&format!("label = {}; ", nix_str(l)));
+        }
+        if let Some(i) = item {
+            body.push_str(&format!("item = {}; ", nix_str(i)));
+        }
+        nix.push_str(&format!("{} = {{ {body}}}; ", nix_str(name)));
     }
     nix.push('}');
     (toml_text, nix)
@@ -536,6 +538,49 @@ fn claude_tokens_rejects_like_nix() {
     assert!(bare_in_nix);
     let (toml_text, _) = claude_token_decls(&n("default"));
     assert!(parse(&toml_text, Path::new("h.toml"), Groups::embedded().unwrap()).is_err());
+}
+
+/// 形を誤った宣言 (tokens・名前ごとの値が表でない・知らないキー・label が文字列でない) を止めるか通すかも、Linux の claude-tokens.nix の
+/// assertions と同じ (Nix の option の型は anything で、型では止めない)
+#[test]
+fn claude_tokens_shapes_reject_like_nix() {
+    if !nix_available() {
+        return;
+    }
+    let cases = [
+        ("[claude]\ntokens = 1\n", "1"),
+        ("[claude]\ntokens = \"x\"\n", "\"x\""),
+        ("[claude.tokens]\nalt = \"x\"\n", "{ alt = \"x\"; }"),
+        (
+            "[claude.tokens.alt]\ntoken = \"x\"\n",
+            "{ alt = { token = \"x\"; }; }",
+        ),
+        (
+            "[claude.tokens.alt]\nlabel = 1\n",
+            "{ alt = { label = 1; }; }",
+        ),
+        (
+            "[claude.tokens.alt]\nitem = 1\n",
+            "{ alt = { item = 1; }; }",
+        ),
+        ("[claude.tokens.alt]\n", "{ alt = { }; }"),
+        ("", "{ }"),
+    ];
+    let mut ours = Vec::new();
+    let mut nix_list = String::from("map (t: builtins.all (a: a.assertion) (ct.assertions t)) [ ");
+    for (toml_text, nix) in cases {
+        ours.push(parse(toml_text, Path::new("h.toml"), Groups::embedded().unwrap()).is_ok());
+        nix_list.push_str(&format!("({nix}) "));
+    }
+    nix_list.push(']');
+    let linux: Vec<bool> = serde_json::from_value(claude_tokens_nix(&nix_list)).unwrap();
+    for (i, (toml_text, _)) in cases.iter().enumerate() {
+        assert_eq!(ours[i], linux[i], "{toml_text}");
+    }
+    assert_eq!(
+        linux,
+        vec![false, false, false, false, false, false, true, true]
+    );
 }
 
 #[test]

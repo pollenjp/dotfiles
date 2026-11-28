@@ -302,7 +302,7 @@ fn parse_claude(v: &toml::Value) -> Result<(NotionValues, BTreeMap<String, Claud
     if !unknown.is_empty() {
         return Err(format!(
             "[claude] に知らないキーがあります: {} (書けるのは [claude.notion]・[claude.tokens])",
-            unknown.join(", ")
+            shown_keys(&unknown)
         ));
     }
     let tokens = match claude.get("tokens") {
@@ -1071,12 +1071,62 @@ pub fn load(path: &Path, groups: Groups) -> Result<HostValues, String> {
     }
 }
 
+/// 知らないキーを文に出す形。名前らしいキー (英字で始まり、英数字・`-`・`_` だけで 32 字まで。`sk-` で始まらない) はそのまま並べ、ほかの
+/// キー (token の値を貼ってしまったものかもしれない) は字を出さずに数だけを足す (dotfiles-private の docs/adr/123_claude_token_watch_*)
+fn shown_keys(keys: &[&str]) -> String {
+    let plain = |k: &str| {
+        let mut cs = k.chars();
+        cs.next().is_some_and(|c| c.is_ascii_alphabetic())
+            && cs.all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+            && k.len() <= 32
+            && !k.starts_with("sk-")
+    };
+    let mut shown: Vec<String> = keys
+        .iter()
+        .filter(|k| plain(k))
+        .map(|k| k.to_string())
+        .collect();
+    let hidden = keys.iter().filter(|k| !plain(k)).count();
+    if hidden > 0 {
+        shown.push(format!("ほか {hidden} 個 (書いた字は出しません)"));
+    }
+    shown.join(", ")
+}
+
+/// TOML の構文の誤りの文。行と桁と誤りのわけだけを出し、toml の文が添える行の写しは出さない (宣言に token の値を引用符なしで貼ったときに、
+/// その行を端末やログへ出さない。dotfiles-private の docs/adr/123_claude_token_watch_*)。わけに、その行の字 (10 字以上のつながり) の写しが
+/// 入っていれば、わけも出さない
+fn toml_error(text: &str, e: &toml::de::Error) -> String {
+    let at = e
+        .span()
+        .and_then(|span| text.get(..span.start))
+        .map(|before| {
+            let line = before.matches('\n').count() + 1;
+            let col = before.rsplit('\n').next().map_or(0, |l| l.chars().count()) + 1;
+            (line, col)
+        });
+    let line_text = at
+        .and_then(|(line, _)| text.split('\n').nth(line - 1))
+        .unwrap_or("");
+    let message = e.message().trim();
+    let copies_line = line_text
+        .split(|c: char| c.is_whitespace() || c == '=' || c == '"' || c == '\'')
+        .any(|w| w.chars().count() >= 10 && message.contains(w));
+    let why = if message.is_empty() || copies_line {
+        "書いた字は出しません".to_string()
+    } else {
+        format!("{}。書いた字は出しません", message.replace('\n', " "))
+    };
+    match at {
+        Some((line, col)) => format!("TOML として読めません ({line} 行目 {col} 桁: {why})"),
+        None => format!("TOML として読めません ({why})"),
+    }
+}
+
 /// ホストの値の文を読む (`load` の中身)。
 pub fn parse(text: &str, path: &Path, groups: Groups) -> Result<HostValues, String> {
     let fail = |msg: String| format!("{}: {msg}", path.display());
-    let t: toml::Table = text
-        .parse()
-        .map_err(|e| fail(format!("TOML として読めません: {e}")))?;
+    let t: toml::Table = text.parse().map_err(|e| fail(toml_error(text, &e)))?;
     let unknown: Vec<&str> = t
         .keys()
         .map(String::as_str)
@@ -1090,7 +1140,7 @@ pub fn parse(text: &str, path: &Path, groups: Groups) -> Result<HostValues, Stri
     if !unknown.is_empty() {
         return Err(fail(format!(
             "知らないキーがあります: {} (書けるのは group・[tools]・[runner]・[opReason]・[sshd]・[t3Code]・[claude.notion]・[claude.tokens])",
-            unknown.join(", ")
+            shown_keys(&unknown)
         )));
     }
     let group = match t.get("group") {
@@ -1735,6 +1785,46 @@ mod tests {
         let e = host(&with_item(&format!("\"{SECRET}\""))).unwrap_err();
         assert!(e.contains("書いた字は出しません"), "{e}");
         assert!(e.contains("token を作り直してください"), "{e}");
+    }
+
+    /// TOML の構文の誤りは行と桁とわけだけを出し、行の写しを出さない。名前らしくない知らないキーは字を出さずに数だけを足す (token の値を
+    /// 引用符なしで貼った・キーの所に貼ったときに、端末やログへ出さない)
+    #[test]
+    fn toml_errors_and_unknown_keys_do_not_copy_the_text() {
+        const SECRET: &str = "sk-ant-oat01-secret-value-do-not-print";
+        let cases: Vec<(String, &str)> = vec![
+            (
+                format!("[claude.tokens.alt]\nitem = {SECRET}\n"),
+                "TOML として読めません (2 行目",
+            ),
+            (format!("{SECRET}\n"), "TOML として読めません (1 行目"),
+            (
+                format!("group = \"minimum\"\n{SECRET}\n"),
+                "TOML として読めません (2 行目",
+            ),
+            (
+                format!("[claude]\n\"{SECRET}\" = 1\n"),
+                "[claude] に知らないキーがあります: ほか 1 個 (書いた字は出しません)",
+            ),
+            (
+                format!("[claude]\n{SECRET} = 1\nnotio = 2\n"),
+                "[claude] に知らないキーがあります: notio, ほか 1 個 (書いた字は出しません)",
+            ),
+            (
+                format!("{SECRET} = 1\n"),
+                "知らないキーがあります: ほか 1 個 (書いた字は出しません)",
+            ),
+        ];
+        for (text, want) in cases {
+            let e = host(&text).unwrap_err();
+            assert!(e.starts_with("h.toml: "), "{e}");
+            assert!(e.contains(want), "{text}: {e}");
+            assert!(!e.contains(SECRET), "{text}: {e}");
+            assert!(!e.contains("secret-value"), "{text}: {e}");
+        }
+        // 名前らしいキーは今までどおり並べる
+        let e = host("[claude]\nx = 1").unwrap_err();
+        assert!(e.contains("[claude] に知らないキーがあります: x ("), "{e}");
     }
 
     /// [claude.tokens.<名前>] から ~/.local/state/dotfiles/claude-tokens.json の中身 (Linux の nix/lib/claude-tokens.nix の stateText と同じ

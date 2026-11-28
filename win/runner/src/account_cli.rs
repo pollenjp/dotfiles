@@ -1631,6 +1631,20 @@ mod tests {
             out.ends_with("判定: ok 2・回す 0・入れる 0・直す 0・宣言漏れ 0\n"),
             "{out}"
         );
+        // 既定のアカウント (personal) を宣言したら直す。打っても通らない remove・add を出さない (Linux と同じ文)
+        let w = audit_world(Some("2026-11-18T21:00:00+09:00"));
+        w.t.write(
+            "home/.local/state/dotfiles/claude-tokens.json",
+            "{\"accounts\":{\"personal\":{\"item\":null,\"label\":\"personal\"}}}\n",
+        );
+        w.t.write(
+            "home/.config/claude-accounts/personal.env",
+            &format!("CLAUDE_CODE_OAUTH_TOKEN={}\n", blob()),
+        );
+        let (code, out, _) = audit_at(&w, now);
+        assert_eq!(code, 1, "{out}");
+        assert!(out.contains("- personal: 直す — 既定のアカウント (subscription。dotfiles が作る) で、token を置かない (宣言から外すか、別の名前で claude-account add <名前> --mode token を打って宣言し直す)\n"), "{out}");
+        assert!(!out.contains("claude-account remove personal"), "{out}");
     }
 
     #[test]
