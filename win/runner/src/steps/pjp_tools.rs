@@ -14,7 +14,9 @@
 //!   を出して止まる。sha256・key が合わない Release は、cargo があっても使わずに止まる (黙って cargo に戻らない。差し替えの印を隠さない)
 //! - 手元の変更 (`git status --porcelain -- nix/pkgs/pjp-tools` が空でない): 写しを使わず・作らず、cargo で作って bin に直に置く (`PJP_TOOLS_KEY`
 //!   は外す。手元の build は key を名乗らない)。cargo が無ければ止まる (手元の変更は Release に無い)
-//! - bin に写す: 写しと sha256 が違う exe だけを、動いていても上書きできる `claude_files::replace_file` で。PATH は claude-selector と同じ
+//! - bin に写す: 写しと sha256 が違う exe だけを、動いていても上書きできる `claude_files::replace_file` で。入口の `pjp` は最後に写す (ほかの
+//!   4 つが置けてから入口が現れる。入口は隣の道具が無いと止まり、ハブの hook の `pjp hub guard` が書き込みを止めうる)。PATH は claude-selector
+//!   と同じ
 //! - check は何も落とさず・作らず、写しと印・bin の一致を見る (写しが無ければ、bin の `pjp --version` の key も添える)。dry-run は打つもの
 //!   (落とす URL・作る cargo・写すファイル・消す古い写し) を出す。どちらも Release があるかは見ない (ネットワークに出ない)
 //!
@@ -655,9 +657,19 @@ fn same(source: Source) -> State {
     }
 }
 
-/// `src` の exe のうち `diff` のものを bin へ写す (動いている exe も、退けてから置く)
+/// 写す順 (入口の pjp を最後に)。入口は hub・child・mark・pack を隣の `pjp-<道具>` で起こすので、ほかが置けてから現れるようにする (途中で
+/// 落ちても、隣の道具の無い入口を置かない。ハブの hook の `pjp hub guard` が入口ごと落ちて書き込みを止めないため)
+fn placing_order<'a>(names: impl IntoIterator<Item = &'a String>) -> Vec<&'a String> {
+    let entry = exe_name("pjp");
+    let (last, mut order): (Vec<&String>, Vec<&String>) =
+        names.into_iter().partition(|n| **n == entry);
+    order.extend(last);
+    order
+}
+
+/// `src` の exe のうち `diff` のものを bin へ写す (動いている exe も、退けてから置く。入口の pjp は最後に)
 fn place(ctx: &mut Ctx, src: &Path, diff: &[(String, bool)], bin: &Path) -> Result<(), Stop> {
-    for (name, _) in diff {
+    for name in placing_order(diff.iter().map(|(n, _)| n)) {
         let from = src.join(name);
         let dest = bin.join(name);
         let bytes = std::fs::read(&from)
@@ -672,15 +684,24 @@ fn place(ctx: &mut Ctx, src: &Path, diff: &[(String, bool)], bin: &Path) -> Resu
     Ok(())
 }
 
-/// dry-run で写すファイルを出す
+/// dry-run で写すファイルを、写す順 (入口の pjp が最後) に出す
 fn say_copies(ctx: &mut Ctx, names: &[String], bin: &Path) {
     if !names.is_empty() {
         ctx.say(format!(
             "[dry-run] 写す: {} → {}",
-            names.join("・"),
+            join_names(names),
             bin.display()
         ));
     }
+}
+
+/// 写す順に並べて「・」でつなぐ
+fn join_names(names: &[String]) -> String {
+    placing_order(names)
+        .into_iter()
+        .map(String::as_str)
+        .collect::<Vec<_>>()
+        .join("・")
 }
 
 /// 古い key の写しを消す (dry-run は出すだけ、check は何もしない。動いていて消せないものは次に回す)
@@ -1029,7 +1050,7 @@ fn worktree(
             ctx.say(format!(
                 "[dry-run] 写す: {} の {} → {}",
                 ws.join("target").join("release").display(),
-                exe_names().join("・"),
+                join_names(&exe_names()),
                 places.bin.display()
             ));
             Ok(todo)
@@ -1123,6 +1144,9 @@ mod tests {
     //!   missing、dry-run は落とす URL・解く先・Release が無いときの cargo・写すファイルを出すだけ
     //! - 3 行目: sha256 が合わない・.sha256 が読めない・key が合わない・zip に exe が足りない → failed。cargo があっても打たず、写し・印・PATH に
     //!   触らず、置いてある bin の exe もそのまま (落とした物と解いた物は消す)。sha256 の合わない zip は解かない
+    //! - 写しの pjp の --version を起こせない (Smart App Control など)・0 でなく終わる → failed で、わけと起こせないときの案内を添える。cargo に
+    //!   戻らず、写しの dir を消し、bin と PATH に触らない
+    //! - bin に写すとき、入口の pjp は最後に置く (ほかの 4 つが置けてから入口が現れる)。dry-run の写すファイルも同じ順
     //! - 4 行目: Release が無い (404)・届かない → cargo があれば workspace で cargo build --release --locked (RUSTUP_TOOLCHAIN は workspace の版、
     //!   PJP_TOOLS_KEY は key) を打ち、写しに入れて印 (cargo) を付けて写す。Release を使えなかったわけを添える
     //! - 5 行目: Release が無い・cargo も無い → failed で、わけに直し方 (数分待って打ち直す・main に戻す・--self-update)。届かないなら github.com。
@@ -1169,6 +1193,10 @@ mod tests {
         WrongKey,
         /// zip に pjp-pack が無い
         Incomplete,
+        /// zip の中の pjp を起こせない (Smart App Control などに止められる)
+        Blocked,
+        /// zip の中の pjp の --version が 0 でなく終わる
+        Crashes,
         /// Release が無い (HTTP 404)
         Missing,
         /// github.com に届かない
@@ -1292,6 +1320,8 @@ mod tests {
                         }
                         Release::WrongKey => format!("zip key={OTHER}"),
                         Release::Incomplete => format!("zip key={KEY} lacks=pjp-pack"),
+                        Release::Blocked => format!("zip key={KEY} launch=blocked"),
+                        Release::Crashes => format!("zip key={KEY} launch=crash"),
                         _ => format!("zip key={KEY}"),
                     };
                     let sha = match release {
@@ -1307,10 +1337,18 @@ mod tests {
                     let zip = std::fs::read_to_string(c.env_value(ZIP_ENV).unwrap()).unwrap();
                     let k = zip.split("key=").nth(1).unwrap().split_whitespace().next().unwrap();
                     let lacks = zip.split_whitespace().find_map(|w| w.strip_prefix("lacks="));
+                    let launch = zip
+                        .split_whitespace()
+                        .find(|w| w.starts_with("launch="))
+                        .map(|w| format!(" {w}"))
+                        .unwrap_or_default();
                     for tool in TOOLS {
                         if lacks != Some(tool) {
-                            std::fs::write(Path::new(&dest).join(exe_name(tool)), format!("{tool} key={k}"))
-                                .unwrap();
+                            std::fs::write(
+                                Path::new(&dest).join(exe_name(tool)),
+                                format!("{tool} key={k}{launch}"),
+                            )
+                            .unwrap();
                         }
                     }
                     return done(Vec::new());
@@ -1319,6 +1357,21 @@ mod tests {
                     // 版は stdout だけから読む
                     assert!(c.stdout_only, "--version は stdout だけを読む");
                     let text = std::fs::read_to_string(&c.program).unwrap();
+                    if text.contains("launch=blocked") {
+                        return RunResult {
+                            exit: Exit::SpawnFailed(
+                                "An Application Control policy has blocked this file. (os error 4551)"
+                                    .to_string(),
+                            ),
+                            output: Vec::new(),
+                        };
+                    }
+                    if text.contains("launch=crash") {
+                        return RunResult {
+                            exit: Exit::Code(-1073741819),
+                            output: vec!["boom".to_string()],
+                        };
+                    }
                     let k = text
                         .split("key=")
                         .nth(1)
@@ -1471,10 +1524,15 @@ mod tests {
             "{out}"
         );
         assert!(out.contains(&format!("{KEY_ENV}={KEY}")), "{out}");
-        assert!(
-            out.contains(&format!("[dry-run] 写す: {} ", exe_names().join("・"))),
-            "{out}"
-        );
+        // 写す順は入口の pjp が最後 (places_the_entry_last)
+        assert!(out.contains("[dry-run] 写す: "), "{out}");
+        for name in exe_names() {
+            assert!(
+                out.lines()
+                    .any(|l| l.starts_with("[dry-run] 写す: ") && l.contains(&name)),
+                "{name}: {out}"
+            );
+        }
         assert!(downloads(&sys).is_empty() && expands(&sys).is_empty());
         assert!(builds(&sys).is_empty() && versions(&sys).is_empty());
         assert!(!w.root().exists() && !w.bin().exists());
@@ -1627,6 +1685,90 @@ mod tests {
                 assert!(expands(&sys).is_empty(), "sha256 の合わない zip は解かない");
             }
         }
+    }
+
+    /// 写しの pjp.exe の --version を起こせない (Smart App Control などに止められる)・0 でなく終わるときは、わけと起こせないときの案内を添えて
+    /// 止まる (cargo に戻らない。手元の cargo で作った exe も同じく止められるため)。確かめていない写しの dir は消し、bin と PATH に触らない
+    #[test]
+    fn stops_when_the_copied_pjp_cannot_be_launched() {
+        for (release, why) in [
+            (Release::Blocked, "os error 4551"),
+            (Release::Crashes, "boom"),
+        ] {
+            let w = World::new();
+            let sys = w.sys(release);
+            let (o, out) = w.run(APPLY, &sys);
+            assert_eq!(o.kind, Kind::Failed, "{release:?} {o:?}\n{out}");
+            assert!(
+                o.text.contains("を起こせない") && o.text.contains(why),
+                "{release:?} {o:?}"
+            );
+            assert!(
+                o.notes.iter().any(|n| n == LAUNCH_HINT),
+                "{release:?} {o:?}"
+            );
+            let v = versions(&sys);
+            assert_eq!(v.len(), 1, "{release:?}");
+            assert_eq!(v[0].program, w.cache().join(exe_name("pjp")));
+            assert!(builds(&sys).is_empty(), "cargo に戻らない: {release:?}");
+            assert!(!w.cache().exists(), "写しの dir は消える: {release:?}");
+            assert!(!w.bin().exists(), "{release:?}");
+            assert_eq!(*w.reg.borrow(), "C:\\Windows", "{release:?}");
+            assert!(out.contains("!! "), "{out}");
+        }
+    }
+
+    /// 入口の pjp.exe は最後に置く (ほかの 4 つが置けてから入口が現れる。入口は隣の道具が無いと止まり、ハブの hook の pjp hub guard を
+    /// 落とす)。dry-run の写すファイルも同じ順に出す
+    #[test]
+    fn places_the_entry_last() {
+        let names = |tools: &[&str]| -> Vec<String> { tools.iter().map(|t| exe_name(t)).collect() };
+        let placed = |out: &str| -> Vec<String> {
+            out.lines()
+                .filter_map(|l| l.strip_prefix("置きました: "))
+                .map(|p| {
+                    Path::new(p)
+                        .file_name()
+                        .unwrap()
+                        .to_string_lossy()
+                        .into_owned()
+                })
+                .collect()
+        };
+        let all = names(&["pjp-hub", "pjp-child", "pjp-mark", "pjp-pack", "pjp"]);
+        let w = World::new();
+        let sys = w.sys(Release::Good);
+        let (_, out) = w.run(DRY_RUN, &sys);
+        assert!(
+            out.contains(&format!("[dry-run] 写す: {} ", all.join("・"))),
+            "{out}"
+        );
+        let (o, out) = w.run(APPLY, &sys);
+        assert_eq!(o.kind, Kind::Ok, "{o:?}\n{out}");
+        assert_eq!(placed(&out), all, "{out}");
+
+        // 写しから入口と pjp-hub だけを写すときも、入口が後
+        for tool in ["pjp", "pjp-hub"] {
+            std::fs::write(w.bin().join(exe_name(tool)), "old").unwrap();
+        }
+        let sys = w.sys(Release::Good);
+        let (_, out) = w.run(DRY_RUN, &sys);
+        let two = names(&["pjp-hub", "pjp"]);
+        assert!(
+            out.contains(&format!("[dry-run] 写す: {} ", two.join("・"))),
+            "{out}"
+        );
+        let (o, out) = w.run(APPLY, &sys);
+        assert_eq!(o.kind, Kind::Ok, "{o:?}\n{out}");
+        assert_eq!(placed(&out), two, "{out}");
+
+        // 手元の変更から cargo で作って直に置くときも
+        let sys = w.sys_with(Release::Good, true);
+        let (_, out) = w.run(DRY_RUN, &sys);
+        assert!(out.contains(&format!(" の {} → ", all.join("・"))), "{out}");
+        let (o, out) = w.run(APPLY, &sys);
+        assert_eq!(o.kind, Kind::Ok, "{o:?}\n{out}");
+        assert_eq!(placed(&out), all, "{out}");
     }
 
     /// 表の 4 行目: Release が無い・届かないときは、cargo があれば手元で作る

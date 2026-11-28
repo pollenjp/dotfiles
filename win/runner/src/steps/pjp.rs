@@ -5,8 +5,10 @@
 //!
 //! - 前の shim を外す: 前の手順が `cargo install` で入れた `<CARGO_HOME か %USERPROFILE%\.cargo>\bin\pjp.exe` は、PATH で公開の `pjp` を覆う
 //!   (`.cargo\bin` は `dotfiles\bin` より前に来る) ので、cargo の記録 (`<CARGO_HOME>\.crates.toml`) に pjp-shim の bin `pjp.exe` があるときだけ
-//!   `cargo uninstall --root <CARGO_HOME> pjp-shim` で外す (前の dotfiles が bin を 2 つとも入れた形も、記録ごと外れる)。記録に無い pjp.exe
-//!   (ほかのもの) は外さずに ⚠ で知らせる (消すのはユーザー)
+//!   `cargo uninstall --root <CARGO_HOME> pjp-shim` で外す (前の dotfiles が bin を 2 つとも入れた形も、記録ごと外れる)。外すのは、公開の入口
+//!   (手順 pjp-tools が置く `%LOCALAPPDATA%\dotfiles\bin\` の `pjp.exe` と、ハブの hook が起こす `pjp-hub.exe`) が置かれているときだけ。まだ
+//!   無ければ残して fix の行で知らせる (`--steps pjp` だけを打った・同じ apply の pjp-tools が止まったときに外すと、このホストから pjp が無くなり、
+//!   ハブの hook の `pjp hub guard` も落ちる)。記録に無い pjp.exe (ほかのもの) は外さずに ⚠ で知らせる (消すのはユーザー)
 //! - shim (`<CARGO_HOME>\bin\pjp-skills.exe`) が無い・起きない・`pjp-skills --version` の版 (shim は bin の名前によらず「pjp <版>」と出す) が
 //!   clone の `crates/pjp-shim` の版と違うときだけ、`cargo install --locked --root <使い捨て>\root --target-dir <使い捨て>\target --path
 //!   <clone>\crates\pjp-shim` を打ち、出来た `pjp-skills.exe` (無ければ `pjp.exe`。clone の shim の crate の bin は、前の pjp だけ・pjp と
@@ -14,16 +16,20 @@
 //!   `claude_files::replace_file` で)。使い捨ての root に入れるのは、`<CARGO_HOME>\bin\pjp.exe` も cargo の記録も `<CARGO_HOME>` に残さないため。
 //!   cargo は clone の中で、clone の `rust-toolchain.toml` の channel を `RUSTUP_TOOLCHAIN` にして打つ (Windows の rustup は既定の toolchain を
 //!   持たず、`cargo run` で起こした runner には runner の版の `RUSTUP_TOOLCHAIN` が付いているため)。置いた後に版を読み直す
+//! - 順は、使い捨ての root に作る → (外すなら) 前の shim を外す → 作った shim を置く。作るのが落ちたら前の shim は外さない (private な道具を
+//!   無くさない)。前の shim を外すと一緒に消える形 (記録に pjp-skills.exe もある) は、版が同じでも作って、外した後に置き直す
 //! - 続けて毎回 `pjp-skills --build` (`PJP_SKILLS_DIR=<clone>`。runner の `RUSTUP_TOOLCHAIN` は外し、shim が clone の版を決める)
 //!
-//! check は shim と前の shim を見る (build しない。check は何も書かない)。dry-run は外すもの・入れるもの・置くもの・作るものを出す。
+//! check は shim と前の shim を見る (build しない。check は何も書かない)。dry-run は入れるもの・外すもの・置くもの・作るものを、apply で打つ順に
+//! 出す。
 //! dotfiles-private の docs/adr/064_win_w02_claude_skills_hub_*・docs/adr/124_*。
 
+use super::claude_accounts::BIN_DIR_REL;
 use super::claude_files::replace_file;
 use super::claude_skills::clone_dir;
 use super::ps1::{ps_quote, run_streaming};
 use super::{Gate, Mode, Outcome, Step, StepInfo};
-use crate::context::Ctx;
+use crate::context::{Ctx, join_segments};
 use crate::process::CommandSpec;
 use crate::report::Kind;
 use std::path::{Path, PathBuf};
@@ -41,6 +47,11 @@ const SHIM_CRATE: &str = "pjp-shim";
 pub const SHIM_BIN: &str = "pjp-skills";
 /// 前の手順が置いた shim の bin の名前 (公開の入口 `pjp` と同じ名前なので、PATH で覆う)
 pub const OLD_SHIM_BIN: &str = "pjp";
+/// 前の shim を外す前に置かれているはずの公開の道具 (手順 pjp-tools が `%LOCALAPPDATA%\dotfiles\bin\` に置く入口と、ハブの hook の
+/// `pjp hub guard` が起こすもの)
+const PUBLIC_TOOLS: [&str; 2] = ["pjp", "pjp-hub"];
+/// 公開の入口がまだ無いので前の shim を残す行の文 (check・dry-run・apply とも)
+const KEEP_TEXT: &str = "公開の pjp (手順 pjp-tools) がまだ無いので、前の shim は残す (dotfiles apply で pjp-tools を流した後に外れる)";
 
 /// exe の名前 (Windows は `<名前>.exe`。ほかの OS の名前は試験のため)。Windows の cargo は記録にもこの名前を書く
 fn exe(name: &str) -> String {
@@ -70,6 +81,21 @@ pub fn shim_path(ctx: &Ctx) -> PathBuf {
 /// 前の手順が入れた shim のパス (`<cargo_root>\bin\pjp.exe`)。
 pub fn old_shim_path(ctx: &Ctx) -> PathBuf {
     cargo_root(ctx).join("bin").join(exe(OLD_SHIM_BIN))
+}
+
+/// 公開の道具の置き場 (`%LOCALAPPDATA%\dotfiles\bin`。手順 pjp-tools が置く)。
+fn public_bin(ctx: &Ctx) -> PathBuf {
+    join_segments(&ctx.roots.local_app_data, BIN_DIR_REL)
+}
+
+/// 公開の入口 (`pjp.exe` と `pjp-hub.exe`) のうち、置き場にまだ無いものの名前。空なら置かれている。
+fn unplaced_public(ctx: &Ctx) -> Vec<String> {
+    let bin = public_bin(ctx);
+    PUBLIC_TOOLS
+        .iter()
+        .map(|t| exe(t))
+        .filter(|n| !bin.join(n).is_file())
+        .collect()
 }
 
 /// cargo の記録 (`<root>\.crates.toml` の `[v1]`。`"pjp-shim <版> (<出どころ>)" = ["pjp.exe", …]`) の、pjp-shim の bin の並び。記録が無い・
@@ -167,14 +193,14 @@ fn old_shim(ctx: &Ctx) -> OldShim {
     }
 }
 
-/// shim を入れる (入れ直す) わけ。入れなくてよければ None。`goes` は、前の shim を外すと一緒に消えるか (前の dotfiles が bin を 2 つとも
-/// 入れ、記録に pjp-skills.exe もある。打たずに決める)。
+/// shim を入れる (入れ直す) わけ。入れなくてよければ None。`goes` は、この流しで前の shim を外し、そのときに一緒に消えるか (前の dotfiles が
+/// bin を 2 つとも入れ、記録に pjp-skills.exe もある。打たずに決める)。
 fn need(ctx: &Ctx, shim: &Path, want: &str, goes: bool) -> Option<(Kind, String)> {
     if goes {
         return Some((
             Kind::Fix,
             format!(
-                "shim の pjp-skills は前の shim と同じ cargo の記録にあり、前の shim を外すと一緒に消える ({}) → 入れ直す",
+                "shim の pjp-skills は前の shim と同じ cargo の記録にあり、前の shim を外すと一緒に消える ({}) → 作り直して、外した後に置く",
                 shim.display()
             ),
         ));
@@ -275,22 +301,47 @@ impl Step for Pjp {
         let shim = shim_path(ctx);
         let old_path = old_shim_path(ctx);
         let old = old_shim(ctx);
+        // 公開の入口 (手順 pjp-tools が置く) のうち、まだ無いもの。揃うまでは記録のある前の shim も外さない (外すと pjp が無くなる)
+        let unplaced = unplaced_public(ctx);
         let recorded = matches!(old, OldShim::Recorded(_));
+        let remove = recorded && unplaced.is_empty();
         // 前の shim の行 (主の行の後ろに足す)
         let mut rest = Vec::new();
         match &old {
             OldShim::Absent => {}
-            OldShim::Recorded(_) => ctx.say(format!(
-                "前の shim: {} (cargo の記録の {SHIM_CRATE} のもの。公開の入口 pjp を覆うので外す)",
+            OldShim::Recorded(_) if remove => ctx.say(format!(
+                "前の shim: {} (cargo の記録の {SHIM_CRATE} のもの。公開の入口 pjp を覆うので、新しい shim を作れたら外す)",
                 old_path.display()
             )),
+            OldShim::Recorded(_) => {
+                ctx.say(format!(
+                    "前の shim: {} (cargo の記録の {SHIM_CRATE} のもの)",
+                    old_path.display()
+                ));
+                ctx.say(format!("!! {KEEP_TEXT}"));
+                let prefix = if matches!(mode, Mode::DryRun { .. }) {
+                    "[dry-run] "
+                } else {
+                    ""
+                };
+                rest.push(
+                    Outcome::new(Kind::Fix, format!("{prefix}{KEEP_TEXT}")).note(format!(
+                        "公開の道具の置き場 {} に {} が無い (手順 pjp-tools が置く)。それまでは前の shim {} が claude-skills の道具を起こす",
+                        public_bin(ctx).display(),
+                        unplaced.join("・"),
+                        old_path.display()
+                    )),
+                );
+            }
             OldShim::Foreign => {
                 let why = foreign_text(&old_path, &root);
                 ctx.say(format!("!! {why}"));
                 rest.push(Outcome::new(Kind::Manual, why));
             }
         }
-        let goes = matches!(&old, OldShim::Recorded(bins) if bins.contains(&exe(SHIM_BIN)));
+        // この流しで前の shim を外し、そのときに pjp-skills.exe も一緒に消えるか (記録に pjp-skills.exe もある)
+        let goes =
+            remove && matches!(&old, OldShim::Recorded(bins) if bins.contains(&exe(SHIM_BIN)));
         let cargo_note = format!("(cwd は clone、RUSTUP_TOOLCHAIN={channel})");
         let uninstall_line = format!(
             "cargo uninstall --root {} {SHIM_CRATE} {cargo_note}",
@@ -321,13 +372,13 @@ impl Step for Pjp {
                         Outcome::new(kind, format!("{text} (apply で)"))
                     }
                 };
-                if recorded {
+                if remove {
                     rest.insert(
                         0,
                         Outcome::new(
                             Kind::Fix,
                             format!(
-                                "前の shim の {} を外す (apply で: cargo uninstall --root {} {SHIM_CRATE}。公開の入口 pjp を覆うため)",
+                                "前の shim の {} を外す (apply で、新しい shim を作れてから: cargo uninstall --root {} {SHIM_CRATE}。公開の入口 pjp を覆うため)",
                                 exe(OLD_SHIM_BIN),
                                 root.display()
                             ),
@@ -337,13 +388,16 @@ impl Step for Pjp {
                 with(vec![main], rest)
             }
             Mode::DryRun { .. } => {
-                if recorded {
+                // apply と同じ順 (作る → 外す → 置く → 道具を作る) に出す
+                let todo = need(ctx, &shim, &want, goes);
+                let work = Path::new("<使い捨ての dir>");
+                if todo.is_some() {
+                    ctx.say(format!("[dry-run] {}", install_line(work)));
+                }
+                if remove {
                     ctx.say(format!("[dry-run] {uninstall_line}"));
                 }
-                let todo = need(ctx, &shim, &want, goes);
                 if todo.is_some() {
-                    let work = Path::new("<使い捨ての dir>");
-                    ctx.say(format!("[dry-run] {}", install_line(work)));
                     ctx.say(format!("[dry-run] {}", place_line(work)));
                 }
                 ctx.say(format!(
@@ -362,13 +416,13 @@ impl Step for Pjp {
                         format!("[dry-run] {text}。続けて pjp-skills --build を流す"),
                     ),
                 };
-                if recorded {
+                if remove {
                     rest.insert(
                         0,
                         Outcome::new(
                             Kind::Fix,
                             format!(
-                                "[dry-run] 前の shim の {} を外す (cargo の記録の {SHIM_CRATE} のもの。公開の入口 pjp を覆うため)",
+                                "[dry-run] 前の shim の {} を外す (cargo の記録の {SHIM_CRATE} のもの。公開の入口 pjp を覆うため。新しい shim を作れてから)",
                                 exe(OLD_SHIM_BIN)
                             ),
                         ),
@@ -377,13 +431,10 @@ impl Step for Pjp {
                 with(vec![main], rest)
             }
             Mode::Apply { .. } => {
-                // 前の shim を外すなら、外した後の様子で入れるかを決める (記録に pjp-skills.exe もあれば一緒に消える)
-                let mut todo = if recorded {
-                    None
-                } else {
-                    need(ctx, &shim, &want, false)
-                };
-                let cargo = if recorded || todo.is_some() {
+                // 順は、使い捨ての root に作る → (外すなら) 前の shim を外す → 作った shim を置く。作るのが落ちたら前の shim は外さない
+                // (private な道具を無くさない)。外すと pjp-skills.exe も一緒に消える形 (goes) は、版が同じでも作り、外した後に置く
+                let todo = need(ctx, &shim, &want, goes);
+                let cargo = if remove || todo.is_some() {
                     match locate_cargo(ctx) {
                         Some(c) => Some(c),
                         None => {
@@ -399,8 +450,38 @@ impl Step for Pjp {
                 } else {
                     None
                 };
+                // 1. 作る (使い捨ての root に。<CARGO_HOME> にはまだ触らない)
+                let mut built = None;
+                if let (Some((_, text)), Some(cargo)) = (&todo, cargo.as_deref()) {
+                    ctx.say(text);
+                    let nanos = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|d| d.as_nanos())
+                        .unwrap_or(0);
+                    let work = std::env::temp_dir().join(format!(
+                        "dotfiles-win-pjp-shim-{}-{nanos}",
+                        std::process::id()
+                    ));
+                    ctx.say(format!("+ {}", install_line(&work)));
+                    match build_shim(ctx, cargo, &work, &shim_dir, &clone, &channel) {
+                        Ok(made) => built = Some((work, made)),
+                        Err(o) => {
+                            remove_work(ctx, &work);
+                            let o = if remove {
+                                o.note(format!(
+                                    "前の shim ({}) は外していない (新しい shim を作れてから外す)。claude-skills の道具は前の shim で起こせる",
+                                    old_path.display()
+                                ))
+                            } else {
+                                o
+                            };
+                            return with(vec![o], rest);
+                        }
+                    }
+                }
+                // 2. 作れたら (作らなくてよければ、そのまま) 前の shim を外す
                 let mut removed_old = false;
-                if let Some(cargo) = cargo.as_deref().filter(|_| recorded) {
+                if let Some(cargo) = cargo.as_deref().filter(|_| remove) {
                     ctx.say(format!("+ {uninstall_line}"));
                     let r = run_streaming(
                         ctx,
@@ -434,27 +515,11 @@ impl Step for Pjp {
                                 )),
                         );
                     }
-                    todo = need(ctx, &shim, &want, false);
                 }
-                if let (Some((_, text)), Some(cargo)) = (&todo, cargo.as_deref()) {
-                    ctx.say(text);
-                    let nanos = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .map(|d| d.as_nanos())
-                        .unwrap_or(0);
-                    let work = std::env::temp_dir().join(format!(
-                        "dotfiles-win-pjp-shim-{}-{nanos}",
-                        std::process::id()
-                    ));
-                    ctx.say(format!("+ {}", install_line(&work)));
-                    let placed = install(ctx, cargo, &work, &shim_dir, &clone, &channel, &shim);
-                    let _ = std::fs::remove_dir_all(&work);
-                    if work.exists() {
-                        ctx.say(format!(
-                            "!! 使い捨ての dir を消せなかった (数百 MB になりうる。要らなければ手で消す): {}",
-                            work.display()
-                        ));
-                    }
+                // 3. 作った shim を置く (2 つとも記録にある形は、外すと pjp-skills.exe も消えるので、置くのは外した後)
+                if let Some((work, made)) = built {
+                    let placed = place_shim(ctx, &made, &shim);
+                    remove_work(ctx, &work);
                     if let Err(o) = placed {
                         return with(vec![o], rest);
                     }
@@ -504,31 +569,44 @@ impl Step for Pjp {
                 } else {
                     String::new()
                 };
-                with(
-                    vec![Outcome::new(
-                        Kind::Ok,
-                        format!(
-                            "{head}shim の pjp-skills {want}・道具を作った (pjp-skills --build)"
-                        ),
-                    )],
-                    rest,
-                )
+                let mut main = Outcome::new(
+                    Kind::Ok,
+                    format!("{head}shim の pjp-skills {want}・道具を作った (pjp-skills --build)"),
+                );
+                if removed_old {
+                    // 動いている herdr-app の会話は、前の shim を PATH の .cargo\bin で見つけていた
+                    main = main.note(format!(
+                        "pjp は公開の入口 ({}) から起きる。手順 pjp-tools が PATH に置き場を足したばかりなら、動いている herdr-app とその中の会話では、herdr-app を上げ直すまで pjp が見つからない",
+                        public_bin(ctx).join(exe(OLD_SHIM_BIN)).display()
+                    ));
+                }
+                with(vec![main], rest)
             }
         }
     }
 }
 
-/// shim を使い捨ての dir `work` (`root`・`target`) に `cargo install` し、出来た exe (`pjp-skills.exe`、無ければ `pjp.exe`) を `shim` の名前で
-/// 置く。落ちたら、その行。`work` を消すのは呼ぶ側。
-fn install(
+/// 使い捨ての dir を消す (消せなければ知らせる)
+fn remove_work(ctx: &mut Ctx, work: &Path) {
+    let _ = std::fs::remove_dir_all(work);
+    if work.exists() {
+        ctx.say(format!(
+            "!! 使い捨ての dir を消せなかった (数百 MB になりうる。要らなければ手で消す): {}",
+            work.display()
+        ));
+    }
+}
+
+/// shim を使い捨ての dir `work` (`root`・`target`) に `cargo install` し、出来た exe (`pjp-skills.exe`、無ければ `pjp.exe`) のパスを返す
+/// (`<CARGO_HOME>` には触らない)。落ちたら、その行。`work` を消すのは呼ぶ側。
+fn build_shim(
     ctx: &mut Ctx,
     cargo: &Path,
     work: &Path,
     shim_dir: &Path,
     clone: &Path,
     channel: &str,
-    shim: &Path,
-) -> Result<(), Outcome> {
+) -> Result<PathBuf, Outcome> {
     let root = work.join("root");
     let target = work.join("target");
     if let Err(e) = std::fs::create_dir_all(work) {
@@ -559,22 +637,26 @@ fn install(
         ));
     }
     let bin = root.join("bin");
-    let Some(built) = [SHIM_BIN, OLD_SHIM_BIN]
+    [SHIM_BIN, OLD_SHIM_BIN]
         .iter()
         .map(|b| bin.join(exe(b)))
         .find(|p| p.is_file())
-    else {
-        return Err(Outcome::new(
-            Kind::Failed,
-            format!(
-                "入れたはずの shim が見つからない ({} に {} も {} も無い)",
-                bin.display(),
-                exe(SHIM_BIN),
-                exe(OLD_SHIM_BIN)
-            ),
-        ));
-    };
-    match std::fs::read(&built).and_then(|bytes| replace_file(&bytes, shim)) {
+        .ok_or_else(|| {
+            Outcome::new(
+                Kind::Failed,
+                format!(
+                    "入れたはずの shim が見つからない ({} に {} も {} も無い)",
+                    bin.display(),
+                    exe(SHIM_BIN),
+                    exe(OLD_SHIM_BIN)
+                ),
+            )
+        })
+}
+
+/// 出来た exe `built` を `shim` の名前で置く (shim は argv[0] を読まない。動いていても入れ替えられる `replace_file` で)。落ちたら、その行。
+fn place_shim(ctx: &mut Ctx, built: &Path, shim: &Path) -> Result<(), Outcome> {
+    match std::fs::read(built).and_then(|bytes| replace_file(&bytes, shim)) {
         Ok(()) => {
             ctx.say(format!(
                 "置きました: {} (<- 出来た {})",
@@ -602,11 +684,14 @@ mod tests {
     //! - clone の shim の crate の bin の形 (前の pjp だけ・pjp と pjp-skills・pjp-skills だけ) によらず、<CARGO_HOME>\bin に置くのは pjp-skills.exe
     //!   だけ (出来た pjp-skills があればそれ、無ければ pjp を写す)
     //! - 版が同じ → install は打たず build だけ。版が違う・起きない → fix
-    //! - 前の手順が入れた shim (<CARGO_HOME>\bin\pjp.exe で、cargo の記録に pjp-shim の bin pjp.exe がある) は cargo uninstall --root <CARGO_HOME>
-    //!   pjp-shim で外してから入れる (記録に pjp-skills.exe もあれば、外すと一緒に消えるので入れ直す)。記録に無い pjp.exe は外さずに ⚠ で知らせる
-    //! - dry-run は外すもの (cargo uninstall) も出し、何も打たない
-    //! - cargo が無い・cargo install が落ちる・入れた exe が無い・置いた shim の版が違う・build が落ちる → failed。uninstall が落ちても入れて作り、
-    //!   failed の行を足す
+    //! - 前の手順が入れた shim (<CARGO_HOME>\bin\pjp.exe で、cargo の記録に pjp-shim の bin pjp.exe がある) は、公開の入口 (%LOCALAPPDATA%\dotfiles\bin
+    //!   の pjp.exe と pjp-hub.exe) が揃っているときだけ外す。順は、新しい shim を使い捨ての root に作る → cargo uninstall --root <CARGO_HOME>
+    //!   pjp-shim で外す → 作った shim を置く (記録に pjp-skills.exe もあれば、外すと一緒に消えるので版が同じでも作って置き直す)。作るのが落ちたら
+    //!   外さない。公開の入口が揃っていなければ外さず、残すことを fix の行で知らせる (check・dry-run・apply とも)。記録に無い pjp.exe は外さずに
+    //!   ⚠ で知らせる
+    //! - dry-run は外すもの (cargo uninstall) も apply の順に出し、何も打たない
+    //! - cargo が無い・cargo install が落ちる・入れた exe が無い・置いた shim の版が違う・build が落ちる → failed。uninstall が落ちても作った shim を
+    //!   置いて道具を作り、failed の行を足す
 
     use super::*;
     use crate::host::{Groups, HostValues};
@@ -695,6 +780,25 @@ mod tests {
         fn place(&self, name: &str, text: &str) {
             std::fs::create_dir_all(self.cargo_home().join("bin")).unwrap();
             std::fs::write(self.bin(name), text).unwrap();
+        }
+
+        /// 公開の道具の置き場 (`%LOCALAPPDATA%\dotfiles\bin`。手順 pjp-tools が置く)
+        fn public_bin(&self) -> PathBuf {
+            self.t
+                .path()
+                .join("home")
+                .join("AppData")
+                .join("Local")
+                .join("dotfiles")
+                .join("bin")
+        }
+
+        /// 手順 pjp-tools が公開の道具 `names` (入口 pjp と pjp-hub など) を置いた後にする
+        fn public(&self, names: &[&str]) {
+            std::fs::create_dir_all(self.public_bin()).unwrap();
+            for n in names {
+                std::fs::write(self.public_bin().join(exe(n)), "public").unwrap();
+            }
         }
 
         /// cargo の記録 (`<CARGO_HOME>\.crates.toml`) に、pjp-shim の bin を `bins` で書く (Windows の cargo は bin の名前に .exe を付けて書く)
@@ -950,12 +1054,14 @@ mod tests {
         assert_eq!(w.read(&w.shim()), shim_text("0.1.0", "pjp-skills"));
     }
 
-    /// 前の手順が入れた shim (cargo の記録に pjp-shim の bin pjp.exe) は cargo uninstall で外してから入れる。前の dotfiles が bin を 2 つとも入れた
-    /// 形 (記録に pjp-skills.exe もある) は、外すと pjp-skills.exe も消えるので入れ直す
+    /// 前の手順が入れた shim (cargo の記録に pjp-shim の bin pjp.exe) は、公開の入口が置かれていれば、新しい shim を使い捨ての root に作れてから
+    /// cargo uninstall で外し、作った shim を置く。前の dotfiles が bin を 2 つとも入れた形 (記録に pjp-skills.exe もある) は、外すと
+    /// pjp-skills.exe も消えるので、版が同じでも作って置き直す (置くのは外した後)
     #[test]
-    fn removes_the_recorded_old_shim_first() {
+    fn removes_the_recorded_old_shim_after_building_the_new_one() {
         for recorded in [vec!["pjp"], vec!["pjp", "pjp-skills"]] {
             let w = World::new();
+            w.public(&["pjp", "pjp-hub"]);
             w.place("pjp", &shim_text("0.1.0", "pjp"));
             if recorded.contains(&"pjp-skills") {
                 w.place("pjp-skills", &shim_text("0.1.0", "pjp-skills"));
@@ -991,14 +1097,129 @@ mod tests {
             );
             assert_eq!(un.cwd.as_deref(), Some(w.clone().as_path()));
             assert_eq!(un.env_value("RUSTUP_TOOLCHAIN").as_deref(), Some("1.99.1"));
+            // 作る → 外す → (置く) → 道具を作る。2 つとも記録にある形で置くのが外すより先なら、外すときに置いた pjp-skills.exe も消える
             assert!(
-                at(&sys, "uninstall") < at(&sys, "install")
-                    && at(&sys, "install") < at(&sys, "--build"),
+                at(&sys, "install") < at(&sys, "uninstall")
+                    && at(&sys, "uninstall") < at(&sys, "--build"),
                 "{:?}",
                 sys.call_args()
             );
             assert_eq!(w.placed(), vec![exe("pjp-skills")], "{recorded:?}");
             assert_eq!(w.read(&w.shim()), shim_text("0.1.0", "pjp-skills"));
+        }
+    }
+
+    /// 公開の入口 (`%LOCALAPPDATA%\dotfiles\bin` の pjp.exe と pjp-hub.exe。手順 pjp-tools が置く) が揃うまでは、記録のある前の shim も外さず、
+    /// 残すことを fix の行で知らせる (外すと、このホストから pjp が無くなる。`dotfiles apply --steps pjp` だけを打った・同じ apply の pjp-tools が
+    /// 止まったとき)。pjp-skills は入れて作る
+    #[test]
+    fn keeps_the_old_shim_until_the_public_pjp_is_placed() {
+        let keep = |o: &Outcome| {
+            o.kind == Kind::Fix
+                && o.text.contains("公開の pjp (手順 pjp-tools) がまだ無いので、前の shim は残す (dotfiles apply で pjp-tools を流した後に外れる)")
+        };
+        for public in [vec![], vec!["pjp"], vec!["pjp-hub"]] {
+            let w = World::new();
+            w.public(&public);
+            w.place("pjp", &shim_text("0.1.0", "pjp"));
+            w.record(&["pjp"]);
+            let sys = w.sys(Fake::default());
+            let (o, out) = w.run(&sys, Mode::Check);
+            assert!(o.iter().any(keep), "{public:?} {o:?}\n{out}");
+            assert!(
+                !o.iter().any(|x| x.text.contains("外す")),
+                "{public:?} {o:?}"
+            );
+            let (o, out) = w.run(&sys, Mode::DryRun { force: false });
+            assert!(
+                o.iter()
+                    .any(|x| keep(x) && x.text.starts_with("[dry-run] ")),
+                "{public:?} {o:?}\n{out}"
+            );
+            assert!(!out.contains("cargo uninstall"), "{public:?}\n{out}");
+            assert!(sys.calls.borrow().is_empty(), "{:?}", sys.call_args());
+
+            let (o, out) = w.run(&sys, APPLY);
+            assert_eq!(
+                kinds(&o),
+                vec![Kind::Ok, Kind::Fix],
+                "{public:?} {o:?}\n{out}"
+            );
+            assert!(keep(&o[1]), "{o:?}");
+            assert!(!o[0].text.contains("前の shim"), "{o:?}");
+            assert!(call(&sys, "uninstall").is_none(), "{:?}", sys.call_args());
+            assert_eq!(
+                w.read(&w.old_shim()),
+                shim_text("0.1.0", "pjp"),
+                "{public:?}"
+            );
+            assert!(w.cargo_home().join(".crates.toml").exists());
+            assert_eq!(w.read(&w.shim()), shim_text("0.1.0", "pjp-skills"));
+            assert!(call(&sys, "--build").is_some());
+        }
+
+        // 前の dotfiles が bin を 2 つとも入れた形: 外さないので pjp-skills.exe も消えない。版が同じなら入れ直さない
+        let w = World::new();
+        w.place("pjp", &shim_text("0.1.0", "pjp"));
+        w.place("pjp-skills", &shim_text("0.1.0", "pjp-skills"));
+        w.record(&["pjp", "pjp-skills"]);
+        let sys = w.sys(Fake {
+            install: 9,
+            ..Fake::default()
+        });
+        let (o, _) = w.run(&sys, Mode::Check);
+        assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Fix], "{o:?}");
+        assert!(keep(&o[1]), "{o:?}");
+        let (o, out) = w.run(&sys, APPLY);
+        assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Fix], "{o:?}\n{out}");
+        assert!(
+            call(&sys, "install").is_none() && call(&sys, "uninstall").is_none(),
+            "{:?}",
+            sys.call_args()
+        );
+        assert!(w.old_shim().exists());
+        assert!(call(&sys, "--build").is_some());
+    }
+
+    /// 新しい shim を作れてから前の shim を外す: 使い捨ての root に作るのが落ちたら、前の shim は外さない (private な道具を無くさない)
+    #[test]
+    fn a_failed_install_keeps_the_old_shim() {
+        for recorded in [vec!["pjp"], vec!["pjp", "pjp-skills"]] {
+            let w = World::new();
+            w.public(&["pjp", "pjp-hub"]);
+            w.place("pjp", &shim_text("0.1.0", "pjp"));
+            if recorded.contains(&"pjp-skills") {
+                w.place("pjp-skills", &shim_text("0.1.0", "pjp-skills"));
+            }
+            w.record(&recorded);
+            let sys = w.sys(Fake {
+                install: 101,
+                ..Fake::default()
+            });
+            let (o, out) = w.run(&sys, APPLY);
+            assert_eq!(kinds(&o), vec![Kind::Failed], "{recorded:?} {o:?}\n{out}");
+            assert!(o[0].text.contains("shim を入れられなかった"), "{o:?}");
+            assert!(
+                o[0].notes
+                    .iter()
+                    .any(|n| n.contains("前の shim") && n.contains("外していない")),
+                "{o:?}"
+            );
+            assert!(
+                call(&sys, "uninstall").is_none(),
+                "{recorded:?} {:?}",
+                sys.call_args()
+            );
+            assert!(call(&sys, "--build").is_none());
+            assert_eq!(
+                w.read(&w.old_shim()),
+                shim_text("0.1.0", "pjp"),
+                "{recorded:?}"
+            );
+            assert!(w.cargo_home().join(".crates.toml").exists());
+            if recorded.contains(&"pjp-skills") {
+                assert_eq!(w.read(&w.shim()), shim_text("0.1.0", "pjp-skills"));
+            }
         }
     }
 
@@ -1039,26 +1260,30 @@ mod tests {
         }
     }
 
-    /// dry-run は外すもの (cargo uninstall)・入れるもの・置くもの・作るものを出し、何も打たない
+    /// dry-run は外すもの (cargo uninstall)・入れるもの・置くもの・作るものを、apply で打つ順 (作る → 外す → 置く → 道具を作る) に出し、何も
+    /// 打たない
     #[test]
     fn dry_run_shows_what_it_removes() {
         let w = World::new();
+        w.public(&["pjp", "pjp-hub"]);
         w.place("pjp", &shim_text("0.1.0", "pjp"));
         w.record(&["pjp"]);
         let sys = w.sys(Fake::default());
         let (o, out) = w.run(&sys, Mode::DryRun { force: false });
+        let uninstall = format!(
+            "[dry-run] cargo uninstall --root {} pjp-shim",
+            w.cargo_home().display()
+        );
+        let install = "[dry-run] cargo install --locked --root <使い捨ての dir>";
+        let place = format!(" を {} に置く", w.shim().display());
+        let build = "[dry-run] pjp-skills --build";
+        let pos = |s: &str| out.find(s).unwrap_or_else(|| panic!("{s} が無い:\n{out}"));
         assert!(
-            out.contains(&format!(
-                "[dry-run] cargo uninstall --root {} pjp-shim",
-                w.cargo_home().display()
-            )),
+            pos(install) < pos(&uninstall)
+                && pos(&uninstall) < pos(&place)
+                && pos(&place) < pos(build),
             "{out}"
         );
-        assert!(
-            out.contains("[dry-run] cargo install --locked --root <使い捨ての dir>"),
-            "{out}"
-        );
-        assert!(out.contains("[dry-run] pjp-skills --build"), "{out}");
         assert!(
             o.iter()
                 .any(|x| x.kind == Kind::Fix && x.text.starts_with("[dry-run] 前の shim")),
@@ -1127,8 +1352,9 @@ mod tests {
         assert_eq!(kinds(&o), vec![Kind::Failed], "{o:?}");
         assert!(o[0].text.contains("pjp-skills --build"), "{o:?}");
 
-        // 前の shim を外せない: 入れて作り、落ちた行を足す
+        // 前の shim を外せない: 作った shim を置いて道具を作り、落ちた行を足す
         let w = World::new();
+        w.public(&["pjp", "pjp-hub"]);
         w.place("pjp", &shim_text("0.1.0", "pjp"));
         w.record(&["pjp"]);
         let sys = w.sys(Fake {
@@ -1137,6 +1363,8 @@ mod tests {
         });
         let (o, out) = w.run(&sys, APPLY);
         assert_eq!(kinds(&o), vec![Kind::Ok, Kind::Failed], "{o:?}\n{out}");
+        assert!(at(&sys, "install") < at(&sys, "uninstall"));
+        assert_eq!(w.read(&w.shim()), shim_text("0.1.0", "pjp-skills"));
         assert!(o[1].text.contains("前の shim"), "{o:?}");
         assert!(
             o[1].notes
