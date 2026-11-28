@@ -119,7 +119,7 @@
           table = import ./lib/groups.nix;
         in
         {
-          version = 2;
+          version = 3;
           # ホストの値に group を書かなかったときのグループ (options.nix の dotfiles.group の既定)
           default = "minimum";
           # 道具の表 (tools) と、Windows の runner だけが読む道具 (runnerOnlyTools。Nix の option が無い。ADR 111) の両方
@@ -128,6 +128,14 @@
               map (t: lib.nameValuePair t.key (table.inGroup group t)) (table.tools ++ table.runnerOnlyTools)
             );
           });
+          # runner の止める条件 (runner の道具 → 要る runner の道具の並び。名前の順)。on の道具の要る道具が off なら、runner はホストの値を
+          # 読むときに止める (終了コード 2)。Nix の requires は入れない (Nix は「効かない (既定も off)」、runner は「ホストの値の誤り」で
+          # 意味が違う)。requiresWhy は同じ組のわけ (止める文に出す)。どちらも lib/groups.nix の runnerDeps から作る (dotfiles-private の ADR 124)
+          requires = lib.mapAttrs (_: builtins.attrNames) table.runnerDeps;
+          requiresWhy = table.runnerDeps;
+          # skill の依存 (skill → { windows = [...]; linux = [...]; })。runner は windows の並びを読み、どれかが off のホストでは、その skill を
+          # Claude Code の一覧に出さない (lib/groups.nix の skills)
+          skills = table.skills;
         };
     in
     {

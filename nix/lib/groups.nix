@@ -34,7 +34,13 @@
 #     follows   既定がグループでなく、ほかの道具 (key) の値に従う (linger は herdrCore に従う。ADR 101)。従う先の値が既定になる
 #     short     ホストの要約の図の箱に出す短い名前 (下の shorts。無ければ label)
 #     runner    Windows の runner (win/runner/) が手順の gate で読む道具か (下の runnerTools)
+#     runnerRequires  Windows の runner の側だけの依存 (runner の道具の key → わけ)。この道具が on なのに、ここに並べた道具が off なら、runner は
+#               ホストの値を読むときに止める (終了コード 2)。Nix の requires (option の既定を決める) とは別に持つ: 同じ key でも OS で
+#               意味が違う道具があり (herdrHub は Windows では herdr-app のハブ、Linux では旧 herdr のハブ)、Linux の既定を変えないため
 #   runnerOnlyTools  Windows の runner だけが読む道具 (Nix の option が無く、group.json にも入らない。privateRepos。下の runnerOnlyTools)
+#   runnerDeps     runner の止める条件の表 (runner の道具の key → 要る道具の key → わけ)。runnerRequires と runnerOnlyTools の requiredBy を
+#                  合わせたもの。flake の lib.windowsGroups (groups.json の requires・requiresWhy) と lib/host-summary/ が読む
+#   skills         skill の依存 (skill の名前 → OS ごとに要る道具の key。下の skills)
 let
   groups = [
     {
@@ -96,6 +102,7 @@ let
       follows = null;
       short = shorts.${key} or label;
       runner = builtins.elem key runnerTools;
+      runnerRequires = { };
     }
     // extra;
 
@@ -161,22 +168,56 @@ let
   # lib.windowsGroups) と、ホストの要約の Windows のホストのページにだけ出る
   #   key         groups.json の tools のキーと、ホストの値 (win/hosts/*.toml) の [tools] の名前
   #   minimum     minimum に入るか (all には必ず入る)
-  #   requiredBy  この道具が off なのに on にできない道具 (runner の道具の key)。runner はホストの値を読むときに止め (終了コード 2)、ホストの
-  #               要約は評価で止める
+  #   requiredBy  この道具が off なのに on にできない道具 (runner の道具の key → わけ)。runner はホストの値を読むときに止め (終了コード 2)、
+  #               ホストの要約は評価で止める。わけは runner の止める文に出す
   runnerOnlyTools = [
     {
       key = "privateRepos";
       label = "pollenjp の private な repo と gh のログイン (Windows)";
       short = "private な repo と gh";
       minimum = false;
-      # claude-skills の clone を読む・claude-skills の pjp でハブを作る・中継のファイルを置く手順 ssh-config が dotfiles-private の ssh/ を読む
-      requiredBy = [
-        "claudePrivateSkills"
-        "herdrHub"
-        "opReasonSshRelay"
-      ];
+      # 集約ハブ (herdrHub) は要らない: ハブと子の道具・mod pjp-spaces・土台の skill は公開の dotfiles にある (dotfiles-private の ADR 124)
+      requiredBy = {
+        claudePrivateSkills = "claude-skills の clone を読む";
+        opReasonSshRelay = "中継のファイルを置く手順 ssh-config が dotfiles-private の ssh/ を読む";
+      };
     }
   ];
+
+  # runner の止める条件の表 (runner の道具の key → 要る道具の key → わけ)。tools の runnerRequires と、runnerOnlyTools の requiredBy を
+  # 合わせる。どちらも書いた組は無い (tests/groups.nix が、key が全部 runnerTools にあることを見る)
+  runnerDeps = builtins.zipAttrsWith (_: builtins.foldl' (a: b: a // b) { }) (
+    map (t: { ${t.key} = t.runnerRequires; }) (builtins.filter (t: t.runnerRequires != { }) tools)
+    ++ builtins.concatMap (
+      r:
+      map (k: {
+        ${k} = {
+          ${r.key} = r.requiredBy.${k};
+        };
+      }) (builtins.attrNames r.requiredBy)
+    ) runnerOnlyTools
+  );
+
+  # skill の依存 (dotfiles-private の ADR 124)。skill の名前 → OS ごとに要る道具の key の並び。要る道具のどれかが off のホストでは、その
+  # skill を Claude Code の一覧に出さない (表に無い skill は、いつも出す)。Windows は runner の道具の key (ホストの値の [tools] と groups.json の
+  # 既定で引く。runner の手順 claude-files が読む)、Linux は表 (tools) の道具の key (option の path で引く。home/modules/claude.nix が
+  # linuxSkillOn で読む)。同じ key でも OS で意味が違う道具 (herdrHub) があるので、OS ごとに書く。SKILL.md の frontmatter には書かない
+  # (表を 1 つに保つ。Nix は YAML を読めない)。key が表にあることと、skill が nix/files/claude/skills/ にあることは tests/groups.nix が見る
+  #
+  # ハブと子の土台の skill は、Windows では集約ハブ (herdrHub。herdr-app のハブ) のホスト、Linux では hc が入るホスト (herdrCore。子が
+  # 動く所と Linux のハブ) に出す
+  skills =
+    let
+      hubAndChild = {
+        windows = [ "herdrHub" ];
+        linux = [ "herdrCore" ];
+      };
+    in
+    {
+      pjp-hc-child = hubAndChild;
+      pjp-hc-hub = hubAndChild;
+      pjp-hc-hub-panel = hubAndChild;
+    };
 
   # switch の無い基本の道具 (今の module が常に入れるもの。minimum の中)。外したいホストが出たら、そのとき switch を足して tools に移す
   base = [
@@ -278,7 +319,15 @@ let
       "enable"
     ] { })
     (tool "ccPages" "cc-pages" [ "ccPages" "enable" ] { })
-    (tool "herdrHub" "集約ハブ ~/h" [ "herdr" "hub" "enable" ] { })
+    # Windows の集約ハブ (herdr-app のハブ) は、mod pjp-spaces と hc を入れる herdr-app と、ハブの会話の Claude Code (土台の skill を置く
+    # 手順 claude-files も) が要る。runner の側だけの依存にする (Linux の herdr.hub.enable は旧 herdr のハブで、要るものが違う。依存は
+    # home/modules/group.nix の assertion)
+    (tool "herdrHub" "集約ハブ ~/h" [ "herdr" "hub" "enable" ] {
+      runnerRequires = {
+        windowsClaudeCode = "ハブの会話の Claude Code と、土台の skill を置く手順 claude-files";
+        windowsHerdr = "mod pjp-spaces と hc を入れる herdr-app";
+      };
+    })
     # 初回の apply で UAC の確認 (管理者の権限) が出る手順。Windows の runner の手順 claude-accounts だけが読む switch (WSL の setup に
     # 同じ手順は無い)。Windows の Claude Code を入れるマシンでだけ効く
     (windowsFilesTool "windowsClaudeAccounts" "Windows の claude-personal・claude-work" "claudeAccounts" {
@@ -351,8 +400,24 @@ in
     tools
     runnerTools
     runnerOnlyTools
+    runnerDeps
+    skills
     groupNamed
     ;
+
+  # Linux のホストで skill name を出すか (skills の linux の道具が全部 on。表に無い skill はいつも出す)。cfg は config.dotfiles
+  linuxSkillOn =
+    cfg: name:
+    builtins.all (
+      k:
+      let
+        found = builtins.filter (t: t.key == k) tools;
+      in
+      if found == [ ] then
+        throw "groups.nix: skills.${name}.linux の道具が表 (tools) に無い: ${k}"
+      else
+        builtins.foldl' (v: n: v.${n}) cfg (builtins.head found).option
+    ) (skills.${name}.linux or [ ]);
 
   # グループ group に道具 t (tools の行) が入るか (follows の道具も、グループの集合としては同じ決まり)
   inGroup = group: t: group == "all" || t.minimum;

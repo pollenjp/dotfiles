@@ -790,8 +790,9 @@ let
   # Windows のホストの要約の値。windowsGroups はグループごとの道具の既定 (win/runner/groups.json と同じ中身。flake の
   # lib.windowsGroups)、toml はホストの値のファイル (builtins.fromTOML の結果)。道具は Windows の runner が読むものだけ
   # (groups.nix の runner と、runner だけが読む runnerOnlyTools)。効く条件は groups.nix の requires のうち runner の道具のものと、
-  # runnerOnlyTools の requiredBy (環境の条件は持たない。runner は Windows で動き、Windows のホストの値には WSL や win/ の配りの switch が
-  # 無いので)。runnerOnlyTools が off なのに、それが要る道具が on のホストは、runner と同じく止める (評価の誤り)
+  # runner の止める条件 (groups.nix の runnerDeps。runnerRequires と runnerOnlyTools の requiredBy) (環境の条件は持たない。runner は Windows で
+  # 動き、Windows のホストの値には WSL や win/ の配りの switch が無いので)。止める条件の要る道具が off なのに、それが要る道具が on のホストは、
+  # runner と同じく止める (評価の誤り)
   winData =
     windowsGroups: name: toml:
     let
@@ -806,17 +807,18 @@ let
       unknown = builtins.filter (k: !(g.tools ? ${k})) (builtins.attrNames overrides);
       notBool = builtins.filter (k: !(builtins.isBool overrides.${k})) (builtins.attrNames overrides);
       runnerRows = builtins.filter (t: t.runner) groups.tools;
-      # Windows の runner だけが読む道具 (groups.nix の runnerOnlyTools。privateRepos) のうち、key の道具が要るもの (ADR 111)
-      onlyReq =
-        key: map (r: r.key) (builtins.filter (r: builtins.elem key r.requiredBy) groups.runnerOnlyTools);
+      # runner の止める条件 (groups.nix の runnerDeps) で、key の道具が要るもの (privateRepos。ADR 111。herdrHub の windowsClaudeCode・
+      # windowsHerdr。ADR 124)
+      depReq = key: builtins.attrNames (groups.runnerDeps.${key} or { });
       winReq =
         t:
-        builtins.filter (k: builtins.elem k groups.runnerTools) (map keyOfOption t.requires)
-        ++ onlyReq t.key;
+        lib.unique (
+          builtins.filter (k: builtins.elem k groups.runnerTools) (map keyOfOption t.requires) ++ depReq t.key
+        );
       val = k: overrides.${k} or g.tools.${k};
       def = k: g.tools.${k};
-      # runner が止めるホスト: runner だけが読む道具が off なのに、それが要る道具が on (runner はホストの値を読むときに止める)
-      needsOff = builtins.filter (t: val t.key && builtins.any (k: !(val k)) (onlyReq t.key)) runnerRows;
+      # runner が止めるホスト: 止める条件の要る道具が off なのに、それが要る道具が on (runner はホストの値を読むときに止める)
+      needsOff = builtins.filter (t: val t.key && builtins.any (k: !(val k)) (depReq t.key)) runnerRows;
       sshd = toml.sshd or { };
       notion = (toml.claude or { }).notion or { };
       listText =
@@ -836,10 +838,12 @@ let
     ) "host-summary: ${name} の [tools] の値は true か false で書いてください: ${lib.concatStringsSep ", " notBool}";
     assert lib.assertMsg (needsOff == [ ])
       "host-summary: ${name} の [tools] で ${
-        lib.concatStringsSep "・" (lib.unique (lib.concatMap (t: onlyReq t.key) needsOff))
+        lib.concatStringsSep "・" (
+          lib.unique (lib.concatMap (t: builtins.filter (k: !(val k)) (depReq t.key)) needsOff)
+        )
       } が off なのに、それが要る道具が on です: ${
         lib.concatMapStringsSep ", " (t: t.key) needsOff
-      } (runner もホストの値を読むときに止める。privateRepos = true を書くか、その道具を false にする。dotfiles の win/README.md の「ホストの値」)";
+      } (runner もホストの値を読むときに止める。要る道具を true にするか、その道具を false にする。dotfiles の win/README.md の「ホストの値」)";
     {
       group = {
         value = group;

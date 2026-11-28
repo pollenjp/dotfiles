@@ -25,6 +25,14 @@
 #   - runnerTools は全部が表の道具か runner だけの道具 (runnerOnlyTools) で、表の runner の印と runner だけの道具の数の和 (18)
 #   - runner の groups.json (lib.windowsGroups) は、表の道具と runner だけの道具 (privateRepos) を持つ。privateRepos は minimum で false、
 #     all で true。group.json の tools には入らない (上の「表の key を全部持つ tools だけ」。Linux の世代を変えない)
+#   - groups.json は version 3 で、runner の止める条件 (requires) は claudePrivateSkills・opReasonSshRelay が privateRepos、herdrHub が
+#     windowsClaudeCode・windowsHerdr (並びは名前の順)。わけ (requiresWhy) は同じ組を持ち、文が空でない。privateRepos に頼る道具に herdrHub は
+#     無い。止める条件の道具と要る道具は全部 runnerTools にある
+#   - herdrHub の runner の側の依存は Linux の既定を変えない: all の Linux のホストで herdr.hub.enable は on、minimum では off (Nix の
+#     requires は持たない)
+#   - groups.json の skills は、ハブと子の土台の skill 3 つ (pjp-hc-child・pjp-hc-hub・pjp-hc-hub-panel) が Windows は herdrHub、Linux は
+#     herdrCore。表の windows の key は runnerTools に、linux の key は表 (tools) にある。linuxSkillOn は herdrCore の値に従い、表に無い
+#     skill はいつも true
 {
   lib,
   pkgs,
@@ -322,6 +330,74 @@ let
         && windowsGroups.groups.minimum.tools.privateRepos == false
         && windowsGroups.groups.all.tools.privateRepos
         && !((json all).tools ? privateRepos);
+    }
+    {
+      name = "groups.json は version 3 で、runner の止める条件 (requires) とそのわけ (requiresWhy) を持ち、privateRepos に頼る道具に herdrHub は無い";
+      ok =
+        windowsGroups.version == 3
+        &&
+          windowsGroups.requires == {
+            claudePrivateSkills = [ "privateRepos" ];
+            herdrHub = [
+              "windowsClaudeCode"
+              "windowsHerdr"
+            ];
+            opReasonSshRelay = [ "privateRepos" ];
+          }
+        && lib.mapAttrs (_: builtins.attrNames) windowsGroups.requiresWhy == windowsGroups.requires
+        && builtins.all (
+          deps: builtins.all (why: builtins.isString why && why != "") (builtins.attrValues deps)
+        ) (builtins.attrValues windowsGroups.requiresWhy)
+        && !(builtins.elem "herdrHub" (
+          builtins.attrNames
+            (builtins.head (builtins.filter (r: r.key == "privateRepos") groups.runnerOnlyTools)).requiredBy
+        ))
+        && builtins.all (k: builtins.elem k groups.runnerTools) (
+          builtins.attrNames windowsGroups.requires
+          ++ lib.concatLists (builtins.attrValues windowsGroups.requires)
+        );
+    }
+    {
+      name = "herdrHub の runner の側の依存は Linux の既定を変えない (all の Linux で herdr.hub.enable は on、minimum では off)";
+      ok =
+        (toolNamed "herdrHub").requires == [ ]
+        && (cfgOf {
+          system = "x86_64-linux";
+          group = "all";
+        }).dotfiles.herdr.hub.enable
+        && !(cfgOf {
+          system = "x86_64-linux";
+          group = "minimum";
+        }).dotfiles.herdr.hub.enable;
+    }
+    {
+      name = "groups.json の skills は土台の skill 3 つが Windows は herdrHub・Linux は herdrCore で、key は表にあり、linuxSkillOn は herdrCore に従う";
+      ok =
+        let
+          hubAndChild = {
+            linux = [ "herdrCore" ];
+            windows = [ "herdrHub" ];
+          };
+          core = cfgOf {
+            system = "x86_64-linux";
+            group = "minimum";
+            modules = [ { dotfiles.herdrCore.enable = true; } ];
+          };
+        in
+        windowsGroups.skills == {
+          pjp-hc-child = hubAndChild;
+          pjp-hc-hub = hubAndChild;
+          pjp-hc-hub-panel = hubAndChild;
+        }
+        && builtins.all (s: builtins.all (k: builtins.elem k groups.runnerTools) s.windows) (
+          builtins.attrValues groups.skills
+        )
+        && builtins.all (s: builtins.all (k: builtins.any (t: t.key == k) groups.tools) s.linux) (
+          builtins.attrValues groups.skills
+        )
+        && groups.linuxSkillOn core.dotfiles "pjp-hc-hub"
+        && !(groups.linuxSkillOn minimum.dotfiles "pjp-hc-hub")
+        && groups.linuxSkillOn minimum.dotfiles "pjp-nix-flake";
     }
   ];
 

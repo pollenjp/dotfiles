@@ -599,9 +599,13 @@ item = "op://<vault の ID>/<項目の ID>/<欄の ID>"   # 元の token の 1Pa
   (`nix/lib/groups.nix` の `runnerOnlyTools`)。minimum に入らず、all に入る。on の PC は bootstrap を `-Private` で流す (runner の手順 `bootstrap` も
   `-Check -Private` を流す)。off の PC では、private な repo か gh のログインを読む手順 (`ssh-config`・`port-forward`・`pin-updates`) を流さず (↷)、`google-ime` は
   辞書を扱わない (設定だけを置く)。off にしても、前に置いたファイル (`.ssh\config.d` の写し・`hosts.json`) は消さない
-- `claudePrivateSkills`・`herdrHub`・`opReasonSshRelay` は `privateRepos` が要る (claude-skills の clone を読む・claude-skills の pjp でハブを作り mod を置く・
-  中継のファイルを置く手順 `ssh-config` が dotfiles-private の `ssh/` を読む)。`privateRepos` が off なのにどれかが on なら、runner がどれがなぜ要るかを
-  出して止める (終了コード 2)。グループ all で `privateRepos = false` を書くなら、3 つの `false` も書く
+- 道具どうしの要る・要らないは `nix/lib/groups.nix` の表 (`runnerDeps`。runner には `groups.json` の `requires` で渡る) で決まる。on の道具の要る道具が
+  off なら、runner がどれがなぜ要るかと直し方を出して止める (終了コード 2)。今の組:
+  - `claudePrivateSkills`・`opReasonSshRelay` は `privateRepos` が要る (claude-skills の clone を読む・中継のファイルを置く手順 `ssh-config` が
+    dotfiles-private の `ssh/` を読む)。グループ all で `privateRepos = false` を書くなら、2 つの `false` も書く
+  - `herdrHub` (集約ハブ) は `windowsClaudeCode` と `windowsHerdr` が要る (ハブの会話の Claude Code と土台の skill を置く手順 `claude-files`・mod
+    pjp-spaces と hc を入れる herdr-app)。`privateRepos` は要らない (ハブと子の道具・mod・土台の skill は公開の dotfiles にある。
+    [claude-skills と Windows のハブ](#claude-skills-と-windows-のハブ-w0-2))。minimum のホストなら `[tools]` に 3 つを書く
 - `claudePrivateSkills` (claude-skills の clone を Windows の Claude Code で使うか) を書くと、手順 `claude-skills`・`local-env`・`pjp` が on になる
 - `devTracker` を書くと、Windows の `CLAUDE.md` に「タスク管理」の節が入り、skillOverrides の `pjp-dev-tracker` が on になる ([後述](#claude-code-の設定))
 - `onePassword` を書かなければ `op-reason` の行は off になり、runner は Windows の op-reason を確かめも入れもしない ([後述](#op-reason))

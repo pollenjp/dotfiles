@@ -3,8 +3,9 @@
 //!
 //! 引く順は `--host-file` → 手元の `host.toml` (雛形 `win/templates/host.minimum.toml` を bootstrap が写す。gh にログインできない PC 向け) →
 //! dotfiles-private (`resolve`)。手元と dotfiles-private の両方があれば、値は手元のものを読み、check は ⚠・apply は止める (どちらを使うか
-//! 決まらない。`Source::Both`)。道具の switch `privateRepos` (pollenjp の private な repo と gh のログイン。runner だけが読む道具) が off なのに、
-//! それが要る道具 (`NEEDS_PRIVATE_REPOS`) が on なら、読むときに止める (dotfiles-private の docs/adr/111_win_runner_without_gh_*)。
+//! 決まらない。`Source::Both`)。on の道具の要る道具 (`groups.json` の `requires`。道具の switch `privateRepos` (pollenjp の private な repo と gh の
+//! ログイン。runner だけが読む道具) が要る道具や、集約ハブ `herdrHub` が要る windowsClaudeCode・windowsHerdr) が off なら、読むときに止める
+//! (dotfiles-private の docs/adr/111_win_runner_without_gh_*・docs/adr/124_*)。
 //!
 //! ホストの値は WSL の Nix のホスト (`nix/hosts/<user>@<hostname>.nix`) に当たる。書けるのは設定グループ (`group`)・道具の switch の上書き
 //! (`[tools]`。`group.json` の `tools` と同じ名前)・受け持ちの印 (`[runner] enable`)・op-reason の SSH の中継のモード (`[opReason]`)・
@@ -533,11 +534,25 @@ fn parse_tokens(t: &toml::Table) -> Result<BTreeMap<String, NotionToken>, String
     Ok(out)
 }
 
-/// `groups.json` の中身 (グループごとの道具の switch の既定)。
+/// `groups.json` の中身 (グループごとの道具の switch の既定・runner の止める条件・skill の依存)。
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Groups {
     pub default: String,
     groups: BTreeMap<String, BTreeMap<String, bool>>,
+    /// runner の止める条件 (道具 → 要る道具の並び。`nix/lib/groups.nix` の runnerDeps)。on の道具の要る道具が off なら、ホストの値を読むときに止める
+    requires: BTreeMap<String, Vec<String>>,
+    /// 同じ組のわけ (道具 → 要る道具 → わけ)。止める文に添える (無い組は添えない)
+    requires_why: BTreeMap<String, BTreeMap<String, String>>,
+    /// skill の依存 (skill → Windows で要る道具の並び。`nix/lib/groups.nix` の skills の windows)
+    skills: BTreeMap<String, Vec<String>>,
+}
+
+/// 文字列の配列を読む (要る道具の並び・skill の依存)
+fn string_list(v: &serde_json::Value) -> Option<Vec<String>> {
+    v.as_array()?
+        .iter()
+        .map(|x| x.as_str().map(str::to_string))
+        .collect()
 }
 
 impl Groups {
@@ -553,8 +568,8 @@ impl Groups {
             )
         };
         let v: serde_json::Value = serde_json::from_str(text).map_err(|e| bad(&e.to_string()))?;
-        if v["version"] != 2 {
-            return Err(bad("version が 2 でない"));
+        if v["version"] != 3 {
+            return Err(bad("version が 3 でない"));
         }
         let default = v["default"]
             .as_str()
@@ -580,7 +595,64 @@ impl Groups {
         if !groups.contains_key(&default) {
             return Err(bad("default のグループが groups に無い"));
         }
-        Ok(Groups { default, groups })
+        let known = |k: &str| groups.values().any(|t| t.contains_key(k));
+        let mut requires = BTreeMap::new();
+        for (tool, list) in v["requires"]
+            .as_object()
+            .ok_or_else(|| bad("requires が無い"))?
+        {
+            let list = string_list(list)
+                .ok_or_else(|| bad(&format!("requires.{tool} が文字列の配列でない")))?;
+            if let Some(k) = std::iter::once(tool).chain(&list).find(|k| !known(k)) {
+                return Err(bad(&format!(
+                    "requires.{tool} の道具 {k} が groups の tools に無い"
+                )));
+            }
+            requires.insert(tool.clone(), list);
+        }
+        let mut requires_why = BTreeMap::new();
+        for (tool, whys) in v["requiresWhy"]
+            .as_object()
+            .ok_or_else(|| bad("requiresWhy が無い"))?
+        {
+            let mut m = BTreeMap::new();
+            for (req, why) in whys
+                .as_object()
+                .ok_or_else(|| bad(&format!("requiresWhy.{tool} が表でない")))?
+            {
+                if !requires.get(tool).is_some_and(|l| l.contains(req)) {
+                    return Err(bad(&format!(
+                        "requiresWhy.{tool}.{req} が requires に無い組"
+                    )));
+                }
+                let why = why
+                    .as_str()
+                    .ok_or_else(|| bad(&format!("requiresWhy.{tool}.{req} が文字列でない")))?;
+                m.insert(req.clone(), why.to_string());
+            }
+            requires_why.insert(tool.clone(), m);
+        }
+        let mut skills = BTreeMap::new();
+        for (name, s) in v["skills"]
+            .as_object()
+            .ok_or_else(|| bad("skills が無い"))?
+        {
+            let list = string_list(&s["windows"])
+                .ok_or_else(|| bad(&format!("skills.{name}.windows が文字列の配列でない")))?;
+            if let Some(k) = list.iter().find(|k| !known(k)) {
+                return Err(bad(&format!(
+                    "skills.{name}.windows の道具 {k} が groups の tools に無い"
+                )));
+            }
+            skills.insert(name.clone(), list);
+        }
+        Ok(Groups {
+            default,
+            groups,
+            requires,
+            requires_why,
+            skills,
+        })
     }
 
     pub fn names(&self) -> Vec<&str> {
@@ -680,6 +752,14 @@ impl HostValues {
             .then_some(self.ssh_relay_mode.as_str())
     }
 
+    /// skill name を Claude Code の一覧に出すか (`groups.json` の skills の windows の道具が全部 on。表に無い skill はいつも出す)
+    pub fn skill_on(&self, name: &str) -> bool {
+        self.groups
+            .skills
+            .get(name)
+            .is_none_or(|tools| tools.iter().all(|k| self.tool(k)))
+    }
+
     /// 道具の switch の値がどこで決まったか (一覧と off の行に添える)。
     pub fn tool_origin(&self, key: &str) -> String {
         if self.overrides.contains_key(key) {
@@ -698,38 +778,38 @@ const REMOVED_GROUPS: [&str; 3] = ["personal", "company", "client"];
 /// 流さず、手順 bootstrap は `-Private` を付けずに確かめる (ADR 111)
 pub const PRIVATE_REPOS: &str = "privateRepos";
 
-/// `privateRepos` が要る道具と、そのわけ (groups.nix の runnerOnlyTools の requiredBy と同じ並び)。privateRepos が off なのにどれかが on なら、
-/// ホストの値を読むときに止める (黙って手順を飛ばさない)
-pub const NEEDS_PRIVATE_REPOS: [(&str, &str); 3] = [
-    ("claudePrivateSkills", "claude-skills の clone を読む"),
-    (
-        "herdrHub",
-        "claude-skills の pjp でハブを作り、claude-skills の mod を置く",
-    ),
-    (
-        "opReasonSshRelay",
-        "中継のファイルを置く手順 ssh-config が dotfiles-private の ssh/ を読む",
-    ),
-];
-
-/// `privateRepos` が off なのに、それが要る道具が on なら、その誤りの文 (無ければ None)
-fn private_repos_error(h: &HostValues) -> Option<String> {
-    if h.tool(PRIVATE_REPOS) {
-        return None;
+/// on の道具の要る道具 (`groups.json` の requires) が off なら、その誤りの文 (要る道具ごとに 1 つ。要る道具の名前の順。無ければ空)。黙って手順を
+/// 飛ばさず、ホストの値を読むときに止める。privateRepos の文は bootstrap の `-Private` を案内する
+fn requires_errors(h: &HostValues) -> Vec<String> {
+    let mut by_req: BTreeMap<&str, Vec<String>> = BTreeMap::new();
+    for (tool, reqs) in &h.groups.requires {
+        if !h.tool(tool) {
+            continue;
+        }
+        for req in reqs.iter().filter(|r| !h.tool(r)) {
+            let shown = match h.groups.requires_why.get(tool).and_then(|w| w.get(req)) {
+                Some(why) => format!("{tool} ({why})"),
+                None => tool.clone(),
+            };
+            by_req.entry(req.as_str()).or_default().push(shown);
+        }
     }
-    let on: Vec<String> = NEEDS_PRIVATE_REPOS
-        .iter()
-        .filter(|(key, _)| h.tool(key))
-        .map(|(key, why)| format!("{key} ({why})"))
-        .collect();
-    if on.is_empty() {
-        return None;
-    }
-    Some(format!(
-        "[tools] {PRIVATE_REPOS} が off ({}) なのに、private な repo を要る道具が on です: {}。gh にログインして private な repo を取る PC なら [tools] に {PRIVATE_REPOS} = true を書き (bootstrap は -Private で流す)、取らない PC なら、その道具を false にしてください (dotfiles の win/README.md の「ホストの値」)",
-        h.tool_origin(PRIVATE_REPOS),
-        on.join("・")
-    ))
+    by_req
+        .into_iter()
+        .map(|(req, on)| {
+            let origin = h.tool_origin(req);
+            let on = on.join("・");
+            if req == PRIVATE_REPOS {
+                format!(
+                    "[tools] {PRIVATE_REPOS} が off ({origin}) なのに、private な repo を要る道具が on です: {on}。gh にログインして private な repo を取る PC なら [tools] に {PRIVATE_REPOS} = true を書き (bootstrap は -Private で流す)、取らない PC なら、その道具を false にしてください (dotfiles の win/README.md の「ホストの値」)"
+                )
+            } else {
+                format!(
+                    "[tools] {req} が off ({origin}) なのに、それを要る道具が on です: {on}。[tools] に {req} = true を書くか、その道具を false にしてください (dotfiles の win/README.md の「ホストの値」)"
+                )
+            }
+        })
+        .collect()
 }
 
 /// op-reason の SSH の中継のモード (`op-reason.exe --ssh-agent --mode` の値。先頭が書かなかったときの既定)
@@ -1237,8 +1317,9 @@ pub fn parse(text: &str, path: &Path, groups: Groups) -> Result<HostValues, Stri
         source: Source::File(path.to_path_buf()),
         groups,
     };
-    if let Some(e) = private_repos_error(&h) {
-        return Err(fail(e));
+    let errors = requires_errors(&h);
+    if !errors.is_empty() {
+        return Err(errors.into_iter().map(fail).collect::<Vec<_>>().join("\n"));
     }
     Ok(h)
 }
@@ -1445,42 +1526,98 @@ mod tests {
         assert!(!HostValues::missing(Path::new("h.toml"), groups()).tool(PRIVATE_REPOS));
     }
 
-    /// privateRepos が off なのに、それが要る道具 (claudePrivateSkills・herdrHub・opReasonSshRelay) が on なら、どの道具がなぜ要るかを出して止める
+    /// privateRepos が off なのに、それが要る道具 (groups.json の requires。claudePrivateSkills・opReasonSshRelay) が on なら、どの道具がなぜ要るかを
+    /// 出して止める。文は前の版 (要る道具を手で並べていた版) と同じ
     #[test]
     fn tools_needing_private_repos_stop_without_it() {
-        for (key, why) in NEEDS_PRIVATE_REPOS {
+        for (key, why) in [
+            ("claudePrivateSkills", "claude-skills の clone を読む"),
+            (
+                "opReasonSshRelay",
+                "中継のファイルを置く手順 ssh-config が dotfiles-private の ssh/ を読む",
+            ),
+        ] {
             let e = host(&format!("[tools]\n{key} = true\n")).unwrap_err();
-            assert!(e.starts_with("h.toml: "), "{e}");
-            assert!(
-                e.contains("[tools] privateRepos が off (グループ minimum の既定) なのに、private な repo を要る道具が on です: "),
-                "{e}"
-            );
-            assert!(e.contains(&format!("{key} ({why})")), "{e}");
-            assert!(
-                e.contains("privateRepos = true を書き (bootstrap は -Private で流す)"),
-                "{e}"
+            assert_eq!(
+                e,
+                format!(
+                    "h.toml: [tools] privateRepos が off (グループ minimum の既定) なのに、private な repo を要る道具が on です: {key} ({why})。gh にログインして private な repo を取る PC なら [tools] に privateRepos = true を書き (bootstrap は -Private で流す)、取らない PC なら、その道具を false にしてください (dotfiles の win/README.md の「ホストの値」)"
+                )
             );
             let h = host(&format!("[tools]\n{key} = true\nprivateRepos = true\n")).unwrap();
             assert!(h.tool(key));
         }
-        // all に privateRepos = false だけを書くと、要る道具の既定 (on) が 3 つとも並ぶ
+        // all に privateRepos = false だけを書くと、要る道具の既定 (on) が並ぶ (名前の順)
         let e = host("group = \"all\"\n[tools]\nprivateRepos = false\n").unwrap_err();
         assert!(
             e.contains("[tools] privateRepos が off (ホストの値) なのに"),
             "{e}"
         );
         assert!(
-            e.contains("claudePrivateSkills (claude-skills の clone を読む)・herdrHub (")
-                && e.contains("・opReasonSshRelay ("),
+            e.contains("claudePrivateSkills (claude-skills の clone を読む)・opReasonSshRelay ("),
             "{e}"
         );
         let h = host(
-            "group = \"all\"\n[tools]\nprivateRepos = false\nclaudePrivateSkills = false\nherdrHub = false\nopReasonSshRelay = false\n",
+            "group = \"all\"\n[tools]\nprivateRepos = false\nclaudePrivateSkills = false\nopReasonSshRelay = false\n",
         )
         .unwrap();
         assert!(!h.tool(PRIVATE_REPOS));
-        // 要らない道具 (devTracker など) は privateRepos が off でも on にできる
+        // 要らない道具 (devTracker・集約ハブなど) は privateRepos が off でも on にできる
         assert!(host("[tools]\ndevTracker = true\nwindowsClaudeCode = true\n").is_ok());
+        assert!(
+            host("[tools]\nwindowsClaudeCode = true\nwindowsHerdr = true\nherdrHub = true\n")
+                .is_ok()
+        );
+    }
+
+    /// 集約ハブ (herdrHub) は privateRepos が要らず、windowsClaudeCode と windowsHerdr が要る (groups.json の requires。dotfiles-private の
+    /// ADR 124)。要る道具が off なら、要る道具ごとに 1 行ずつ、どの道具がなぜ要るかと直し方を出して止める
+    #[test]
+    fn hub_needs_claude_code_and_herdr() {
+        // minimum に 3 つを足したホスト (privateRepos は既定の off) は通る
+        let h = host("[tools]\nwindowsClaudeCode = true\nwindowsHerdr = true\nherdrHub = true\n")
+            .unwrap();
+        assert!(h.tool("herdrHub"));
+        assert!(!h.tool(PRIVATE_REPOS));
+        let e = host("[tools]\nwindowsClaudeCode = true\nherdrHub = true\n").unwrap_err();
+        assert_eq!(
+            e,
+            "h.toml: [tools] windowsHerdr が off (グループ minimum の既定) なのに、それを要る道具が on です: herdrHub (mod pjp-spaces と hc を入れる herdr-app)。[tools] に windowsHerdr = true を書くか、その道具を false にしてください (dotfiles の win/README.md の「ホストの値」)"
+        );
+        // 2 つとも off なら 2 行 (要る道具の名前の順)。どちらの行もファイルの名前で始まる
+        let e = host("[tools]\nherdrHub = true\n").unwrap_err();
+        let lines: Vec<&str> = e.lines().collect();
+        assert_eq!(lines.len(), 2, "{e}");
+        assert!(
+            lines[0].starts_with("h.toml: [tools] windowsClaudeCode が off (グループ minimum の既定) なのに、それを要る道具が on です: herdrHub (ハブの会話の Claude Code と、土台の skill を置く手順 claude-files)。"),
+            "{e}"
+        );
+        assert!(
+            lines[1].starts_with("h.toml: [tools] windowsHerdr が off"),
+            "{e}"
+        );
+        // all は通り、all で windowsHerdr だけを外すと止まる
+        assert!(host("group = \"all\"\n").is_ok());
+        let e = host("group = \"all\"\n[tools]\nwindowsHerdr = false\n").unwrap_err();
+        assert!(
+            e.starts_with("h.toml: [tools] windowsHerdr が off (ホストの値) なのに、それを要る道具が on です: herdrHub ("),
+            "{e}"
+        );
+        assert!(host("group = \"all\"\n[tools]\nwindowsHerdr = false\nherdrHub = false\n").is_ok());
+    }
+
+    /// 埋めた groups.json の skill の依存 (skills の windows): 表の skill は要る道具が全部 on のときだけ出し、表に無い skill はいつも出す
+    #[test]
+    fn skill_on_follows_the_table() {
+        let minimum = host("").unwrap();
+        let hub = host("[tools]\nwindowsClaudeCode = true\nwindowsHerdr = true\nherdrHub = true\n")
+            .unwrap();
+        for name in ["pjp-hc-hub", "pjp-hc-child", "pjp-hc-hub-panel"] {
+            assert!(!minimum.skill_on(name), "{name}");
+            assert!(hub.skill_on(name), "{name}");
+        }
+        assert!(minimum.skill_on("pjp-nix-flake"));
+        assert!(host("group = \"all\"\n").unwrap().skill_on("pjp-hc-hub"));
     }
 
     /// --host-file が無いときは、手元の host.toml → dotfiles-private の順に引く。両方あれば手元を読んで Both、どちらも無ければ 2 つの場所を並べる
@@ -1531,7 +1668,7 @@ mod tests {
         // 手元のファイルの誤りは、ほかのホストの値の誤りと同じく止める
         t.write(
             "home/.config/dotfiles/host.toml",
-            "[tools]\nherdrHub = true\n",
+            "[tools]\nclaudePrivateSkills = true\n",
         );
         let e = resolve(&local, &private, groups()).unwrap_err();
         assert!(e.contains("host.toml: [tools] privateRepos が off"), "{e}");
@@ -2252,26 +2389,57 @@ mod tests {
 
     #[test]
     fn rejects_broken_groups_json() {
+        let ok = r#"{"version":3,"default":"minimum","groups":{"minimum":{"tools":{"a":false,"b":true}}},"requires":{"a":["b"]},"requiresWhy":{"a":{"b":"わけ"}},"skills":{"s":{"windows":["a"],"linux":["x"]}}}"#;
+        assert!(Groups::parse(ok).is_ok());
         assert!(Groups::parse("{}").is_err());
         assert!(Groups::parse("not json").is_err());
-        // 前の版 (段の tiers を持っていた version 1) は読まない
-        assert!(
-            Groups::parse(r#"{"version":1,"default":"minimum","groups":{"minimum":{"tools":{}}}}"#)
-                .is_err()
-        );
-        assert!(
-            Groups::parse(r#"{"version":2,"default":"x","groups":{"minimum":{"tools":{}}}}"#)
-                .is_err()
-        );
-        assert!(
-            Groups::parse(
-                r#"{"version":2,"default":"minimum","groups":{"minimum":{"tools":{"a":1}}}}"#
-            )
-            .is_err()
-        );
-        assert!(
-            Groups::parse(r#"{"version":2,"default":"minimum","groups":{"minimum":{"tools":{}}}}"#)
-                .is_ok()
-        );
+        // 前の版 (段の tiers を持っていた version 1 と、要る道具の表を持たない version 2) は読まない
+        for old in [1, 2] {
+            let text = ok.replace("\"version\":3", &format!("\"version\":{old}"));
+            assert!(Groups::parse(&text).is_err(), "{text}");
+        }
+        let broken = [
+            ("\"default\":\"minimum\"", "\"default\":\"x\""),
+            ("\"a\":false", "\"a\":1"),
+            // requires・skills の道具は groups の tools にある名前で、並びは文字列の配列
+            (
+                "\"requires\":{\"a\":[\"b\"]}",
+                "\"requires\":{\"a\":[\"c\"]}",
+            ),
+            (
+                "\"requires\":{\"a\":[\"b\"]}",
+                "\"requires\":{\"c\":[\"b\"]}",
+            ),
+            ("\"requires\":{\"a\":[\"b\"]}", "\"requires\":{\"a\":\"b\"}"),
+            ("\"requires\":{\"a\":[\"b\"]},", ""),
+            (
+                "\"skills\":{\"s\":{\"windows\":[\"a\"]",
+                "\"skills\":{\"s\":{\"windows\":[\"c\"]",
+            ),
+            (
+                "\"skills\":{\"s\":{\"windows\":[\"a\"]",
+                "\"skills\":{\"s\":{\"windows\":[1]",
+            ),
+            (
+                ",\"skills\":{\"s\":{\"windows\":[\"a\"],\"linux\":[\"x\"]}}",
+                "",
+            ),
+            // わけは要る道具の表と同じ組の文字列
+            (
+                "\"requiresWhy\":{\"a\":{\"b\":\"わけ\"}}",
+                "\"requiresWhy\":{\"a\":{\"c\":\"わけ\"}}",
+            ),
+            (
+                "\"requiresWhy\":{\"a\":{\"b\":\"わけ\"}}",
+                "\"requiresWhy\":{\"a\":{\"b\":1}}",
+            ),
+        ];
+        for (from, to) in broken {
+            let text = ok.replace(from, to);
+            assert_ne!(text, ok, "{from}");
+            assert!(Groups::parse(&text).is_err(), "{text}");
+        }
+        // わけの無い組は読める (文にわけを添えない)
+        assert!(Groups::parse(&ok.replace("{\"a\":{\"b\":\"わけ\"}}", "{}")).is_ok());
     }
 }

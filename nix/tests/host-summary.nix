@@ -25,9 +25,10 @@
 #   - winData: グループ・[tools] の上書き (host) とグループの既定 (group)・効く条件 (opReasonSshRelay は onePassword と privateRepos) で効かない
 #     道具・runner の道具だけ (runner だけが読む privateRepos の行は最後で、効く条件は無い)・図に描けない値 (受け持ち・鍵の本数とコメント
 #     (鍵そのものは出さない)・ユーザー・送り元の数)。group を書かないホストは minimum で unset。やめたグループ (company など)・知らない
-#     グループ・知らない道具・bool でない道具の値と、privateRepos が off なのにそれが要る道具 (claudePrivateSkills・herdrHub・
-#     opReasonSshRelay) が on のホスト (all に privateRepos = false だけを書いたホストも) は評価で止める。
-#     図の領域の値は、minimum がいつも on、all はグループが all のときだけ on
+#     グループ・知らない道具・bool でない道具の値と、runner の止める条件 (groups.nix の runnerDeps) の要る道具が off なのにそれが要る道具が
+#     on のホスト (privateRepos が off で claudePrivateSkills・opReasonSshRelay が on。all に privateRepos = false だけを書いたホストも。
+#     herdrHub が on で windowsClaudeCode か windowsHerdr が off) は評価で止める。herdrHub は privateRepos が off でも、windowsClaudeCode と
+#     windowsHerdr が on なら止めない。図の領域の値は、minimum がいつも on、all はグループが all のときだけ on
 #   - files: 入口 (README.md と html/hosts.html)・Nix と Windows のホストのページを出し、入口の表で同じ PC (@ の後ろを小文字で比べる)
 #     の Nix と Windows のホストを結ぶ。入口の図は Nix と Windows の 2 つで、重ねるタブは 2 台以上のときだけ。ホストが 0 台でも
 #     README.md と html/hosts.html だけを出す (「ありません」)
@@ -340,6 +341,11 @@ let
         && (rowOf dave "opReasonSshRelay").requiresOff == [ "[tools] onePassword" ]
         && (rowOf dave "windowsClaudeAccounts").requires == [ "[tools] windowsClaudeCode" ]
         && (rowOf dave "claudePrivateSkills").requires == [ "[tools] privateRepos" ]
+        &&
+          (rowOf dave "herdrHub").requires == [
+            "[tools] windowsClaudeCode"
+            "[tools] windowsHerdr"
+          ]
         && (rowOf dave "privateRepos").source == "host"
         && (rowOf dave "privateRepos").effective
         && (rowOf dave "privateRepos").default == false
@@ -385,7 +391,7 @@ let
         && (builtins.head (builtins.head (dataOfHtml allHost).figures).views).regions.all.value;
     }
     {
-      name = "winData: やめたグループ・知らないグループ・知らない道具・bool でない道具の値と、privateRepos が off なのにそれが要る道具が on のホストは評価で止める";
+      name = "winData: やめたグループ・知らないグループ・知らない道具・bool でない道具の値と、止める条件の要る道具が off なのにそれが要る道具が on のホストは評価で止める";
       ok =
         throws (hostSummary.winData windowsGroups "x@y" { group = "company"; })
         && throws (hostSummary.winData windowsGroups "x@y" { group = "nope"; })
@@ -393,6 +399,23 @@ let
         && throws (hostSummary.winData windowsGroups "x@y" { tools.windowsNtn = "yes"; })
         && throws (hostSummary.winData windowsGroups "x@y" { tools.claudePrivateSkills = true; })
         && throws (hostSummary.winData windowsGroups "x@y" { tools.herdrHub = true; })
+        && throws (
+          hostSummary.winData windowsGroups "x@y" {
+            tools = {
+              herdrHub = true;
+              windowsClaudeCode = true;
+            };
+          }
+        )
+        && !(throws (
+          hostSummary.winData windowsGroups "x@y" {
+            tools = {
+              herdrHub = true;
+              windowsClaudeCode = true;
+              windowsHerdr = true;
+            };
+          }
+        ))
         && throws (
           hostSummary.winData windowsGroups "x@y" {
             group = "all";
@@ -413,7 +436,6 @@ let
             tools = {
               privateRepos = false;
               claudePrivateSkills = false;
-              herdrHub = false;
               opReasonSshRelay = false;
             };
           }
