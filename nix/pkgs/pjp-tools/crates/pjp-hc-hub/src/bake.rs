@@ -9,6 +9,11 @@
 //! Windows のパスを WSL から見たパス (`wsl:` の行。WSL のハブの `ticket.sh figure` に渡す) も添える。ミニ絵 (markdown の節と Q&A の答えの絵の行 `![説明](<パス>)`) は marks を
 //! 持たないので、図のパスを渡すと焼かずに写し、付けた項目の見出しと説明からキャプションを作る。
 //!
+//! panel の図は、根の width・height を表に出る大きさ (image の節の width・height・ミニ絵の 200×80) の [`FINENESS`] 倍にし、
+//! viewBox を表に出る大きさにして描く (`references/panel-figures.md` の「細かさ」)。写しは根の width・height を
+//! 表に出る大きさに戻して書く (panel の外では今までどおりの大きさで出る)。写すときに、粗い図 (根がその倍率より小さい)・縦横の比の違い・
+//! 表に出る図で 10 px より小さい字・形の多すぎるミニ絵を `!!` の行で知らせる (描いた往復で気づくため)。
+//!
 //! marks の形と既定値は mod (dotfiles の `win/herdr-app/mods/pjp-hub-panel/main.js` の `mark()`) に合わせる:
 //! - flow: x1,y1 → x2,y2 の向きに speed px/s (既定 40) で流れる点。点は半径 4 で、間は 2π·292/45 px (mod の ring.svg の、
 //!   半径 292 の円に並べた 45 個の点)。線の外接矩形 (線と直角の向きにだけ 5 px 広げる) で切り抜き、点は mod と同じく線の端で
@@ -43,6 +48,16 @@ const CLIP_PAD: f64 = 5.0;
 /// mod の ring.svg の、点を並べた円の半径と点の数。
 const RING_RADIUS: f64 = 292.0;
 const RING_DOTS: f64 = 45.0;
+/// panel の図の細かさ: SVG の根の width・height を、表に出る大きさ (image の節の width・height・ミニ絵の [`MINI_SIZE`]) の何倍に
+/// するか (わけは `references/panel-figures.md` の「細かさ」)。これより粗い図に `!!` を出す。
+pub const FINENESS: f64 = 4.0;
+/// ミニ絵の表に出る大きさ (mod の `MINI`。panel の文字の倍率はこの上に掛かる)。
+pub const MINI_SIZE: (f64, f64) = (200.0, 80.0);
+/// 字の大きさの下限 (表に出る図の px。`references/panel-figures.md` の「大きさと字」)。
+const MIN_FONT: f64 = 10.0;
+/// ミニ絵の形の上限 (`references/panel-figures.md` の「ミニ絵」): 箱 (地の rect を除く rect) と字の行 (text) の数。
+const MINI_MAX_BOXES: usize = 3;
+const MINI_MAX_TEXTS: usize = 6;
 /// label の字体 (panel の図の雛形と同じ。`references/panel-figures.md` の「大きさと字」)。
 const LABEL_FONT: &str = "'Yu Gothic UI', 'Meiryo UI', Meiryo, 'Segoe UI', sans-serif";
 /// theme の名前で書かれた color を置き換える色 (`references/panel-figures.md` の「色」の暗い theme の色)。
@@ -85,14 +100,15 @@ pub fn herdr_app_home() -> Result<PathBuf> {
 /// 焼いた結果。
 #[derive(Debug, Clone, PartialEq)]
 pub struct Baked {
-    /// 書く SVG の中身。焼く mark が 1 つも無ければ、元の中身のまま。
+    /// 書く SVG の中身。根の width・height は表に出る大きさ (節の width・height) にする。焼く mark が 1 つも無ければ、
+    /// ほかは元の中身のまま。
     pub svg: String,
     /// 節の marks の数 (焼けなかったものも)。
     pub tried: usize,
     /// 焼いた mark の種類ごとの数 (出てきた順)。
     pub counts: Vec<(&'static str, usize)>,
-    /// 直すべき合図 (焼けなかった mark・theme の名前で書いた色・節と SVG の大きさの違い)。報告の `!!` の行。panel の図でも
-    /// ずれている。
+    /// 直すべき合図 (焼けなかった mark・theme の名前で書いた色・節と SVG の縦横の比の違い・粗い図・小さい字)。報告の `!!` の行。
+    /// panel の図でもずれている・読みにくい。
     pub warnings: Vec<String>,
     /// 知らせ (label を焼いた時点の字)。報告の `note:` の行。直すものは無い。
     pub notes: Vec<String>,
@@ -103,9 +119,9 @@ impl Baked {
     pub fn summary(&self) -> String {
         if self.counts.is_empty() {
             return if self.tried == 0 {
-                "marks なし。SVG をそのまま写した".to_owned()
+                "marks なし。焼かずに写した".to_owned()
             } else {
-                "marks を 1 つも焼けなかった (!! の行)。SVG をそのまま写した".to_owned()
+                "marks を 1 つも焼けなかった (!! の行)。焼かずに写した".to_owned()
             };
         }
         let parts: Vec<String> = self
@@ -253,11 +269,12 @@ fn bake_target(
         )?;
         let source = media_path(to.home, arg)?;
         let svg = read_figure(&source)?;
-        let out = write_copy(arg, &source, &svg, to.out_dir, names)?;
+        let (copy, warnings) = copy_mini(&svg)?;
+        let out = write_copy(arg, &source, &copy, to.out_dir, names)?;
         let mut report = String::new();
         let _ = writeln!(
             report,
-            "{arg}: {} に写した (ミニ絵。marks は無いので、そのまま)",
+            "{arg}: {} に写した (ミニ絵。marks は無いので焼かない)",
             out.display()
         );
         let _ = writeln!(
@@ -267,6 +284,9 @@ fn bake_target(
         );
         if to.wsl {
             push_wsl(&mut report, &out);
+        }
+        for w in &warnings {
+            let _ = writeln!(report, "  !! {w}");
         }
         return Ok(report);
     }
@@ -562,15 +582,22 @@ pub fn bake(svg: &str, section: &Value) -> std::result::Result<Baked, String> {
         ));
     }
     let root = svg_root(svg).ok_or("SVG の <svg> の始まりがありません")?;
-    let close = svg
-        .rfind("</svg")
-        .filter(|&i| svg[i + "</svg".len()..].trim_start().starts_with('>'))
-        .ok_or("SVG の </svg> がありません")?;
     let width = size_or(section.get("width"), 520.0);
     let height = size_or(section.get("height"), 300.0);
     let mut warnings = Vec::new();
     let mut notes = Vec::new();
-    let transform = frame(&root, width, height, &mut warnings);
+    let fit = fit(&root, width, height, "節", &mut warnings);
+    warnings.extend(small_texts(svg, fit.unit));
+    // 写しの根は表に出る大きさにする (panel の外では今までどおりの大きさで出る。SVG なので粗くならない)
+    let svg = &match fit.resize {
+        Some(size) => resized(svg, &root, size),
+        None => svg.to_owned(),
+    };
+    let close = svg
+        .rfind("</svg")
+        .filter(|&i| svg[i + "</svg".len()..].trim_start().starts_with('>'))
+        .ok_or("SVG の </svg> がありません")?;
+    let transform = fit.transform;
     let marks: &[Value] = match section.get("marks") {
         None | Some(Value::Null) => &[],
         Some(Value::Array(a)) => a,
@@ -931,8 +958,8 @@ struct Root {
     view_box: Option<[f64; 4]>,
 }
 
-/// `<svg …>` の始まりの tag から、width・height・viewBox を読む。
-fn svg_root(svg: &str) -> Option<Root> {
+/// `<svg …>` の始まりの tag の範囲 (`<svg` から `>` の手前まで)。
+fn root_span(svg: &str) -> Option<(usize, usize)> {
     let mut from = 0;
     let start = loop {
         let i = from + svg[from..].find("<svg")?;
@@ -943,6 +970,12 @@ fn svg_root(svg: &str) -> Option<Root> {
         from = i + 4;
     };
     let end = start + svg[start..].find('>')?;
+    Some((start, end))
+}
+
+/// `<svg …>` の始まりの tag から、width・height・viewBox を読む。
+fn svg_root(svg: &str) -> Option<Root> {
+    let (start, end) = root_span(svg)?;
     let tag = &svg[start..end];
     let length = |name: &str| {
         attr(tag, name)
@@ -967,6 +1000,11 @@ fn svg_root(svg: &str) -> Option<Root> {
 
 /// tag の中の属性 `name="…"` か `name='…'` の値。
 fn attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+    attr_span(tag, name).map(|(a, b)| &tag[a..b])
+}
+
+/// tag の中の属性 `name="…"` か `name='…'` の値の範囲 (引用符の内側)。
+fn attr_span(tag: &str, name: &str) -> Option<(usize, usize)> {
     let mut from = 0;
     while let Some(off) = tag[from..].find(name) {
         let i = from + off;
@@ -975,7 +1013,8 @@ fn attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
         if !before.is_some_and(char::is_whitespace) {
             continue;
         }
-        let rest = tag[i + name.len()..].trim_start();
+        let after = &tag[i + name.len()..];
+        let rest = after.trim_start();
         let Some(rest) = rest.strip_prefix('=') else {
             continue;
         };
@@ -984,48 +1023,288 @@ fn attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
         if quote != '"' && quote != '\'' {
             continue;
         }
-        let body = &rest[1..];
-        return body.find(quote).map(|j| &body[..j]);
+        let start = tag.len() - rest.len() + 1;
+        return tag[start..].find(quote).map(|j| (start, start + j));
     }
     None
 }
 
-/// marks の座標 (節の width×height の px) を SVG の座標 (viewBox) に写す transform。同じ空間なら None。
+/// 図の大きさの見立て ([`fit`])。
+#[derive(Debug, Clone, PartialEq)]
+struct Fit {
+    /// marks の座標 (表に出る大きさの px) を SVG の座標 (viewBox) に写す transform。同じ空間なら None。
+    transform: Option<String>,
+    /// 写しの根に書く width・height (表に出る大きさ)。根の大きさがそれと同じか、縦横の比が違うなら None (書き換えない)。
+    resize: Option<(f64, f64)>,
+    /// viewBox の 1 単位が、表に出る図で何 px か (字の大きさを表の px にする)。
+    unit: f64,
+}
+
+/// 根の大きさ (width・height。無ければ viewBox の幅と高さ) を、表に出る大きさ `width`×`height` (image の節の width・height。
+/// ミニ絵は [`MINI_SIZE`]) と比べる。`what` は報告の文で表に出る大きさを指す語 (`節`・`ミニ絵`)。
 ///
-/// 写すこと自体は正しい (SVG の width・height が節と同じで viewBox だけが違う図も、写せば panel と同じ所に出る) ので黙って
-/// 写す。注意を足すのは、SVG の大きさ (width・height。無ければ viewBox の幅と高さ) が節の width・height と違うときだけ
-/// (`references/panel.md` の「図」: panel.json の width・height は SVG の width・height と同じにする)。
-fn frame(root: &Root, width: f64, height: f64, warnings: &mut Vec<String>) -> Option<String> {
+/// herdr-app は SVG を根の width・height の 2 倍で 1 回だけ絵にして引き伸ばすので、根は表に出る大きさの [`FINENESS`] 倍にし、
+/// viewBox を表に出る大きさにする (`references/panel-figures.md` の「細かさ」)。根の大きさが表に出る大きさの何倍かは問わず
+/// (縦横で同じなら panel は同じ所に描く)、[`FINENESS`] 倍より粗いとき・縦横の比が違うときだけ注意を足す。marks は viewBox が
+/// どうであれ写せば panel と同じ所に出るので、viewBox だけが違う図は黙って写す。
+fn fit(root: &Root, width: f64, height: f64, what: &str, warnings: &mut Vec<String>) -> Fit {
+    let fine = FINENESS;
     let size = match (root.width, root.height, root.view_box) {
         (Some(w), Some(h), _) => Some((w, h)),
         (_, _, Some(vb)) => Some((vb[2], vb[3])),
         _ => None,
     };
     let same = |a: f64, b: f64| (a - b).abs() < 1e-9;
-    if let Some((w, h)) = size
-        && !(same(w, width) && same(h, height))
-    {
-        warnings.push(format!(
-            "節の大きさ {}x{} と SVG の大きさ {}x{} が違う (marks は SVG に合わせて焼いた。panel.json の width・height は SVG と同じにする)",
-            num(width),
-            num(height),
-            num(w),
-            num(h)
-        ));
+    let mut resize = None;
+    if let Some((w, h)) = size {
+        let (kw, kh) = (w / width, h / height);
+        if !same(kw, kh) {
+            warnings.push(format!(
+                "{what}の大きさ {}x{} と SVG の大きさ {}x{} の縦横の比が違う (marks は SVG に合わせて焼いた。SVG の viewBox は {what}と同じ 0 0 {} {}、width・height は {}x{} にする。panel-figures.md の「細かさ」)",
+                num(width),
+                num(height),
+                num(w),
+                num(h),
+                num(width),
+                num(height),
+                num(width * fine),
+                num(height * fine)
+            ));
+        } else {
+            if kw < fine - 1e-9 {
+                warnings.push(format!(
+                    "SVG の大きさ {}x{} は{what}の大きさ {}x{} の {} 倍で、panel で粗く出る (width・height を {}x{}、viewBox を 0 0 {} {} にし、名前を替えて載せ直す。panel-figures.md の「細かさ」)",
+                    num(w),
+                    num(h),
+                    num(width),
+                    num(height),
+                    num(kw),
+                    num(width * fine),
+                    num(height * fine),
+                    num(width),
+                    num(height)
+                ));
+            }
+            if !same(kw, 1.0) {
+                resize = Some((width, height));
+            }
+        }
     }
     let vb = root
         .view_box
-        .or_else(|| size.map(|(w, h)| [0.0, 0.0, w, h]))?;
-    if same(vb[0], 0.0) && same(vb[1], 0.0) && same(vb[2], width) && same(vb[3], height) {
-        return None;
+        .or_else(|| size.map(|(w, h)| [0.0, 0.0, w, h]));
+    let Some(vb) = vb else {
+        return Fit {
+            transform: None,
+            resize,
+            unit: 1.0,
+        };
+    };
+    let unit = width / vb[2];
+    let transform =
+        if same(vb[0], 0.0) && same(vb[1], 0.0) && same(vb[2], width) && same(vb[3], height) {
+            None
+        } else {
+            Some(format!(
+                "translate({} {}) scale({} {})",
+                num(vb[0]),
+                num(vb[1]),
+                num(vb[2] / width),
+                num(vb[3] / height)
+            ))
+        };
+    Fit {
+        transform,
+        resize,
+        unit,
     }
-    Some(format!(
-        "translate({} {}) scale({} {})",
-        num(vb[0]),
-        num(vb[1]),
-        num(vb[2] / width),
-        num(vb[3] / height)
-    ))
+}
+
+/// 根の width・height を `w`×`h` にした SVG。viewBox が無ければ、元の大きさの viewBox を足す (中身の座標はそのまま)。
+fn resized(svg: &str, root: &Root, (w, h): (f64, f64)) -> String {
+    let Some((start, end)) = root_span(svg) else {
+        return svg.to_owned();
+    };
+    let tag = &svg[start..end];
+    // 置き換え (範囲・字) を後ろから当てる。無い属性は `<svg` の直後に足す
+    let mut edits: Vec<(usize, usize, String)> = Vec::new();
+    let mut insert = String::new();
+    if root.view_box.is_none()
+        && let (Some(ow), Some(oh)) = (root.width, root.height)
+    {
+        let _ = write!(insert, " viewBox=\"0 0 {} {}\"", num(ow), num(oh));
+    }
+    for (name, v) in [("width", w), ("height", h)] {
+        match attr_span(tag, name) {
+            Some((a, b)) => edits.push((a, b, num(v))),
+            None => {
+                let _ = write!(insert, " {name}=\"{}\"", num(v));
+            }
+        }
+    }
+    if !insert.is_empty() {
+        edits.push((4, 4, insert));
+    }
+    edits.sort_by_key(|e| std::cmp::Reverse(e.0));
+    let mut t = tag.to_owned();
+    for (a, b, text) in edits {
+        t.replace_range(a..b, &text);
+    }
+    format!("{}{t}{}", &svg[..start], &svg[end..])
+}
+
+/// SVG の始まりの tag を順に (名前, tag の中身 (`<` から `>` の手前まで), `>` の次の位置)。コメント・CDATA・処理命令・閉じる tag は
+/// 飛ばす。
+fn start_tags(svg: &str) -> Vec<(&str, &str, usize)> {
+    let mut out = Vec::new();
+    let mut i = 0;
+    while let Some(off) = svg[i..].find('<') {
+        let s = i + off;
+        let rest = &svg[s..];
+        let skip_to = |close: &str| rest.find(close).map_or(svg.len(), |e| s + e + close.len());
+        if rest.starts_with("<!--") {
+            i = skip_to("-->");
+            continue;
+        }
+        if rest.starts_with("<![CDATA[") {
+            i = skip_to("]]>");
+            continue;
+        }
+        let Some(e) = rest.find('>') else { break };
+        let tag = &rest[..e];
+        i = s + e + 1;
+        let name_end = tag[1..]
+            .find(|c: char| c.is_whitespace() || c == '/')
+            .map_or(tag.len(), |n| n + 1);
+        let name = &tag[1..name_end];
+        if name.is_empty() || name.starts_with(['/', '!', '?']) {
+            continue;
+        }
+        out.push((name, tag, i));
+    }
+    out
+}
+
+/// tag の字の大きさ (font-size の属性か style の font-size。単位が無いか px のものだけ)。
+fn font_size(tag: &str) -> Option<f64> {
+    let from_style = attr(tag, "style").and_then(|st| {
+        st.split(';').find_map(|d| {
+            let (k, v) = d.split_once(':')?;
+            (k.trim() == "font-size").then(|| v.trim())
+        })
+    });
+    let v = from_style.or_else(|| attr(tag, "font-size"))?;
+    let v = v.trim();
+    let v = v.strip_suffix("px").unwrap_or(v).trim();
+    v.parse::<f64>().ok().filter(|n| n.is_finite() && *n > 0.0)
+}
+
+/// 表に出る図で [`MIN_FONT`] px より小さい字 (font-size を書いた text・tspan・g など) を知らせる文。`unit` は viewBox の
+/// 1 単位が表で何 px か ([`Fit::unit`])。3 つまで字を挙げ、残りは数だけ。
+fn small_texts(svg: &str, unit: f64) -> Vec<String> {
+    let mut found: Vec<(f64, f64, String)> = Vec::new();
+    for (name, tag, after) in start_tags(svg) {
+        let Some(size) = font_size(tag) else { continue };
+        let px = size * unit;
+        if px >= MIN_FONT - 1e-9 {
+            continue;
+        }
+        let what = if name == "text" || name == "tspan" {
+            let body = &svg[after..];
+            let body = &body[..body.find(&format!("</{name}")).unwrap_or(body.len())];
+            let mut plain = String::new();
+            let mut in_tag = false;
+            for c in body.chars() {
+                match c {
+                    '<' => in_tag = true,
+                    '>' => in_tag = false,
+                    c if !in_tag => plain.push(c),
+                    _ => {}
+                }
+            }
+            let plain = plain.split_whitespace().collect::<Vec<_>>().join(" ");
+            let short: String = plain.chars().take(12).collect();
+            let more = if plain.chars().count() > 12 {
+                "…"
+            } else {
+                ""
+            };
+            format!("「{short}{more}」は")
+        } else {
+            format!("<{name}> の")
+        };
+        found.push((size, px, what));
+    }
+    let mut out: Vec<String> = found
+        .iter()
+        .take(3)
+        .map(|(size, px, what)| {
+            let shown = if (unit - 1.0).abs() < 1e-9 {
+                String::new()
+            } else {
+                format!("。表に出る図で {} px", num(*px))
+            };
+            format!(
+                "字が小さい: {what} font-size {}{shown} ({} px 以上にする。panel-figures.md の「大きさと字」)",
+                num(*size),
+                num(MIN_FONT)
+            )
+        })
+        .collect();
+    if found.len() > 3 {
+        out.push(format!(
+            "字が小さい: ほかにも {} か所 ({} px 以上にする)",
+            found.len() - 3,
+            num(MIN_FONT)
+        ));
+    }
+    out
+}
+
+/// ミニ絵の形が多すぎないか (箱 = 地の rect を除く rect が [`MINI_MAX_BOXES`] まで、字 = text が [`MINI_MAX_TEXTS`] まで。
+/// `references/panel-figures.md` の「ミニ絵」)。`view` は viewBox の幅と高さ (地の rect を見分ける)。
+fn mini_shape(svg: &str, view: (f64, f64)) -> Vec<String> {
+    let tags = start_tags(svg);
+    let full = |tag: &str| {
+        let n = |k: &str| attr(tag, k).and_then(|v| v.trim().parse::<f64>().ok());
+        n("width") == Some(view.0) && n("height") == Some(view.1)
+    };
+    let boxes = tags
+        .iter()
+        .filter(|(name, tag, _)| *name == "rect" && !full(tag))
+        .count();
+    let texts = tags.iter().filter(|(name, _, _)| *name == "text").count();
+    let mut out = Vec::new();
+    if boxes > MINI_MAX_BOXES {
+        out.push(format!(
+            "箱 (rect) が {boxes} つ (ミニ絵は {MINI_MAX_BOXES} つと矢印まで。多ければ image の節の図にする。panel-figures.md の「ミニ絵」)"
+        ));
+    }
+    if texts > MINI_MAX_TEXTS {
+        out.push(format!(
+            "字の行 (text) が {texts} 行 (ミニ絵は {MINI_MAX_TEXTS} 行まで。箱ごとに 2 行まで。panel-figures.md の「ミニ絵」)"
+        ));
+    }
+    out
+}
+
+/// ミニ絵の写し: 根の大きさを [`MINI_SIZE`] にした SVG と、直すべき合図 (`!!`。粗い・縦横の比・小さい字・形が多い)。
+pub fn copy_mini(svg: &str) -> std::result::Result<(String, Vec<String>), String> {
+    let root = svg_root(svg).ok_or("SVG の <svg> の始まりがありません")?;
+    let (w, h) = MINI_SIZE;
+    let mut warnings = Vec::new();
+    let fit = fit(&root, w, h, "ミニ絵", &mut warnings);
+    warnings.extend(small_texts(svg, fit.unit));
+    let view = root.view_box.map_or_else(
+        || (root.width.unwrap_or(w), root.height.unwrap_or(h)),
+        |vb| (vb[2], vb[3]),
+    );
+    warnings.extend(mini_shape(svg, view));
+    let text = match fit.resize {
+        Some(size) => resized(svg, &root, size),
+        None => svg.to_owned(),
+    };
+    Ok((text, warnings))
 }
 
 /// 数を短く書く (小数は 3 桁まで、末尾の 0 と点を落とす。-0 は 0)。
@@ -1081,6 +1360,13 @@ mod tests {
             .clone()
     }
 
+    /// 雛形の根の width・height (表に出る大きさの `fine` 倍) を、表に出る大きさに戻したもの (写しの根)。
+    fn at_shown_size(svg: &str, (w, h): (u32, u32), fine: u32) -> String {
+        let from = format!("width=\"{}\" height=\"{}\"", w * fine, h * fine);
+        assert!(svg.contains(&from), "{from}");
+        svg.replacen(&from, &format!("width=\"{w}\" height=\"{h}\""), 1)
+    }
+
     fn svg460x300() -> String {
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"460\" height=\"300\" viewBox=\"0 0 460 300\">\n  <rect width=\"460\" height=\"300\" fill=\"#1e2228\"/>\n</svg>\n".to_owned()
     }
@@ -1107,10 +1393,11 @@ mod tests {
 
     #[test]
     fn act_template_is_baked_on_top_and_keeps_the_figure() {
-        let svg = template("act.svg");
-        let baked = bake(&svg, &template_section("act")).unwrap();
+        let baked = bake(&template("act.svg"), &template_section("act")).unwrap();
         assert_eq!(baked.counts, vec![("flow", 2), ("pulse", 2)]);
         assert!(baked.warnings.is_empty(), "{:?}", baked.warnings);
+        // 根の width・height だけ表に出る大きさ (節の 460x300) に戻す
+        let svg = at_shown_size(&template("act.svg"), (460, 300), 4);
         let close = svg.rfind("</svg>").unwrap();
         // 元の図はそのまま。焼いた g は </svg> の前 (図の上) に入る
         assert!(baked.svg.starts_with(&svg[..close]));
@@ -1171,11 +1458,15 @@ mod tests {
 
     #[test]
     fn figure_without_marks_is_copied_as_is() {
-        let svg = template("compare.svg");
-        let baked = bake(&svg, &template_section("compare")).unwrap();
-        assert_eq!(baked.svg, svg);
+        let baked = bake(&template("compare.svg"), &template_section("compare")).unwrap();
+        assert_eq!(
+            baked.svg,
+            at_shown_size(&template("compare.svg"), (460, 240), 4)
+        );
         assert!(baked.counts.is_empty());
-        assert_eq!(baked.summary(), "marks なし。SVG をそのまま写した");
+        assert!(baked.warnings.is_empty(), "{:?}", baked.warnings);
+        assert_eq!(baked.summary(), "marks なし。焼かずに写した");
+        // 節の大きさの無い節は 520x300 とみる。460x300 の図は縦横の比が違うので、根を書き換えない
         let none = bake(&svg460x300(), &json!({ "type": "image", "src": "a/b.svg" })).unwrap();
         assert_eq!(none.svg, svg460x300());
     }
@@ -1265,40 +1556,68 @@ mod tests {
         assert_eq!(none.svg, svg460x300());
         assert_eq!(
             none.summary(),
-            "marks を 1 つも焼けなかった (!! の行)。SVG をそのまま写した"
+            "marks を 1 つも焼けなかった (!! の行)。焼かずに写した"
         );
     }
 
     #[test]
-    fn size_mismatch_maps_marks_into_the_svg() {
-        let svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"920\" height=\"600\" viewBox=\"0 0 920 600\"><rect width=\"920\" height=\"600\"/></svg>";
-        let baked = bake(
-            svg,
-            &section(json!([{ "kind": "pulse", "x": 10, "y": 10, "w": 50, "h": 30 }])),
+    fn size_and_fineness() {
+        let pulse = section(json!([{ "kind": "pulse", "x": 10, "y": 10, "w": 50, "h": 30 }]));
+        let coarse = |w: &str, h: &str| {
+            format!(
+                "SVG の大きさ {w}x{h} は節の大きさ 460x300 の {} 倍で、panel で粗く出る (width・height を 1840x1200、viewBox を 0 0 460 300 にし、名前を替えて載せ直す。panel-figures.md の「細かさ」)",
+                num(w.parse::<f64>().unwrap() / 460.0)
+            )
+        };
+        // 決まりの形 (根が 4 倍・viewBox が節と同じ): 注意なし・marks は写さず・写しの根は節の大きさ
+        let fine = bake(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"1840\" height=\"1200\" viewBox=\"0 0 460 300\"><rect width=\"460\" height=\"300\"/></svg>",
+            &pulse,
         )
         .unwrap();
+        assert!(fine.warnings.is_empty(), "{:?}", fine.warnings);
+        assert!(fine.svg.starts_with("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"460\" height=\"300\" viewBox=\"0 0 460 300\">"), "{}", fine.svg);
+        assert!(fine.svg.contains("<g id=\"pjp-marks\">"));
+        // 4 倍より細かくてもよい (整数倍でなくても、縦横で同じなら)
+        let finer = bake(
+            "<svg width=\"2300\" height=\"1500\" viewBox=\"0 0 460 300\"><rect/></svg>",
+            &pulse,
+        )
+        .unwrap();
+        assert!(finer.warnings.is_empty(), "{:?}", finer.warnings);
+        assert!(
+            finer
+                .svg
+                .starts_with("<svg width=\"460\" height=\"300\" viewBox=\"0 0 460 300\">"),
+            "{}",
+            finer.svg
+        );
+
+        // 2 倍の大きさで viewBox も 2 倍: marks は viewBox に写し、粗いと知らせる
+        let svg = "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"920\" height=\"600\" viewBox=\"0 0 920 600\"><rect width=\"920\" height=\"600\"/></svg>";
+        let baked = bake(svg, &pulse).unwrap();
         assert!(
             baked
                 .svg
                 .contains("<g id=\"pjp-marks\" transform=\"translate(0 0) scale(2 2)\">")
         );
-        assert_eq!(
-            baked.warnings,
-            vec![
-                "節の大きさ 460x300 と SVG の大きさ 920x600 が違う (marks は SVG に合わせて焼いた。panel.json の width・height は SVG と同じにする)".to_owned()
-            ]
-        );
+        assert_eq!(baked.warnings, vec![coarse("920", "600")]);
+        assert!(baked.svg.starts_with("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"460\" height=\"300\" viewBox=\"0 0 920 600\">"));
         // </svg> が同じ行にあっても、改行を挟んで入れる
         assert!(baked.svg.contains("/>\n  <g id=\"pjp-marks\""));
         assert!(baked.svg.ends_with("  </g>\n</svg>"));
-        let pulse = section(json!([{ "kind": "pulse", "x": 10, "y": 10, "w": 50, "h": 30 }]));
-        // viewBox が無ければ width・height で比べる
+        // 根が節と同じ (前の決まりの図): 粗いと知らせ、根は書き換えない
         let plain = bake("<svg width=\"460px\" height=\"300\"><rect/></svg>", &pulse).unwrap();
-        assert!(plain.warnings.is_empty(), "{:?}", plain.warnings);
+        assert_eq!(plain.warnings, vec![coarse("460", "300")]);
+        assert!(
+            plain
+                .svg
+                .starts_with("<svg width=\"460px\" height=\"300\">")
+        );
         assert!(plain.svg.contains("<g id=\"pjp-marks\">"));
-        // 大きさは節と同じで viewBox だけ違う図は、黙って viewBox に写す (誤った注意を出さない)
+        // 大きさは節の 4 倍で viewBox だけ違う図は、黙って viewBox に写す (誤った注意を出さない)
         let half = bake(
-            "<svg width=\"460\" height=\"300\" viewBox=\"0 0 230 150\"><rect/></svg>",
+            "<svg width=\"1840\" height=\"1200\" viewBox=\"0 0 230 150\"><rect/></svg>",
             &pulse,
         )
         .unwrap();
@@ -1307,17 +1626,145 @@ mod tests {
             half.svg
                 .contains("<g id=\"pjp-marks\" transform=\"translate(0 0) scale(0.5 0.5)\">")
         );
-        // width・height が無ければ viewBox の大きさで比べる
+        // width・height が無ければ viewBox の大きさで比べる (1 倍なので粗い)。写しは根に width・height を足す
         let vb_only = bake("<svg viewBox=\"0 0 460 300\"><rect/></svg>", &pulse).unwrap();
-        assert!(vb_only.warnings.is_empty(), "{:?}", vb_only.warnings);
+        assert_eq!(vb_only.warnings, vec![coarse("460", "300")]);
+        // width・height だけ (viewBox が無い) 4 倍の図は、写しに元の大きさの viewBox を足して中身の座標を保つ
+        let no_vb = bake("<svg width=\"1840\" height=\"1200\"><rect/></svg>", &pulse).unwrap();
+        assert!(no_vb.warnings.is_empty(), "{:?}", no_vb.warnings);
+        assert!(
+            no_vb
+                .svg
+                .starts_with("<svg viewBox=\"0 0 1840 1200\" width=\"460\" height=\"300\">"),
+            "{}",
+            no_vb.svg
+        );
+        assert!(
+            no_vb
+                .svg
+                .contains("transform=\"translate(0 0) scale(4 4)\"")
+        );
+        // 縦横の比が違う
+        let skew = bake(
+            "<svg width=\"1840\" height=\"600\" viewBox=\"0 0 460 300\"><rect/></svg>",
+            &pulse,
+        )
+        .unwrap();
+        assert_eq!(skew.warnings.len(), 1, "{:?}", skew.warnings);
+        assert!(
+            skew.warnings[0]
+                .starts_with("節の大きさ 460x300 と SVG の大きさ 1840x600 の縦横の比が違う"),
+            "{:?}",
+            skew.warnings
+        );
+        assert!(skew.svg.starts_with("<svg width=\"1840\" height=\"600\""));
         // 節の width・height は JSON の数だけを読む (mod の sizeOr と同じく、数の字は 520x300 とみる)
         let text_size = json!({ "type": "image", "width": "460", "height": "300", "marks": [{ "kind": "pulse", "x": 10, "y": 10, "w": 50, "h": 30 }] });
         let by_text = bake(&svg460x300(), &text_size).unwrap();
         assert!(
-            by_text.warnings[0].contains("節の大きさ 520x300 と SVG の大きさ 460x300 が違う"),
+            by_text.warnings[0]
+                .contains("節の大きさ 520x300 と SVG の大きさ 460x300 の縦横の比が違う"),
             "{:?}",
             by_text.warnings
         );
+    }
+
+    #[test]
+    fn small_texts_are_reported_in_shown_px() {
+        let sec = section(json!([]));
+        let svg = "<svg width=\"1840\" height=\"1200\" viewBox=\"0 0 460 300\"><!-- <text font-size=\"2\">コメントの中</text> --><g font-size=\"8\"><text x=\"1\" y=\"2\">親の字</text></g><text font-size=\"10\">ちょうど</text><text style=\"fill: #fff; font-size: 5.2px\">とても小さい字で書いた長い行の字</text><text font-size=\"9\">a<tspan font-weight=\"700\">b</tspan>c</text><text font-size=\"1em\">em は見ない</text></svg>";
+        let w = bake(svg, &sec).unwrap().warnings;
+        assert_eq!(
+            w,
+            vec![
+                "字が小さい: <g> の font-size 8 (10 px 以上にする。panel-figures.md の「大きさと字」)".to_owned(),
+                "字が小さい: 「とても小さい字で書いた長…」は font-size 5.2 (10 px 以上にする。panel-figures.md の「大きさと字」)".to_owned(),
+                "字が小さい: 「abc」は font-size 9 (10 px 以上にする。panel-figures.md の「大きさと字」)".to_owned(),
+            ]
+        );
+        // viewBox が表に出る大きさより大きい図は、表に出る px に直して比べる (font-size 16 が 8 px)
+        let w = bake(
+            "<svg width=\"1840\" height=\"1200\" viewBox=\"0 0 920 600\"><text font-size=\"16\">a</text><text font-size=\"20\">b</text><text font-size=\"1\">c</text><text font-size=\"2\">d</text><text font-size=\"3\">e</text></svg>",
+            &sec,
+        )
+        .unwrap()
+        .warnings;
+        assert_eq!(w.len(), 4, "{w:?}");
+        assert_eq!(
+            w[0],
+            "字が小さい: 「a」は font-size 16。表に出る図で 8 px (10 px 以上にする。panel-figures.md の「大きさと字」)"
+        );
+        assert_eq!(w[3], "字が小さい: ほかにも 1 か所 (10 px 以上にする)");
+        // 雛形はどれも 10 px 以上
+        for name in [
+            "act.svg",
+            "route.svg",
+            "compare.svg",
+            "mini-flow.svg",
+            "mini-before-after.svg",
+            "mini-branch.svg",
+        ] {
+            assert!(small_texts(&template(name), 1.0).is_empty(), "{name}");
+        }
+    }
+
+    #[test]
+    fn minis_are_checked_and_copied_at_the_shown_size() {
+        for name in ["mini-flow.svg", "mini-before-after.svg", "mini-branch.svg"] {
+            let (copy, warnings) = copy_mini(&template(name)).unwrap();
+            assert!(warnings.is_empty(), "{name}: {warnings:?}");
+            assert_eq!(copy, at_shown_size(&template(name), (200, 80), 4), "{name}");
+        }
+        // 前の決まり (200x80 の根) で、字が小さく、箱と字を詰めたミニ絵
+        let mut crowded = String::from(
+            "<svg width=\"200\" height=\"80\" viewBox=\"0 0 200 80\"><rect width=\"200\" height=\"80\"/>",
+        );
+        for i in 0..4 {
+            let _ = write!(
+                crowded,
+                "<rect x=\"{}\" y=\"4\" width=\"40\" height=\"30\"/><text font-size=\"4.5\">a{i}</text><text font-size=\"10\">b{i}</text>",
+                i * 48
+            );
+        }
+        crowded.push_str("</svg>");
+        let (copy, w) = copy_mini(&crowded).unwrap();
+        assert_eq!(copy, crowded, "根が表に出る大きさと同じなら書き換えない");
+        assert_eq!(w.len(), 7, "{w:?}");
+        assert_eq!(
+            w[0],
+            "SVG の大きさ 200x80 はミニ絵の大きさ 200x80 の 1 倍で、panel で粗く出る (width・height を 800x320、viewBox を 0 0 200 80 にし、名前を替えて載せ直す。panel-figures.md の「細かさ」)"
+        );
+        assert!(
+            w[1].starts_with("字が小さい: 「a0」は font-size 4.5 ("),
+            "{w:?}"
+        );
+        assert_eq!(w[4], "字が小さい: ほかにも 1 か所 (10 px 以上にする)");
+        assert_eq!(
+            w[5],
+            "箱 (rect) が 4 つ (ミニ絵は 3 つと矢印まで。多ければ image の節の図にする。panel-figures.md の「ミニ絵」)"
+        );
+        assert_eq!(
+            w[6],
+            "字の行 (text) が 8 行 (ミニ絵は 6 行まで。箱ごとに 2 行まで。panel-figures.md の「ミニ絵」)"
+        );
+        // 根を 4 倍にした写し (ハブの当座の -x4) は通る。それより小さい (2 倍) と粗いと知らせる
+        let x4 = "<svg width=\"800\" height=\"320\" viewBox=\"0 0 200 80\"><rect width=\"200\" height=\"80\"/><text font-size=\"11\">a</text></svg>";
+        let (copy, w) = copy_mini(x4).unwrap();
+        assert!(w.is_empty(), "{w:?}");
+        assert!(copy.starts_with("<svg width=\"200\" height=\"80\" viewBox=\"0 0 200 80\">"));
+        let (_, w) = copy_mini(&x4.replace(
+            "width=\"800\" height=\"320\"",
+            "width=\"400\" height=\"160\"",
+        ))
+        .unwrap();
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert!(
+            w[0].starts_with(
+                "SVG の大きさ 400x160 はミニ絵の大きさ 200x80 の 2 倍で、panel で粗く出る"
+            ),
+            "{w:?}"
+        );
+        assert!(copy_mini("<html/>").unwrap_err().contains("<svg>"));
     }
 
     #[test]

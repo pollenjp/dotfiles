@@ -1,9 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="200" height="80" viewBox="0 0 200 80"
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="320" viewBox="0 0 200 80"
      font-family="'Yu Gothic UI', 'Meiryo UI', Meiryo, 'Segoe UI', sans-serif">
   <title>雛形 mini-branch: 1 つ (左・青) が 2 つ (右) に分かれる</title>
   <!-- panel のミニ絵の雛形 (pjp-hc-hub の references/panel-figures.md の「ミニ絵」)。字だけを替えて使う。
        箱の字は、左 (11 px・太字) が全角 5 字まで、右 (11 px・太字) が全角 7 字まで (半角は 2 字で全角 1 字)。
-       結果が分かれるなら、右の箱を緑 (思ったとおり) と赤 (違った) に替える。動き (marks) は付けない -->
+       結果が分かれるなら、右の箱を緑 (思ったとおり) と赤 (違った) に替える。動き (marks) は付けない
+       根の width・height は viewBox (表に出る大きさ) の 4 倍のまま変えず、座標と字の大きさは viewBox の単位で書く (panel-figures.md の「細かさ」) -->
   <rect width="200" height="80" fill="#1e2228"/>
 
   <!-- 分かれる線と矢印 -->

@@ -1,8 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="460" height="300" viewBox="0 0 460 300"
+<svg xmlns="http://www.w3.org/2000/svg" width="1840" height="1200" viewBox="0 0 460 300"
      font-family="'Yu Gothic UI', 'Meiryo UI', Meiryo, 'Segoe UI', sans-serif">
   <title>雛形 act: 手順の 1 枚。ユーザーがする所 (① ②)、依頼の通り道 (登場物 A → 主役 → 登場物 C)、見ること</title>
   <!-- panel の図の雛形 (pjp-hc-hub の references/panel-figures.md)。字を替え、要らない箱を消して使う。
-       marks は assets/panel/sections.json の節 act。箱や線を動かしたら、marks の座標も同じに替える -->
+       marks は assets/panel/sections.json の節 act。箱や線を動かしたら、marks の座標も同じに替える
+       根の width・height は viewBox (表に出る大きさ) の 4 倍のまま変えず、座標と字の大きさは viewBox の単位で書く (panel-figures.md の「細かさ」) -->
   <rect width="460" height="300" fill="#1e2228"/>
 
   <!-- ユーザーがする所 (黄)。marks の pulse を同じ x・y・w・h で重ねる -->

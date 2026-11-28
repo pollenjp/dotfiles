@@ -128,12 +128,15 @@ pulse、行き来 = dot。比べる図のように、流れもユーザーがす
   隠せない。替える字は SVG に描かずに空けておき、初めから label で置く (SVG に描いた字を替えるなら、名前を替えて描き直す)。
   x,y は字の左上 (SVG の text の y は字の下の線)。9 px より小さくならない。`pjp hub bake` の写しには焼いた時点の字が入り、
   後で label を替えても写しは替わらない
-- marks の座標は図の px (width・height と同じ空間)。図が縮めば marks も同じだけ縮む
+- marks の座標は表に出る大きさの px (節の width・height と、SVG の viewBox と同じ空間。下の「細かさ」)。図が縮めば marks も同じだけ縮む
 - panel の外で動かして見せる写しは、`pjp hub bake` が marks を SVG の中の CSS の動きに焼く (flow は線の上を流れる点・pulse は点滅する枠・
   dot は行き来する点。`panel.md` の「図」)。panel に載せる SVG に CSS や SMIL の動きを書き足さない (panel では動かず、焼いた写しでは
   marks と二重になる)
 
 ## 大きさと字
+
+大きさと字の px は、どれも表に出る大きさ (SVG の viewBox の単位) で書く。SVG の根の width・height は、その 4 倍にする (下の
+「細かさ」)。
 
 - 幅は **460**。panel は図をペインの幅 (余白の 50 px を引き、アプリの zoom で割った幅) に合わせて縮め・大きくする (0.1〜2 倍。
   dotfiles #255 の mod から)。広く描くほど、同じペインで字が小さく出る。手本も、540 で描いた図を 460 に詰め直して載せた (前の
@@ -143,6 +146,7 @@ pulse、行き来 = dot。比べる図のように、流れもユーザーがす
 - 高さは 220〜360。図 1 枚が、まとめのペインの 1 画面に収まる高さにする (問いのペインを開くと、並びによってはまとめのペインが
   低く・狭くなる。並びは `panel.md`)
 - 字: 名前 13〜14 (入れ物の中の部品は 12)・役目 12・状態と補足 11・線のラベル 10・ユーザーの動作 15 (太字)。10 px より小さくしない
+  (ミニ絵も同じ。`pjp hub bake` が、表に出る図で 10 px より小さい字を `!!` の行で知らせる。下の「確かめる」)
 - 1 行の長さ: 幅 120 の箱で、12 px の行は全角 9 字まで。長い名前は 2 行に割らず、短く言い換える
 - 外周の余白は 8 px ほど (6〜14)、箱の間は 40〜60 px (flow の線の長さ)。座標は整数で書き、箱の中の字は `text-anchor="middle"` で
   中央に置く
@@ -151,7 +155,51 @@ pulse、行き来 = dot。比べる図のように、流れもユーザーがす
   指しても戻らなかった (Windows の字体を resvg に渡した下見))。図に Windows のパスを書くときは `/` で区切る
   (`mods/pjp-hub-panel/`)。写して打つパスは図に書かず、markdown の code の span に書く
 
+## 細かさ (SVG の根の width・height)
+
+panel の図 (image の節の SVG とミニ絵) は、表に出る大きさを viewBox に書き、SVG の根の width・height をその **4 倍** にする
+(ユーザーの指示 2026-11-28: panel の図が粗くて読めないので、3 倍以上に細かくする。ミニ絵も
+4 倍にそろえるのは、同じ日のユーザーの答え)。倍率はここにだけ書く。雛形
+(`assets/panel/`) と `pjp hub bake` (dotfiles の `nix/pkgs/pjp-tools/crates/pjp-hc-hub/src/bake.rs` の `FINENESS`) はこの数に合わせる
+(bake の試験が、雛形の根の大きさとこの節の数を `FINENESS` と突き合わせる)。
+
+| 図 | 表に出る大きさ (viewBox) | 根の width・height | panel が大きく出す上限 |
+| --- | --- | --- | --- |
+| image の節 | 節の width・height (雛形は 460×300 など) | 4 倍 (460×300 なら 1840×1200) | ペインで 2 倍・小窓で 4 倍 |
+| ミニ絵 | 200×80 | 4 倍 (800×320) | ペインの幅いっぱい (ふだんのペインで 4 倍ほど)・小窓で 8 倍 |
+
+```xml
+<svg xmlns="http://www.w3.org/2000/svg" width="1840" height="1200" viewBox="0 0 460 300" …>   <!-- image の節 (width 460・height 300) -->
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="320" viewBox="0 0 200 80" …>      <!-- ミニ絵 -->
+```
+
+- 座標・字の大きさ・地の rect・marks は、今までどおり表に出る大きさ (viewBox の単位) で書き、根の 2 つの数だけを 4 倍にする。雛形を写せば、
+  もう 4 倍になっている。字・箱を描き替えても根の 2 つの数は替えない
+- 4 倍にするわけ:
+  - herdr-app の `image()` (GPUI の img()) は、SVG を根の width・height の 2 倍で 1 回だけ絵 (bitmap) にし、あとは引き伸ばして描く
+    (mod の頭のコメントの「図の大きさと、大きく見る小窓」)。絵にする倍率を渡す口は無い (herdr-app の `gpui-kit.d.ts` の `image(path)`)
+  - 表に出た図には、アプリの zoom (ユーザーは 1.1) と画面の表示の倍率 (4K の画面で 150%) が掛かる。表に出る大きさの n 倍で出た図は、
+    n × 1.65 倍の実の px になる。根を 4 倍にすると絵は 8 倍で、n が 4.8 までを覆う (image の節の小窓の 4 倍 → 6.6 倍、ミニ絵のふだんのペインの
+    幅 (画面の約 800 px) → 4 倍ほど)
+  - 根が表に出る大きさのまま (2026-11-28 までの決まり) だと絵は 2 倍しかなく、小窓では 3.3 倍に引き伸ばしてにじみ、字が読めなかった
+- ミニ絵は、mod が置き場の幅いっぱいの 16:9 の枠に収まるいっぱいで出し (下の「ミニ絵」)、小窓で 8 倍まで大きくする。小窓で 8 倍
+  (画面の約 2640 px) まで大きくしたときと、ペインを窓いっぱい (`pane.zoom`) にしたときは、絵を 1.65 倍ほどに引き伸ばし、字の縁が少し
+  柔らかい。ユーザーはそれを受けて 4 倍にそろえた (2026-11-28。試しのペインで 8 倍と見比べ、4 倍で足りるとした。決まりが「図は全部 4 倍」の 1 つで
+  済み、絵の重さも 1 枚 16 MB から 4 MB になる)
+- 重さ: 460×300 の図は 3680×2400 px の絵 (約 35 MB)、ミニ絵は 1600×640 px (約 4 MB) になる。1 回の書き直しで載せる図の枚数の決まり
+  (1 つの話に 3 枚まで・ミニ絵は 3 枚まで) は変えない
+- 粗い図 (根が表に出る大きさの 4 倍より小さい)・縦横の比が表に出る大きさと違う図は、`pjp hub bake` が `!!` の行で知らせる (「確かめる」)。
+  4 倍より細かい図は知らせない
+- `pjp hub bake` の写しは、根の width・height を表に出る大きさに戻して書く (panel の外では今までどおりの大きさで出る。SVG は図形のまま
+  描かれるので粗くならない)
+- 前の決まりで描いた図 (根が表に出る大きさのまま) を細かくするときは、図を Read で読み、根の width・height だけを 4 倍にした写しを
+  別の名前 (`<名前>-x4.svg`) で Write し (viewBox が無ければ、元の表に出る大きさで `viewBox="0 0 <幅> <高さ>"` を足す)、panel.json の
+  節の src・ミニ絵の行のパスを写しに替える (同じ名前で書き換えた図は描き直らない)。節の width・height と marks はそのまま。字が 10 px
+  より小さい図は、細かくしても読みにくいので、雛形から描き直す。panel の外に出した写しは出し直さなくてよい (写しは粗くない)
+
 ## 雛形
+
+大きさは表に出る大きさ (viewBox。根の width・height はその 4 倍。上の「細かさ」)。
 
 | ファイル | 形 | 場面 |
 | --- | --- | --- |
@@ -189,10 +237,14 @@ pulse、行き来 = dot。比べる図のように、流れもユーザーがす
 箇条書きの複雑な項目の下に出す小さな図 (書き方・付ける項目・置き場所・使える mod は `panel.md` の「ミニ絵」)。雛形を写し、字だけを
 替えて描く (ユーザーの承認 2026-11-19)。
 
-- 大きさは幅 200・高さ 80 だけ (`width="200" height="80" viewBox="0 0 200 80"`)。panel が文字の倍率に合わせて大きさを変える
-  (100% で 240×96)
-- 字体・色・地の rect は今の図と同じ (上の「色」「大きさと字」)。字は 10 px 以上
-- 形は少なく、箱 2〜3 つと矢印まで。箱の字は全角 8 字まで (半角は 2 字で全角 1 字)。雛形ごとの上限は下の表 (雛形の SVG のコメントにもある)
+- 形は幅 200・高さ 80 だけ (`viewBox="0 0 200 80"`。根は `width="800" height="320"`。上の「細かさ」)。panel は、置き場の幅 (項目の字の
+  頭からカードの右の縁まで) いっぱいの 16:9 の枠に収まるいっぱいで出す。5:2 は 16:9 より横長なので、右の端が置き場の右の縁に届く。
+  ペインの幅と panel の文字の倍率 (− % +) に追う (ユーザーの指示 2026-11-28: 16:9 の枠に収めたときに右の端が縁に届くまで大きく
+  出し、panel の拡大・縮小に追う。それまでは 200×80 を文字の倍率で変えた 1 つの大きさ (100% で 240×96)。`panel.md` の
+  「ミニ絵」)。大きく出るぶん、字は今までどおり 10 px 以上で、詰め込まない
+- 字体・色・地の rect は今の図と同じ (上の「色」「大きさと字」)。字は 10 px 以上 (viewBox の単位)
+- 形は少なく、箱 2〜3 つと矢印まで。字は箱ごとに 2 行まで (名前と状態か補足。図全体で 6 行まで)。箱の字は全角 8 字まで (半角は
+  2 字で全角 1 字)。雛形ごとの上限は下の表 (雛形の SVG のコメントにもある)。箱・字の行を足したくなったら、ミニ絵でなく image の節の図にする
 - 動き (marks) は付けない。説明の字はミニ絵の下に出ないので、図の中の字だけで分かるように描く
 
 | ファイル | 形 | 箱の字の上限 (全角) |
@@ -205,42 +257,52 @@ pulse、行き来 = dot。比べる図のように、流れもユーザーがす
 2. `<home>\pjp-hub-panel-media\<会話の名前>\mini-<名前>.svg` に Write で書く。描き直したら名前を替える
 3. 確かめる。形を変えたときだけ絵にして見る (token を抑えるため):
    - 字だけを替えた: XML として読めるか (`panel.md` の「図」の 1 行) と、箱ごとの字数が上の表の上限に収まるかを数える
-   - 形を変えた (箱を足した・動かした・大きさを替えた): 次の script で headless Edge に絵にさせ (2 倍の 400×160)、Read で見る。字が
-     箱からはみ出さないか、矢印が箱に届くか
+   - どちらでも: panel.json に絵の行を書いた後、`pjp hub bake '<panel.json の絶対パス>' <会話の名前>/mini-<名前>.svg --out '<scratchpad>\bake-check'`
+     で写しを作り、`!!` の行を見る。粗い (根が 4 倍より小さい)・字が 10 px より小さい・箱が 4 つ以上・字の行が 7 行以上なら、雛形から
+     描き直し、名前を替えて載せ直す
+   - 形を変えた (箱を足した・動かした・大きさを替えた): 次の script で headless Edge に絵にさせ (根の大きさの 800×320)、Read で見る。字が箱からはみ出さないか、矢印が箱に届くか
 
 ```powershell
 # 埋めるもの: <ミニ絵の SVG の絶対パス>・<png の絶対パス> (scratchpad。panel のフォルダの外)
 $edge = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\msedge.exe').'(default)'
 $ud = Join-Path $env:TEMP "pjp-mini-edge-$PID"   # 使い捨ての profile (ユーザーの Edge の profile と窓に触らない)
-& $edge --headless --disable-gpu --hide-scrollbars --no-first-run --no-default-browser-check "--user-data-dir=$ud" --window-size=200,80 --force-device-scale-factor=2 '--screenshot=<png の絶対パス>' ([uri]'<ミニ絵の SVG の絶対パス>').AbsoluteUri 2>$null | Out-Null
+& $edge --headless --disable-gpu --hide-scrollbars --no-first-run --no-default-browser-check "--user-data-dir=$ud" --window-size=800,320 --force-device-scale-factor=1 '--screenshot=<png の絶対パス>' ([uri]'<ミニ絵の SVG の絶対パス>').AbsoluteUri 2>$null | Out-Null
 Remove-Item -Recurse -Force $ud -ErrorAction SilentlyContinue
 Test-Path '<png の絶対パス>'   # True なら絵ができた
 ```
 
 - msedge.exe も herdr-app と同じく GUI の exe なので、`| Out-Null` で流して待つ (`panel.md` の冒頭の「流して待つ」)。`2>$null` は
-  Edge が出す sync などの ERROR の行を捨てる。この形を Windows の pwsh 7 で流し、待った直後に png があり、使い捨ての profile が
-  消えたことを確かめた (2026-11-19)
+  Edge が出す sync などの ERROR の行を捨てる。この形 (前の大きさの `--window-size=200,80 --force-device-scale-factor=2`) を Windows の
+  pwsh 7 で流し、待った直後に png があり、使い捨ての profile が消えたことを確かめた (2026-11-19)。Edge は SVG を根の大きさで開くので、
+  窓は根の 800×320 にし (窓が小さいと左上だけが写る)、等倍で撮る (png も 800×320)
 - 3 つの雛形の字を、全角の上限まで入れた写しをこの手で絵にし、どの箱でも字が箱に収まると確かめた (2026-11-19。Windows の
-  Yu Gothic UI)
+  Yu Gothic UI。根を 4 倍にしても viewBox の中の字と箱の比は変わらない)
 
 ## 確かめる
 
 1. XML と JSON として読めるか (`panel.md` の「書き方」「図」の 1 行ずつ)
 2. marks が図の箱と線に合っているか (次の script。`ずれ` の行を、出たわけのとおりに直す)
 3. shot で見る (`panel.md` の「見た目を確かめる」)。2 枚で点が線に沿って動くか、点滅の枠が箱に重なるか、字が箱からはみ出さないか
-4. `pjp hub bake` で写しを作るときの `!!` の行 (焼けない mark・theme の名前の色・節と SVG の大きさの違い) も、panel の
-   図のずれの合図。panel.json か SVG を直す (`note:` の行は知らせだけ)
+4. `pjp hub bake` で写しを作るときの `!!` の行 (焼けない mark・theme の名前の色・節と SVG の縦横の比の違い・粗い図 (根が「細かさ」の
+   倍率より小さい)・表に出る図で 10 px より小さい字・箱か字の行の多すぎるミニ絵) も、panel の図のずれと読みにくさの合図。panel.json か
+   SVG を直す (`note:` の行は知らせだけ)
 
 ```powershell
 # 埋めるもの: <SVG の絶対パス>・<panel.json の絶対パス>・<節の id>
+$fine = 4   # 根の width・height は viewBox の何倍か (panel-figures.md の「細かさ」)
 $svg = [xml](Get-Content -Raw '<SVG の絶対パス>')
 $sec = @((Get-Content -Raw '<panel.json の絶対パス>' | ConvertFrom-Json).sections | Where-Object { $_.id -eq '<節の id>' })[0]
 $rects = @($svg.SelectNodes("//*[local-name()='rect']"))
 $lines = @($svg.SelectNodes("//*[local-name()='line']"))
-$w = $svg.DocumentElement.width; $h = $svg.DocumentElement.height
+$root = $svg.DocumentElement
+$w = $root.width; $h = $root.height
+$vb = @("$($root.viewBox)".Trim() -split '[\s,]+')
 if (-not $sec) { "ずれ  節 '<節の id>' が panel.json に無い" }
-elseif ("$w" -ne "$($sec.width)" -or "$h" -ne "$($sec.height)") { "ずれ  大きさ: SVG ${w}x$h / 節 $($sec.width)x$($sec.height)" }
-else { "ok    大きさ ${w}x$h" }
+elseif ($vb.Count -ne 4 -or "$($vb[2])" -ne "$($sec.width)" -or "$($vb[3])" -ne "$($sec.height)") {
+  "ずれ  viewBox: SVG '$($root.viewBox)' / 節 $($sec.width)x$($sec.height) (viewBox は 0 0 <節の width> <節の height>)" }
+elseif ("$w" -ne "$($fine * $sec.width)" -or "$h" -ne "$($fine * $sec.height)") {
+  "ずれ  細かさ: 根 ${w}x$h / 節の $fine 倍 $($fine * $sec.width)x$($fine * $sec.height) (「細かさ」)" }
+else { "ok    大きさ 節 $($sec.width)x$($sec.height)・根 ${w}x$h" }
 $on = { param($l, $px, $py)   # 点 (px, py) が線 l の上 (0.5 px まで) にあるか
   $ax = [double]$l.x1; $ay = [double]$l.y1; $dx = [double]$l.x2 - $ax; $dy = [double]$l.y2 - $ay
   $dd = $dx * $dx + $dy * $dy
@@ -276,6 +338,8 @@ foreach ($m in $sec.marks) {
 | 文で足りる項目にもミニ絵を付ける・1 回の書き直しで 4 枚以上 | 複雑な項目 (流れ・前と後・分岐・3 つ以上がかかわる) だけに、3 枚まで |
 | 1 枚に全部の手順を詰める | 手順ごとに 1 枚。節の title に手順の名前と番号 |
 | 幅 540 以上で描く (ペインで縮み、字が潰れる) | 幅 460 で描く |
+| 根の width・height を表に出る大きさのまま (`width="200" height="80"`) にする (大きく出るとにじむ) | 根は viewBox の 4 倍 (「細かさ」)。雛形を写せばそうなっている |
+| ミニ絵に箱と字の行を詰め、字を 10 px より小さくする (表の上でも小窓でも読めない) | 箱 3 つ・字の行 6 行・字 10 px 以上に収める。収まらなければ image の節の図にする |
 | 長い線・斜めの線に flow を 1 本 (点が中ほどにしか出ない・線から外れる) | 40〜60 px に割って並べる。斜めは横と縦に分ける |
 | pulse を主役・推す案・大事な箱に付ける | pulse はユーザーがする所だけ |
 | 箱を動かして marks を直し忘れる | 確かめの script で `ずれ` を見る |

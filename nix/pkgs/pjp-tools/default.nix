@@ -12,8 +12,9 @@
 #     clippy と test を流す
 #   - 直すときの道具は flake の devShells.pjp-tools (cargo・rustc・clippy・rustfmt・git)
 #
-# src は nix/ を root にし、workspace と、pjp-hc-hub の試験が読む skill の図の雛形 (files/claude/skills/pjp-hc-hub/assets/panel) だけを
-# 入れる (cargoRoot・buildAndTestSubdir で workspace に入って作る)。試験は git を打つ (ハブを一時ディレクトリに作る)
+# src は nix/ を root にし、workspace と、pjp-hc-hub の試験が読む skill の図の雛形 (files/claude/skills/pjp-hc-hub/assets/panel) と、
+# 雛形の細かさの倍率を書いた panel-figures.md だけを入れる (cargoRoot・buildAndTestSubdir で workspace に入って作る)。試験は git を
+# 打つ (ハブを一時ディレクトリに作る)
 {
   lib,
   rustPlatform,
@@ -31,6 +32,7 @@ rustPlatform.buildRustPackage {
       ./Cargo.lock
       ./crates
       ../../files/claude/skills/pjp-hc-hub/assets/panel
+      ../../files/claude/skills/pjp-hc-hub/references/panel-figures.md
     ];
   };
   cargoRoot = "pkgs/pjp-tools";

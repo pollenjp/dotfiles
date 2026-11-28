@@ -3,8 +3,11 @@
 //! (`tests/bake/*.svg`) と比べる。
 //!
 //! 雛形か焼き方を直して golden を作り直すときは、`PJP_BAKE_RECORD=1 cargo test -p pjp-hc-hub --test bake` で書き直し、
-//! 中身を目で確かめて commit する。golden が XML として読め、雛形の図と sections.json の marks に合っているかは、Python の
-//! `scripts/test_panel_templates.py` が見る。
+//! 中身を目で確かめて commit する。雛形の図の細かさ (根の width・height が viewBox の [`FINENESS`] 倍) と、panel-figures.md の
+//! 「細かさ」の倍率も見る (claude-skills の Python の雛形の試験の、細かさの検査を写したもの。ほかの検査 (marks と箱の合い方・色) は
+//! 写していない)。
+//!
+//! [`FINENESS`]: pjp_hc_hub::bake::FINENESS
 
 mod common;
 
@@ -124,7 +127,7 @@ fn templates_are_baked_like_the_goldens() {
             t.out.join("route.svg").display()
         ),
         format!(
-            "compare: {} に書いた (marks なし。SVG をそのまま写した)\n  caption: 2026/11/23 22:40 の panel の図: 案 A と案 B — どこが違い、どちらを推すか (1 行)\n",
+            "compare: {} に書いた (marks なし。焼かずに写した)\n  caption: 2026/11/23 22:40 の panel の図: 案 A と案 B — どこが違い、どちらを推すか (1 行)\n",
             t.out.join("compare.svg").display()
         ),
     ] {
@@ -156,10 +159,14 @@ fn minis_are_copied_and_srcs_name_their_sections() {
     let t = T::new("minis");
     let out = t.bake(&["TKT-n/mini-flow.svg", "TKT-n/act.svg"], &t.out, &[]);
     ok(&out);
-    // ミニ絵は焼かずにそのまま写す。image の節の src を渡すと、その節を焼く
+    // ミニ絵は焼かずに、根の width・height だけを表に出る大きさ (200x80) に戻して写す。image の節の src を渡すと、その節を焼く
     assert_eq!(
         read(&t.out.join("mini-flow.svg")),
-        read(&assets().join("mini-flow.svg"))
+        read(&assets().join("mini-flow.svg")).replacen(
+            "width=\"800\" height=\"320\"",
+            "width=\"200\" height=\"80\"",
+            1
+        )
     );
     if !recording() {
         assert_eq!(
@@ -170,7 +177,7 @@ fn minis_are_copied_and_srcs_name_their_sections() {
     let so = stdout(&out);
     for want in [
         format!(
-            "TKT-n/mini-flow.svg: {} に写した (ミニ絵。marks は無いので、そのまま)\n  caption: 2026/11/23 22:40 の panel のミニ絵: 見出しの項目 (流れ) — 流れの説明 (小窓に出る 1 行)\n",
+            "TKT-n/mini-flow.svg: {} に写した (ミニ絵。marks は無いので焼かない)\n  caption: 2026/11/23 22:40 の panel のミニ絵: 見出しの項目 (流れ) — 流れの説明 (小窓に出る 1 行)\n",
             t.out.join("mini-flow.svg").display()
         ),
         format!(
@@ -289,4 +296,70 @@ fn herdr_app_home_comes_from_the_option_then_the_env() {
     c.env("PJP_NOW", NOW).env("HERDR_APP_HOME", &other);
     ok(&c.output().unwrap());
     assert!(out_dir.join("act.svg").is_file());
+}
+
+#[test]
+fn coarse_figures_and_small_texts_are_flagged() {
+    let t = T::new("coarse");
+    // 前の決まりの大きさ (根が表に出る大きさのまま) で、字を詰めたミニ絵
+    t.sb.write(
+        &t.media.join("mini-flow.svg"),
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"80\" viewBox=\"0 0 200 80\"><rect width=\"200\" height=\"80\"/><text font-size=\"4\">詰めた字</text></svg>",
+    );
+    let out = t.bake(&["TKT-n/mini-flow.svg"], &t.out, &[]);
+    ok(&out);
+    let so = stdout(&out);
+    for want in [
+        "  !! SVG の大きさ 200x80 はミニ絵の大きさ 200x80 の 1 倍で、panel で粗く出る (width・height を 800x320、viewBox を 0 0 200 80 にし、名前を替えて載せ直す。panel-figures.md の「細かさ」)\n",
+        "  !! 字が小さい: 「詰めた字」は font-size 4 (10 px 以上にする。panel-figures.md の「大きさと字」)\n",
+    ] {
+        assert!(so.contains(want), "{want}\n---\n{so}");
+    }
+}
+
+/// `<svg …>` の根の tag の属性 `name` の値。
+fn root_attr<'a>(svg: &'a str, name: &str, file: &str) -> &'a str {
+    let start = svg
+        .find("<svg")
+        .unwrap_or_else(|| panic!("{file}: <svg が無い"));
+    let tag = &svg[start..start + svg[start..].find('>').unwrap()];
+    let key = format!(" {name}=\"");
+    let i = tag
+        .find(&key)
+        .unwrap_or_else(|| panic!("{file}: 根に {name} が無い"))
+        + key.len();
+    &tag[i..i + tag[i..].find('"').unwrap()]
+}
+
+#[test]
+fn templates_are_drawn_at_the_fineness_of_the_figures_doc() {
+    let fine = pjp_hc_hub::bake::FINENESS;
+    for f in FIGURES.iter().chain(&MINIS) {
+        let svg = read(&assets().join(f));
+        let view: Vec<f64> = root_attr(&svg, "viewBox", f)
+            .split_whitespace()
+            .map(|v| v.parse().unwrap())
+            .collect();
+        assert_eq!(view.len(), 4, "{f}: viewBox は 0 0 <幅> <高さ>");
+        assert_eq!(
+            (view[0], view[1]),
+            (0.0, 0.0),
+            "{f}: viewBox は 0 0 <幅> <高さ>"
+        );
+        let size: (f64, f64) = (
+            root_attr(&svg, "width", f).parse().unwrap(),
+            root_attr(&svg, "height", f).parse().unwrap(),
+        );
+        assert_eq!(
+            size,
+            (view[2] * fine, view[3] * fine),
+            "{f}: 根の width・height は viewBox の {fine} 倍 (panel-figures.md の「細かさ」)"
+        );
+    }
+    let doc = read(&assets().join("../../references/panel-figures.md"));
+    let want = format!("**{fine} 倍**");
+    assert!(
+        doc.contains(&want),
+        "panel-figures.md の「細かさ」の倍率が bake.rs の FINENESS ({want}) と違う"
+    );
 }

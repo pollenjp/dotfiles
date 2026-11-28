@@ -32,8 +32,9 @@ pjp.hub.skill・署名しない commit をする。別の repo の中・remote �
 
 bake は節の src の図を HOME (既定は HERDR_APP_HOME → XDG_CONFIG_HOME/herdr-app → ~/.config/herdr-app) の
 pjp-hub-panel-media から読み、flow・pulse・dot を CSS の動きに、label を字にして、図と同じ名前で DIR に書く (panel の図は
-書き換えない)。DIR は scratchpad の、panel.json のフォルダと HOME の外にする (中なら終了コード 2)。写せないものがあれば
-終了コード 1。!! の行は panel の図のずれ (直す)、note: の行は知らせ。
+書き換えない)。写しの根の width・height は表に出る大きさ (節の width・height・ミニ絵の 200x80) に戻す。DIR は scratchpad の、
+panel.json のフォルダと HOME の外にする (中なら終了コード 2)。写せないものがあれば終了コード 1。!! の行は panel の図のずれと
+読みにくさ (粗い図 (根が表に出る大きさの 4 倍より小さい)・10 px より小さい字・形の多いミニ絵も。直す)、note: の行は知らせ。
 ";
 
 /// `pjp hub <args>…` を打ち、終了コードを返す。

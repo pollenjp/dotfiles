@@ -1,9 +1,10 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="460" height="352" viewBox="0 0 460 352"
+<svg xmlns="http://www.w3.org/2000/svg" width="1840" height="1408" viewBox="0 0 460 352"
      font-family="'Yu Gothic UI', 'Meiryo UI', Meiryo, 'Segoe UI', sans-serif">
   <title>雛形 route: 届くまでの段を上から順に並べる。済んだ段は緑、ユーザーの番の段は黄 (①)、まだの段は灰</title>
   <!-- panel の図の雛形 (pjp-hc-hub の references/panel-figures.md)。段は 4 つまで (箱 52・間 40。5 つ以上は段をまとめるか 2 枚に)。
        いまの段がユーザーの番でなければ、その段を青 (#263445・#61afef) にする。
-       marks は assets/panel/sections.json の節 route。箱や線を動かしたら、marks の座標も同じに替える -->
+       marks は assets/panel/sections.json の節 route。箱や線を動かしたら、marks の座標も同じに替える
+       根の width・height は viewBox (表に出る大きさ) の 4 倍のまま変えず、座標と字の大きさは viewBox の単位で書く (panel-figures.md の「細かさ」) -->
   <rect width="460" height="352" fill="#1e2228"/>
 
   <!-- 段をつなぐ線 (箱の間は 40 px)。済んだ段から今の段までに marks の flow を置く -->

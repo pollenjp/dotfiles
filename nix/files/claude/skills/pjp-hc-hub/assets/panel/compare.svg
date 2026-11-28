@@ -1,8 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="460" height="240" viewBox="0 0 460 240"
+<svg xmlns="http://www.w3.org/2000/svg" width="1840" height="960" viewBox="0 0 460 240"
      font-family="'Yu Gothic UI', 'Meiryo UI', Meiryo, 'Segoe UI', sans-serif">
   <title>雛形 compare: 2 つの案 (か前と後) を左右に並べ、下に 1 行ずつの結論を置く。推す案は左に置いて青い枠</title>
   <!-- panel の図の雛形 (pjp-hc-hub の references/panel-figures.md)。案の名前と並びは問いの選択肢と同じにする (推す案が先頭 = 左)。
-       前と後を比べるときは左が前・右が後。marks は assets/panel/sections.json の節 compare (流れもユーザーがする所も無ければ空) -->
+       前と後を比べるときは左が前・右が後。marks は assets/panel/sections.json の節 compare (流れもユーザーがする所も無ければ空)
+       根の width・height は viewBox (表に出る大きさ) の 4 倍のまま変えず、座標と字の大きさは viewBox の単位で書く (panel-figures.md の「細かさ」) -->
   <rect width="460" height="240" fill="#1e2228"/>
 
   <!-- 左: 案 A (推す案。枠を青にし、見出しの右に「推す」) -->
