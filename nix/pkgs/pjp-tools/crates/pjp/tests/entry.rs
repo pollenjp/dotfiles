@@ -18,13 +18,30 @@
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 const PJP: &str = env!("CARGO_BIN_EXE_pjp");
 const EXE: &str = std::env::consts::EXE_SUFFIX;
 
 static NEXT: AtomicUsize = AtomicUsize::new(0);
+
+/// exe を書く (写す) 間と、process を起こす (fork から exec まで) 間をそろえる鍵。テストは並んで走るので、あるテストが exe を
+/// 書いている間にほかのテストが fork すると、子が exec するまで書き込みの fd を持ち、書き終えた exe を起こすと Linux は
+/// ETXTBSY (Text file busy) で断る。書く間と起こす間を同じ鍵で包めば重ならない
+static EXE_LOCK: Mutex<()> = Mutex::new(());
+
+fn exe_lock() -> MutexGuard<'static, ()> {
+    EXE_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// `src` の exe を `dest` に写す (鍵を持って)。
+fn copy_exe(src: &Path, dest: &Path) {
+    let _lock = exe_lock();
+    std::fs::copy(src, dest).unwrap();
+}
 
 const FAKE_MAIN: &str = r#"
 use std::io::Read;
@@ -63,12 +80,18 @@ fn fake_exe() -> &'static Path {
         let src = dir.join("fake.rs");
         std::fs::write(&src, FAKE_MAIN).unwrap();
         let exe = dir.join(format!("fake{EXE}"));
-        let out = Command::new(rustc())
-            .args(["--edition", "2021", "-o"])
-            .arg(&exe)
-            .arg(&src)
-            .output()
-            .expect("rustc を起こせない");
+        let child = {
+            let _lock = exe_lock();
+            Command::new(rustc())
+                .args(["--edition", "2021", "-o"])
+                .arg(&exe)
+                .arg(&src)
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("rustc を起こせない")
+        };
+        let out = child.wait_with_output().expect("rustc を待てない");
         assert!(
             out.status.success(),
             "偽の道具を作れない: {}",
@@ -92,7 +115,7 @@ impl Sandbox {
         for d in ["bin", "skills", "home", "cargo/bin"] {
             std::fs::create_dir_all(root.join(d)).unwrap();
         }
-        std::fs::copy(PJP, root.join("bin").join(format!("pjp{EXE}"))).unwrap();
+        copy_exe(Path::new(PJP), &root.join("bin").join(format!("pjp{EXE}")));
         Sandbox { root }
     }
 
@@ -103,7 +126,7 @@ impl Sandbox {
     /// 偽の道具を `dir` に `name` (拡張子は OS の形) で置く。
     fn put(&self, dir: &str, name: &str) -> PathBuf {
         let p = self.dir(dir).join(format!("{name}{EXE}"));
-        std::fs::copy(fake_exe(), &p).unwrap();
+        copy_exe(fake_exe(), &p);
         p
     }
 
@@ -136,13 +159,14 @@ impl Sandbox {
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut child = c.spawn().unwrap();
-        child
-            .stdin
-            .take()
-            .unwrap()
-            .write_all(stdin.as_bytes())
-            .unwrap();
+        let mut child = {
+            let _lock = exe_lock();
+            c.spawn().unwrap()
+        };
+        // 入口が stdin を読まずに終わる (道具が無い) と、書く前にパイプが閉じる。それは咎めない (渡せたかは偽の道具の控えで見る)
+        if let Err(e) = child.stdin.take().unwrap().write_all(stdin.as_bytes()) {
+            assert_eq!(e.kind(), std::io::ErrorKind::BrokenPipe, "{e}");
+        }
         child.wait_with_output().unwrap()
     }
 }
@@ -232,7 +256,10 @@ fn missing_public_tool_names_its_path_and_exits_127() {
 #[test]
 fn pjp_skills_that_is_this_entry_stops_with_1() {
     let sb = Sandbox::new("skills-is-entry");
-    std::fs::copy(PJP, sb.dir("skills").join(format!("pjp-skills{EXE}"))).unwrap();
+    copy_exe(
+        Path::new(PJP),
+        &sb.dir("skills").join(format!("pjp-skills{EXE}")),
+    );
     let out = sb.run(&["ticket", "list"], 0, "");
     assert_eq!(out.status.code(), Some(1), "{}", text(&out.stderr));
     let err = text(&out.stderr);
