@@ -276,7 +276,7 @@ pub fn help_text(name: Option<&str>) -> String {
         "この PC:".to_string(),
         format!("  claude-account set-token {n}"),
         format!(
-            "    見えない入力で token を貼る (DPAPI で暗号化して %USERPROFILE%\\.config\\claude-accounts\\{n}.env に書く。このユーザーとこの PC でだけ読める)"
+            "    見えない入力で token を貼る (DPAPI で暗号化して %USERPROFILE%\\.config\\claude-accounts\\{n}.env に書き、入れた時刻を控える。このユーザーとこの PC でだけ読める)"
         ),
         String::new(),
         "ほかのマシン (子を立てる Linux のマシンなど。登録はマシンごと):".to_string(),
@@ -291,6 +291,9 @@ pub fn help_text(name: Option<&str>) -> String {
             "    (dotfiles を新しくしたら claude-account add {n} --mode token を打つ。置いたファイルはそのまま使う)"
         ),
         format!("  置けたかは、そのマシンで claude-account check {n} (0 なら使える。値は出さない)"),
+        format!(
+            "  置いたホストは、そのホストの宣言 (Linux は dotfiles.claude.tokens.{n}、Windows は [claude.tokens.{n}]。同じ token なら同じ呼び名) にも書く (claude-account audit が並べる)"
+        ),
         String::new(),
         "token の値:".to_string(),
         "  1Password のアプリで token の項目を開いて値をコピーし、set-token の入力に貼る。まだ無ければ、自分の端末で".to_string(),
@@ -299,6 +302,33 @@ pub fn help_text(name: Option<&str>) -> String {
             "  1Password から毎回読むなら (起こすたびに承認が出る): 参照を token のファイル ({n}.env) に 1 行で書く:"
         ),
         format!("    {KEY}=op://…"),
+    ]
+    .join("\n")
+}
+
+/// `claude-account help token default` の文 (素の claude に token を置く手順。Linux の claude-account の bare_token_help と同じ文。Windows の素の
+/// claude は token を読まないが、手順は Linux のホストのもの)
+pub fn bare_help_text() -> String {
+    let n = crate::host::BARE_NAME;
+    [
+        format!("素の claude (~/.claude。名前 {n}) に token を置く手順"),
+        String::new(),
+        format!(
+            "素の claude が token で起きるのは、ホストの宣言に dotfiles.claude.tokens.{n} を書いて switch したホストだけ"
+        ),
+        "(宣言の無いホストの素の claude は /login で使う)。".to_string(),
+        String::new(),
+        "token を出す (ブラウザのある端末で。素の claude と同じ Claude のアカウントで承認する):".to_string(),
+        "  claude setup-token".to_string(),
+        "    出た token は画面に出るだけで保存されないので、1Password にも入れておく".to_string(),
+        String::new(),
+        "宣言したホストの端末 (ssh か herdr-app の端末。Claude Code の ! は使わない) で:".to_string(),
+        format!("  claude-account set-token {n}"),
+        format!(
+            "    見えない入力で token を貼る (~/.config/claude-accounts/{n}.env に権限 600 で書き、入れた時刻を控える)"
+        ),
+        format!("  1Password から移すなら: op read '<参照>' | claude-account set-token {n}"),
+        format!("  置けたかは claude-account check {n} (0 なら使える。値は出さない)"),
     ]
     .join("\n")
 }

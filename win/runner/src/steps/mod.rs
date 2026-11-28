@@ -16,6 +16,7 @@ pub mod claude_skill_overrides;
 pub mod claude_skills;
 pub mod claude_statusline;
 pub mod claude_t3;
+pub mod claude_tokens;
 pub mod deploy;
 pub mod fancyzones;
 pub mod files;
@@ -228,6 +229,9 @@ pub fn all_with(options: Options) -> Vec<Box<dyn Step>> {
         // claude-selector (cs) を Linux と同じ crate から作って claude-<名前> と同じ置き場に置く (Windows にしか無い手順。
         // dotfiles-private の docs/adr/087_claude_selector_*)
         Box::new(claude_selector::ClaudeSelector),
+        // claude の token の置き場の宣言 ([claude.tokens]) を claude-tokens.json に書く (Linux の home/modules/claude.nix を写した、Windows にしか無い
+        // 手順。読むのは claude-account audit。dotfiles-private の docs/adr/123_claude_token_watch_*)
+        Box::new(claude_tokens::ClaudeTokens),
         Box::new(files::Files),
         // $PROFILE に starship の init の 1 行を、dotfiles.ps1 を読む行より前に足す (Windows にしか無い手順。starship を入れるのは ps1 の手順
         // starship。dotfiles-private の docs/superpowers/specs/2026-11-25-win-starship-install-design.md)
@@ -333,6 +337,7 @@ mod tests {
                 (98, "t3-code-settings"),
                 (99, "claude-accounts"),
                 (99, "claude-selector"),
+                (99, "claude-tokens"),
                 (99, "herdr-app-keys"),
                 (99, "international"),
                 (99, "port-forward"),
@@ -379,7 +384,7 @@ mod tests {
 
     /// Windows にしか無い手順は bootstrap と W0-2 の手順と Claude Code の設定の手順 (T3 Code の会話だけの設定も) と git の設定とマシンローカルの
     /// 環境変数のファイル (local-env) と Notion の API キーの宣言と知らせ (notion-tokens) と herdr-app の mod
-    /// (pjp-spaces と layout も) とキーと claude-personal・claude-work と claude-selector と T3 Code (入れる ps1 の手順と設定) と ghq・fzf (cdrepo が
+    /// (pjp-spaces と layout も) とキーと claude-personal・claude-work と claude-selector と claude の token の置き場の宣言 (claude-tokens) と T3 Code (入れる ps1 の手順と設定) と ghq・fzf (cdrepo が
     /// 使う。入れる ps1 の手順) と Claude Desktop (入れる ps1 の手順) と starship (入れる ps1 の手順と、$PROFILE の init の 1 行の starship-init) と
     /// Codex CLI (入れる ps1 の手順) と winget 自身 (入れる ps1 の手順) だけ
     /// (WSL から写した手順・まだ無い手順は受け持ちに従う)
@@ -423,6 +428,7 @@ mod tests {
                 "t3-code-settings",
                 "claude-accounts",
                 "claude-selector",
+                "claude-tokens",
                 "herdr-app-keys",
             ]
         );

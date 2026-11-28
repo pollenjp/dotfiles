@@ -10,7 +10,8 @@
 //! (`[tools]`。`group.json` の `tools` と同じ名前)・受け持ちの印 (`[runner] enable`)・op-reason の SSH の中継のモード (`[opReason]`)・
 //! sshd に入れる公開鍵 (`[sshd] authorizedKeys`。Nix の `wsl.windowsFiles.sshd.authorizedKeys` と同じ意味)・sshd の AllowUsers のユーザーと
 //! 入ってよい送り元 (`[sshd] allowUsers`・`allowFrom`。Nix には無い)・
-//! T3 Code の Claude に `CLAUDE_CODE_ENTRYPOINT=""` を渡すか (`[t3Code]`)・Notion へ書く skill の宛先 (`[claude.notion]`。Nix の `dotfiles.claude.notion` と同じ名前と形) だけ。書いていない道具の既定は、Nix が表 (`nix/lib/groups.nix`) から書き出した `groups.json`
+//! T3 Code の Claude に `CLAUDE_CODE_ENTRYPOINT=""` を渡すか (`[t3Code]`)・Notion へ書く skill の宛先 (`[claude.notion]`。Nix の `dotfiles.claude.notion` と同じ名前と形)・
+//! claude の setup-token の token の置き場の宣言 (`[claude.tokens]`。Nix の `dotfiles.claude.tokens` と同じ名前と形。ただし素の claude の `default` は書けない) だけ。書いていない道具の既定は、Nix が表 (`nix/lib/groups.nix`) から書き出した `groups.json`
 //! (`nix eval --raw ./nix#lib.windowsGroupsJson`) から引く (dotfiles-private の docs/adr/058_win_runner_bootstrap_* §2 H・
 //! docs/adr/064_win_w02_claude_skills_hub_*)。設定グループは道具の集合で、minimum (既定) と all の 2 つ (docs/adr/109_host_groups_minimum_all_*)。
 //! 前のグループの名前 (personal・company・client。ADR 057) は、書き直し方を案内して止める。
@@ -45,6 +46,10 @@
 //! [claude.notion.tokens.personal]      # このマシンで Notion の API キーを使うプロファイルと種類 (Nix の dotfiles.claude.notion.tokens と同じ)
 //! kind = "personal"                    # integration (integration の API キー)・personal (個人用アクセストークン)
 //! item = "op://<vault>/<項目>/<欄>"     # 元の値の 1Password の参照 (欄まで。値ではない)。書かなければ null
+//!
+//! [claude.tokens.alt]                  # この PC のアカウント alt (claude-account add alt --mode token) に置いた claude setup-token の token (Nix の dotfiles.claude.tokens と同じ)
+//! label = "alt"                        # token の呼び名 (同じ token を置いたホスト・アカウントで同じにする)。書かなければアカウントの名前
+//! item = "op://<vault>/<項目>/<欄>"     # 元の token の 1Password の参照 (欄まで。値ではない)。書かなければ null
 //! ```
 
 use std::collections::BTreeMap;
@@ -102,6 +107,67 @@ pub struct NotionToken {
     /// 元の値を置いた 1Password の参照 (欄まで書いた `op://…`。値ではない)。書かなければ None (JSON の null)。dotfiles は読まず、
     /// claude-skills の棚卸しと回す手順と、手順 notion-tokens の入れ方の知らせが使う
     pub item: Option<String>,
+}
+
+/// claude の setup-token の token の置き場の宣言 1 つ (`[claude.tokens.<名前>]` の `label`・`item`。Linux の `dotfiles.claude.tokens.<名前>` と同じ)。
+/// 値 (token) は持たない。`~/.local/state/dotfiles/claude-tokens.json` (`claude_tokens_json`) になり、`claude-account audit` が読む
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ClaudeToken {
+    /// token の呼び名 (同じ token を置いたホスト・アカウントで同じにする)。書かなければアカウントの名前
+    pub label: String,
+    /// 元の token を置いた 1Password の参照 (欄まで書いた `op://…`。値ではない)。書かなければ None (JSON の null)
+    pub item: Option<String>,
+}
+
+/// 素の claude (`~/.claude`) の名前。Linux では宣言すると素の claude が token で起きるが、Windows の素の claude は /login のままなので、
+/// ホストの値には書けない (dotfiles-private の docs/adr/123_claude_token_watch_*)
+pub const BARE_NAME: &str = "default";
+
+/// claude-tokens.json の中身。Linux の nix/lib/claude-tokens.nix の stateText (`builtins.toJSON { accounts = …; } + "\n"`) と同じバイト列
+/// (名前の順・キーの順・空白なしの 1 行と改行)。宣言が無くても `{"accounts":{}}`:
+///
+/// `{"accounts":{"alt":{"item":null,"label":"alt"}}}`
+pub fn claude_tokens_json(tokens: &BTreeMap<String, ClaudeToken>) -> String {
+    let accounts: serde_json::Map<String, serde_json::Value> = tokens
+        .iter()
+        .map(|(name, t)| {
+            let mut e = serde_json::Map::new();
+            e.insert(
+                "item".to_string(),
+                t.item
+                    .clone()
+                    .map_or(serde_json::Value::Null, serde_json::Value::String),
+            );
+            e.insert(
+                "label".to_string(),
+                serde_json::Value::String(t.label.clone()),
+            );
+            (name.clone(), serde_json::Value::Object(e))
+        })
+        .collect();
+    let mut top = serde_json::Map::new();
+    top.insert("accounts".to_string(), serde_json::Value::Object(accounts));
+    format!("{}\n", serde_json::Value::Object(top))
+}
+
+/// `[claude.tokens]` のキー (アカウントの名前) の形: claude-account の名前 (英小文字・数字で始まり、英小文字・数字・- と _ だけで 32 字まで。
+/// sk-ant- で始まらない) で、管理のコマンド・claude-selector の名前 (account・selector) でない。Linux の nix/lib/claude-tokens.nix の nameOk と同じ
+pub fn claude_token_name_ok(name: &str) -> bool {
+    crate::accounts::name_ok(name) && !crate::accounts::RESERVED.contains(&name)
+}
+
+/// token の呼び名の形: 英小文字・数字で始まり、英小文字・数字・. - _ だけで 64 字まで。sk-ant- で始まらない (token の値を書いたとき)。
+/// Linux の nix/lib/claude-tokens.nix の labelOk と同じ
+pub fn claude_token_label_ok(label: &str) -> bool {
+    let mut chars = label.chars();
+    let lead_ok = chars
+        .next()
+        .is_some_and(|c| c.is_ascii_lowercase() || c.is_ascii_digit());
+    lead_ok
+        && label.len() <= 64
+        && !label.starts_with("sk-ant-")
+        && chars
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '.' | '_' | '-'))
 }
 
 /// `~/.config/pjp/env` の変数名。名前を大文字にし、`-` を `_` にして頭に `PJP_NOTION_TOKEN_` を付ける (Linux の nix/lib/notion-tokens.nix の
@@ -223,25 +289,95 @@ fn toml_to_json(v: &toml::Value, where_: &str) -> Result<serde_json::Value, Stri
     })
 }
 
-/// `[claude]` の表を読む (書けるのは `[claude.notion]` だけ)。
-fn parse_claude(v: &toml::Value) -> Result<NotionValues, String> {
+/// `[claude]` の表を読む (書けるのは `[claude.notion]` と `[claude.tokens]`)。
+fn parse_claude(v: &toml::Value) -> Result<(NotionValues, BTreeMap<String, ClaudeToken>), String> {
     let toml::Value::Table(claude) = v else {
-        return Err("claude は [claude.notion] の表で書いてください".to_string());
+        return Err("claude は [claude.notion]・[claude.tokens] の表で書いてください".to_string());
     };
     let unknown: Vec<&str> = claude
         .keys()
         .map(String::as_str)
-        .filter(|k| *k != "notion")
+        .filter(|k| !["notion", "tokens"].contains(k))
         .collect();
     if !unknown.is_empty() {
         return Err(format!(
-            "[claude] に知らないキーがあります: {} (書けるのは [claude.notion])",
+            "[claude] に知らないキーがあります: {} (書けるのは [claude.notion]・[claude.tokens])",
             unknown.join(", ")
         ));
     }
-    let Some(notion) = claude.get("notion") else {
-        return Ok(NotionValues::default());
+    let tokens = match claude.get("tokens") {
+        None => BTreeMap::new(),
+        Some(toml::Value::Table(t)) => parse_claude_tokens(t)?,
+        Some(_) => {
+            return Err(
+                "[claude] の tokens は表で書いてください ([claude.tokens.<アカウントの名前>])"
+                    .to_string(),
+            );
+        }
     };
+    let notion = match claude.get("notion") {
+        None => NotionValues::default(),
+        Some(n) => parse_notion(n)?,
+    };
+    Ok((notion, tokens))
+}
+
+/// `[claude.tokens]` を読む (Linux の nix/lib/claude-tokens.nix の assertions と同じ見方に、Nix では型が見るもの (表でない値・label が文字列で
+/// ない・知らないキー) と、Windows では書けない素の claude (`default`) を足す)。止める文に、規則に合わない名前・label・item・知らないキーの字を
+/// 出さない (token の値を書いてしまったときに、端末やログへ値が出ないように。名前は数だけ、label と item は宣言の名前だけを出す)。
+fn parse_claude_tokens(t: &toml::Table) -> Result<BTreeMap<String, ClaudeToken>, String> {
+    let bad = t.keys().filter(|n| !claude_token_name_ok(n)).count();
+    if bad > 0 {
+        return Err(format!(
+            "[claude.tokens] のキー (アカウントの名前) のうち {bad} 個が、アカウントの名前の形ではありません (書いた字は出しません)。英小文字・数字で始め、英小文字・数字・- と _ だけで 32 字までにしてください (sk-ant- で始まる字・account・selector は使えない)。token の値そのものを書いたのなら、その行を消して、token を作り直してください"
+        ));
+    }
+    if t.contains_key(BARE_NAME) {
+        return Err(format!(
+            "[claude.tokens] の {BARE_NAME} (素の claude) は Windows のホストの値には書けません (Windows の素の claude は token を読まず、/login で使う。dotfiles-private の ADR 123)。素の claude を token で起こすのは Linux のホスト (Nix の dotfiles.claude.tokens.{BARE_NAME}) だけです"
+        ));
+    }
+    let mut out = BTreeMap::new();
+    for (name, v) in t {
+        let toml::Value::Table(e) = v else {
+            return Err(format!(
+                "[claude.tokens] の {name} は表で書いてください ([claude.tokens.{name}] に label と item。どちらも省ける)"
+            ));
+        };
+        let unknown = e
+            .keys()
+            .filter(|k| !["label", "item"].contains(&k.as_str()))
+            .count();
+        if unknown > 0 {
+            return Err(format!(
+                "[claude.tokens.{name}] に知らないキーが {unknown} 個あります (書けるのは label・item。書いた字は出しません)"
+            ));
+        }
+        let label = match e.get("label") {
+            None => name.clone(),
+            Some(toml::Value::String(l)) if claude_token_label_ok(l) => l.clone(),
+            Some(_) => {
+                return Err(format!(
+                    "[claude.tokens.{name}] の label が、token の呼び名の形ではありません (書いた字は出しません)。英小文字・数字で始め、英小文字・数字・. - _ だけで 64 字までにしてください (sk-ant- で始まる字は使えない)。同じ token を置いたホスト・アカウントで同じ呼び名にします (書かなければアカウントの名前)。token の値そのものを書いたのなら、その行を消して、token を作り直してください (commit した値は履歴に残ります)"
+                ));
+            }
+        };
+        let item = match e.get("item") {
+            None => None,
+            Some(toml::Value::String(s)) if item_ref_ok(s) => Some(s.clone()),
+            Some(_) => {
+                return Err(format!(
+                    "[claude.tokens.{name}] の item が、欄まで書いた 1Password の参照 (op://<vault の ID>/<項目の ID>/<欄の ID>。セクションがあれば op://<vault>/<項目>/<セクション>/<欄>) の形ではありません (書いた字は出しません)。pjp-op-ref が出す ID の形の参照を書くか、分かるまで item を書かないでください。token の値そのものを書いたのなら、その行を消して、token を作り直してください (commit した値は履歴に残ります)"
+                ));
+            }
+        };
+        out.insert(name.clone(), ClaudeToken { label, item });
+    }
+    Ok(out)
+}
+
+/// `[claude.notion]` の表を読む。
+fn parse_notion(notion: &toml::Value) -> Result<NotionValues, String> {
     let toml::Value::Table(notion) = notion else {
         return Err("[claude] の notion は [claude.notion] の表で書いてください".to_string());
     };
@@ -495,6 +631,8 @@ pub struct HostValues {
     pub t3_clear_claude_entrypoint: bool,
     /// Notion へ書く skill の宛先 (`[claude.notion]`)
     pub notion: NotionValues,
+    /// claude の setup-token の token の置き場の宣言 (`[claude.tokens]`。アカウントの名前 → 宣言。値 (token) は持たない)
+    pub claude_tokens: BTreeMap<String, ClaudeToken>,
     pub source: Source,
     groups: Groups,
 }
@@ -517,6 +655,7 @@ impl HostValues {
             sshd_allow_from: None,
             t3_clear_claude_entrypoint: false,
             notion: NotionValues::default(),
+            claude_tokens: BTreeMap::new(),
             source: Source::Missing(paths),
             groups,
         }
@@ -950,7 +1089,7 @@ pub fn parse(text: &str, path: &Path, groups: Groups) -> Result<HostValues, Stri
         .collect();
     if !unknown.is_empty() {
         return Err(fail(format!(
-            "知らないキーがあります: {} (書けるのは group・[tools]・[runner]・[opReason]・[sshd]・[t3Code]・[claude.notion])",
+            "知らないキーがあります: {} (書けるのは group・[tools]・[runner]・[opReason]・[sshd]・[t3Code]・[claude.notion]・[claude.tokens])",
             unknown.join(", ")
         )));
     }
@@ -1030,8 +1169,8 @@ pub fn parse(text: &str, path: &Path, groups: Groups) -> Result<HostValues, Stri
         None => false,
         Some(v) => parse_t3_code(v).map_err(fail)?,
     };
-    let notion = match t.get("claude") {
-        None => NotionValues::default(),
+    let (notion, claude_tokens) = match t.get("claude") {
+        None => (NotionValues::default(), BTreeMap::new()),
         Some(v) => parse_claude(v).map_err(fail)?,
     };
     let h = HostValues {
@@ -1044,6 +1183,7 @@ pub fn parse(text: &str, path: &Path, groups: Groups) -> Result<HostValues, Stri
         sshd_allow_from: sshd.allow_from,
         t3_clear_claude_entrypoint,
         notion,
+        claude_tokens,
         source: Source::File(path.to_path_buf()),
         groups,
     };
@@ -1075,6 +1215,12 @@ mod tests {
     //!   を作る。宣言が無くても {"tokens":{}}。表を入れ子に書いても inline table で書いても同じ。claude-notion.json には入れない
     //! - 宣言の誤り (tokens・名前ごとの値が表でない・名前の形・知らないキー・kind が無い・2 つの外・item が欄まで書いた op:// の参照でない・同じ
     //!   変数になる 2 つの名前) は止める。止める文に item と kind の字を出さない (値を書いてしまったときに端末やログへ出ないように)
+    //! - claude の token の置き場の宣言 ([claude.tokens.<名前>] の label・item) から、claude-tokens.json の中身 (Linux の nix/lib/claude-tokens.nix
+    //!   の stateText と同じ 1 行の JSON。名前の順・キーの順、label は書かなければアカウントの名前、item は書かなければ null) を作る。宣言が無くても
+    //!   {"accounts":{}}。inline table で書いても同じ。[claude.notion] と一緒に書いても互いに混ざらない
+    //! - その宣言の誤り (tokens・名前ごとの値が表でない・名前の形 (大文字・- で始まる・空白・33 字・sk-ant- で始まる・account・selector)・素の
+    //!   claude の default (Windows の素の claude は token を読まない)・知らないキー・label の形・item の形) は止める。止める文に、規則に合わない
+    //!   名前・label・item・知らないキーの字を出さない (名前は数だけ)
 
     use super::*;
     use crate::testutil::TempDir;
@@ -1404,7 +1550,7 @@ mod tests {
         for (text, want) in [
             (
                 "claude = 1",
-                "claude は [claude.notion] の表で書いてください",
+                "claude は [claude.notion]・[claude.tokens] の表で書いてください",
             ),
             ("[claude]\nx = 1", "[claude] に知らないキーがあります: x"),
             (
@@ -1591,12 +1737,115 @@ mod tests {
         assert!(e.contains("token を作り直してください"), "{e}");
     }
 
+    /// [claude.tokens.<名前>] から ~/.local/state/dotfiles/claude-tokens.json の中身 (Linux の nix/lib/claude-tokens.nix の stateText と同じ
+    /// 1 行の JSON) を作る
+    #[test]
+    fn claude_tokens_json_is_like_nix() {
+        let empty = "{\"accounts\":{}}\n";
+        assert_eq!(claude_tokens_json(&host("").unwrap().claude_tokens), empty);
+        assert_eq!(
+            claude_tokens_json(&HostValues::missing(Path::new("h.toml"), groups()).claude_tokens),
+            empty
+        );
+        let h = host(
+            "[claude.notion]\nprofile = \"personal\"\n\n[claude.tokens.alt]\n\n[claude.tokens.b2]\nlabel = \"shared.v2_x-1\"\nitem = \"op://Private Vault/My Item/credential\"\n",
+        )
+        .unwrap();
+        assert_eq!(
+            claude_tokens_json(&h.claude_tokens),
+            "{\"accounts\":{\"alt\":{\"item\":null,\"label\":\"alt\"},\"b2\":{\"item\":\"op://Private Vault/My Item/credential\",\"label\":\"shared.v2_x-1\"}}}\n"
+        );
+        // [claude.notion] とは混ざらない
+        assert_eq!(h.notion.profile.as_deref(), Some("personal"));
+        assert_eq!(h.notion.tokens_json(), "{\"tokens\":{}}\n");
+        // inline table で書いても同じ
+        let inline = host("[claude]\ntokens = { alt = {} }\n").unwrap();
+        assert_eq!(
+            claude_tokens_json(&inline.claude_tokens),
+            "{\"accounts\":{\"alt\":{\"item\":null,\"label\":\"alt\"}}}\n"
+        );
+    }
+
+    /// 書けない [claude.tokens] は止める。止める文に、規則に合わない名前・label・item・知らないキーの字を出さない
+    #[test]
+    fn rejects_claude_token_mistakes() {
+        const SECRET: &str = "sk-ant-oat01-secret-value-do-not-print";
+        let label_shape = "[claude.tokens.alt] の label が、token の呼び名の形ではありません (書いた字は出しません)";
+        let item_shape = "[claude.tokens.alt] の item が、欄まで書いた 1Password の参照";
+        let name_shape = "[claude.tokens] のキー (アカウントの名前) のうち 1 個が、アカウントの名前の形ではありません (書いた字は出しません)";
+        let cases: Vec<(String, &str)> = vec![
+            (
+                "[claude]\ntokens = 1".to_string(),
+                "[claude] の tokens は表で書いてください ([claude.tokens.<アカウントの名前>])",
+            ),
+            (
+                format!("[claude.tokens]\nalt = \"{SECRET}\""),
+                "[claude.tokens] の alt は表で書いてください ([claude.tokens.alt] に label と item。どちらも省ける)",
+            ),
+            ("[claude.tokens.Alt]".to_string(), name_shape),
+            ("[claude.tokens.-x]".to_string(), name_shape),
+            ("[claude.tokens.\"a b\"]".to_string(), name_shape),
+            (
+                "[claude.tokens.a23456789012345678901234567890123]".to_string(),
+                name_shape,
+            ),
+            (format!("[claude.tokens.{SECRET}]"), name_shape),
+            ("[claude.tokens.account]".to_string(), name_shape),
+            ("[claude.tokens.selector]".to_string(), name_shape),
+            (
+                "[claude.tokens.default]".to_string(),
+                "[claude.tokens] の default (素の claude) は Windows のホストの値には書けません",
+            ),
+            (
+                format!("[claude.tokens.alt]\nlable = \"{SECRET}\""),
+                "[claude.tokens.alt] に知らないキーが 1 個あります (書けるのは label・item。書いた字は出しません)",
+            ),
+            (
+                format!("[claude.tokens.alt]\n\"{SECRET}\" = 1"),
+                "[claude.tokens.alt] に知らないキーが 1 個あります",
+            ),
+            ("[claude.tokens.alt]\nlabel = \"Main\"".to_string(), label_shape),
+            ("[claude.tokens.alt]\nlabel = \"a b\"".to_string(), label_shape),
+            ("[claude.tokens.alt]\nlabel = \"\"".to_string(), label_shape),
+            (
+                "[claude.tokens.alt]\nlabel = \"a2345678901234567890123456789012345678901234567890123456789012345\""
+                    .to_string(),
+                label_shape,
+            ),
+            (format!("[claude.tokens.alt]\nlabel = \"{SECRET}\""), label_shape),
+            ("[claude.tokens.alt]\nlabel = 1".to_string(), label_shape),
+            (format!("[claude.tokens.alt]\nitem = \"{SECRET}\""), item_shape),
+            (
+                format!("[claude.tokens.alt]\nitem = \"op://v/{SECRET}\""),
+                item_shape,
+            ),
+            ("[claude.tokens.alt]\nitem = \"\"".to_string(), item_shape),
+            ("[claude.tokens.alt]\nitem = 1".to_string(), item_shape),
+        ];
+        for (text, want) in cases {
+            let e = host(&text).unwrap_err();
+            assert!(e.starts_with("h.toml: "), "{e}");
+            assert!(e.contains(want), "{text}: {e}");
+            assert!(!e.contains(SECRET), "{text}: {e}");
+            assert!(!e.contains("lable"), "{text}: {e}");
+        }
+        // 受ける形: label は書かなければアカウントの名前、. と _ と - を含む呼び名、セクションのある参照
+        let h = host(
+            "[claude.tokens.a-b_c]\n[claude.tokens.x]\nlabel = \"m.v2_x-1\"\nitem = \"op://a/b/s/c\"\n",
+        )
+        .unwrap();
+        assert_eq!(h.claude_tokens["a-b_c"].label, "a-b_c");
+        assert_eq!(h.claude_tokens["a-b_c"].item, None);
+        assert_eq!(h.claude_tokens["x"].label, "m.v2_x-1");
+        assert_eq!(h.claude_tokens["x"].item.as_deref(), Some("op://a/b/s/c"));
+    }
+
     #[test]
     fn rejects_mistakes() {
         for (text, want) in [
             (
                 "grop = \"x\"",
-                "知らないキーがあります: grop (書けるのは group・[tools]・[runner]・[opReason]・[sshd]・[t3Code]・[claude.notion])",
+                "知らないキーがあります: grop (書けるのは group・[tools]・[runner]・[opReason]・[sshd]・[t3Code]・[claude.notion]・[claude.tokens])",
             ),
             (
                 "group = \"home\"",

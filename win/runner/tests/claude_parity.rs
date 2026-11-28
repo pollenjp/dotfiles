@@ -11,6 +11,11 @@
 //!   (宣言なし・item の null・セクションのある参照・空白と ASCII でない字の参照・- のある名前)。宣言を止めるか通すかが、同じ宣言の
 //!   notion-tokens.nix の assertions と同じ (名前の形・item の形・同じ変数になる 2 つの名前。kind は Nix の型 (enum) が見るので、ここでは
 //!   比べず単体の試験で見る)
+//! - claude-tokens.json の中身 (ホストの値の [claude.tokens]) が、同じ宣言の Linux の nix/lib/claude-tokens.nix の stateText と同じバイト列
+//!   (宣言なし・label を省く (アカウントの名前)・. _ - のある呼び名・item の null・セクションのある参照)。宣言を止めるか通すかが、同じ宣言の
+//!   claude-tokens.nix の assertions と同じ (名前の形・32 字・sk-ant-・account・selector・label の形・64 字・item の形)。違うのは素の claude の
+//!   default だけ (Nix は通し、Windows は止める。Windows の素の claude は token を読まない)。表でない値・label が文字列でない・知らないキーは
+//!   Nix の型が見るので、ここでは比べず単体の試験で見る
 //!
 //! - 既定のアカウントの名前 (steps::claude_accounts::DEFAULT_ACCOUNTS) が、Linux の claude.nix が sandbox のホストに書く claude-accounts.json と
 //!   同じ並び (claude-account の既定の personal・work)
@@ -24,7 +29,7 @@
 mod common;
 
 use common::which;
-use dotfiles_win::host::{Groups, parse};
+use dotfiles_win::host::{Groups, claude_tokens_json, parse};
 use dotfiles_win::steps::claude_env::{GIT_CONFIG, VARS};
 use std::path::Path;
 use std::process::Command;
@@ -378,6 +383,159 @@ fn notion_tokens_rejects_like_nix() {
     }
     // 通すものと止めるものの両方がある (どちらかに寄った比べ方になっていない)
     assert!(linux.contains(&true) && linux.contains(&false));
+}
+
+/// Linux の nix/lib/claude-tokens.nix (`ct`) を使う Nix の式 `expr` を評価した JSON (notion_tokens_nix と同じ読み方)
+fn claude_tokens_nix(expr: &str) -> serde_json::Value {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("..")
+        .join("..")
+        .join("nix")
+        .canonicalize()
+        .unwrap();
+    let dir = dir.to_str().unwrap();
+    let full = format!(
+        "let flake = builtins.getFlake \"path:{dir}\"; lib = flake.inputs.nixpkgs.lib; ct = import (/. + \"{dir}/lib/claude-tokens.nix\") {{ inherit lib; }}; in {expr}"
+    );
+    let out = Command::new("nix")
+        .args(["eval", "--impure", "--json", "--expr"])
+        .arg(&full)
+        .output()
+        .expect("nix を起こせない");
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    serde_json::from_slice(&out.stdout).expect("nix eval の出力が JSON でない")
+}
+
+/// claude の token の宣言 1 つ (名前・label・item)
+type ClaudeTokenDecl<'a> = (&'a str, Option<&'a str>, Option<&'a str>);
+
+/// claude の token の宣言を、ホストの値の TOML と Nix の attrset にする (Nix の側の label は、省いたらアカウントの名前。
+/// home/options.nix の default = name と同じ)
+fn claude_token_decls(decls: &[ClaudeTokenDecl]) -> (String, String) {
+    let mut toml_text = String::new();
+    let mut nix = String::from("{ ");
+    for (name, label, item) in decls {
+        toml_text.push_str(&format!("[claude.tokens.{}]\n", toml_str(name)));
+        if let Some(l) = label {
+            toml_text.push_str(&format!("label = {}\n", toml_str(l)));
+        }
+        if let Some(i) = item {
+            toml_text.push_str(&format!("item = {}\n", toml_str(i)));
+        }
+        nix.push_str(&format!(
+            "{} = {{ label = {}; item = {}; }}; ",
+            nix_str(name),
+            nix_str(label.unwrap_or(name)),
+            item.map_or("null".to_string(), nix_str)
+        ));
+    }
+    nix.push('}');
+    (toml_text, nix)
+}
+
+/// claude-tokens.json の中身が、同じ宣言の Linux の claude-tokens.nix の stateText と同じバイト列
+#[test]
+fn claude_tokens_json_matches_nix() {
+    if !nix_available() {
+        return;
+    }
+    let cases: Vec<Vec<ClaudeTokenDecl>> = vec![
+        vec![],
+        vec![("alt", None, None)],
+        vec![
+            ("alt", Some("shared"), Some("op://vvvv/iiii/ffff")),
+            ("b-2_c", None, None),
+            (
+                "0w",
+                Some("m.v2_x-1"),
+                Some("op://Private Vault/My Item/s1/credential"),
+            ),
+            ("z", Some("shared"), Some("op://金庫/項目/欄 ")),
+        ],
+    ];
+    let mut ours = Vec::new();
+    let mut nix_list = String::from("map ct.stateText [ ");
+    for decls in &cases {
+        let (toml_text, nix) = claude_token_decls(decls);
+        ours.push(claude_tokens_json(
+            &parse(&toml_text, Path::new("h.toml"), Groups::embedded().unwrap())
+                .unwrap()
+                .claude_tokens,
+        ));
+        nix_list.push_str(&format!("({nix}) "));
+    }
+    nix_list.push(']');
+    let linux: Vec<String> = serde_json::from_value(claude_tokens_nix(&nix_list)).unwrap();
+    assert_eq!(ours, linux);
+    assert_eq!(linux[0], "{\"accounts\":{}}\n");
+}
+
+/// 宣言を止めるか通すかが、同じ宣言の Linux の claude-tokens.nix の assertions (どれも true なら通す) と同じ。素の claude の default だけは、
+/// Nix が通し Windows が止める
+#[test]
+fn claude_tokens_rejects_like_nix() {
+    if !nix_available() {
+        return;
+    }
+    let n = |name: &'static str| vec![(name, None, None)];
+    let label = |l: &'static str| vec![("alt", Some(l), None)];
+    let item = |i: &'static str| vec![("alt", None, Some(i))];
+    let cases: Vec<Vec<ClaudeTokenDecl>> = vec![
+        n("alt"),
+        n("0a"),
+        n("a-b_c"),
+        n("a2345678901234567890123456789012"),
+        n("a23456789012345678901234567890123"),
+        n("Alt"),
+        n("-x"),
+        n("_x"),
+        n("a b"),
+        n("a.b"),
+        n("sk-ant-x"),
+        n("account"),
+        n("selector"),
+        label("m.v2_x-1"),
+        label("a234567890123456789012345678901234567890123456789012345678901234"),
+        label("a2345678901234567890123456789012345678901234567890123456789012345"),
+        label("Main"),
+        label("a b"),
+        label(""),
+        label(".x"),
+        label("sk-ant-oat01-x"),
+        item("op://a/b/c"),
+        item("op://a/b/s/c"),
+        item("op://Private Vault/My Item/credential"),
+        item("op://a/b"),
+        item("op://a/b/c/d/e"),
+        item(" op://a/b/c"),
+        item("op://a/b/c\n"),
+        item(""),
+        item("sk-ant-oat01-x"),
+    ];
+    let mut ours = Vec::new();
+    let mut nix_list = String::from("map (t: builtins.all (a: a.assertion) (ct.assertions t)) [ ");
+    for decls in &cases {
+        let (toml_text, nix) = claude_token_decls(decls);
+        ours.push(parse(&toml_text, Path::new("h.toml"), Groups::embedded().unwrap()).is_ok());
+        nix_list.push_str(&format!("({nix}) "));
+    }
+    nix_list.push_str(&format!("({}) ", claude_token_decls(&n("default")).1));
+    nix_list.push(']');
+    let mut linux: Vec<bool> = serde_json::from_value(claude_tokens_nix(&nix_list)).unwrap();
+    let bare_in_nix = linux.pop().unwrap();
+    for (i, decls) in cases.iter().enumerate() {
+        assert_eq!(ours[i], linux[i], "{decls:?}");
+    }
+    // 通すものと止めるものの両方がある (どちらかに寄った比べ方になっていない)
+    assert!(linux.contains(&true) && linux.contains(&false));
+    // 素の claude の default: Nix は通す (Linux では素の claude が token で起きる)・Windows は止める
+    assert!(bare_in_nix);
+    let (toml_text, _) = claude_token_decls(&n("default"));
+    assert!(parse(&toml_text, Path::new("h.toml"), Groups::embedded().unwrap()).is_err());
 }
 
 #[test]

@@ -4,23 +4,29 @@
 //! | サブコマンド | すること |
 //! | --- | --- |
 //! | `add <名前> --mode subscription\|token` | 登録 (`accounts`) に書き、手順 `claude-accounts` をそのアカウントのぶんだけ流す (dir・symlink (足りなければ UAC の確認 1 回)・launcher) |
-//! | `set-token <名前>` | token のアカウントに token を入れる (`token::set_token`。DPAPI) |
-//! | `list` | 既定と登録のアカウントを、種類・元・状態で並べる |
+//! | `set-token <名前>` | token のアカウントに token を入れる (`token::set_token`。DPAPI)。入れた時刻を控える (`token_audit::put_time`) |
+//! | `list` | 既定と登録のアカウント (と素の claude) を、種類・元・状態で並べる |
 //! | `check <名前>` | 使えるか (0 = 使える・stdout に 1 行 / 1 = 用意が無い・stderr にユーザーの手 / 2 = 知らない名前)。値を出さず、op を呼ばない |
-//! | `remove <名前> [--purge]` | 登録から外して launcher を消す。`--purge` なら `~/.claude-<名前>` (中のリンクは辿らない) と token のファイルも消す |
+//! | `remove <名前> [--purge]` | 登録から外して launcher を消す。`--purge` なら `~/.claude-<名前>` (中のリンクは辿らない) と token のファイルと入れた時刻の控えも消す |
+//! | `audit` | token の置き場の宣言と、この PC の token・入れた時刻を値を見ずに並べ、判定を出す (`token_audit::audit`) |
 //! | `help token [<名前>]` | token をこの PC とほかのマシンに置く手順 |
 //!
+//! 素の claude (`~/.claude`) は名前 `default` で扱う (`check default`・`list` の行)。Windows の素の claude は token を読まず /login で使うので、
+//! `set-token default` は 2 (Linux は宣言のあるホストで token。dotfiles-private の docs/adr/123_claude_token_watch_*)。
+//!
 //! 終了コード: 0 = 済んだ・使える / 1 = できなかった・用意が無い / 2 = 使い方の誤り・知らない名前 (set-token は PowerShell が無ければ 127)。
+//! audit は 0 = 手を入れるものが無い / 1 = ある / 2 = 宣言・登録・控えを読めない。
 
 use crate::accounts::{self, MANAGER, Mode, Origin, Registry, SELECTOR};
 use crate::context::Ctx;
-use crate::host::{Groups, HostValues};
+use crate::host::{BARE_NAME, Groups, HostValues};
 use crate::link::{is_link, link_target, remove_link, same_path};
 use crate::manifest::Roots;
 use crate::process::{RealSys, Sys};
 use crate::report::Kind;
 use crate::steps::{self, claude_accounts};
 use crate::token;
+use crate::token_audit;
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -30,14 +36,16 @@ pub fn usage() -> String {
     [
         "使い方: claude-account <サブコマンド>",
         "  add <名前> --mode subscription|token   アカウントを足す (~/.claude-<名前>・launcher claude-<名前>・登録)",
-        "  set-token <名前>                       token のアカウントに token を入れる (見えない入力。パイプなら 1 行)",
-        "  list                                   既定と登録のアカウントと、その状態を並べる",
+        "  set-token <名前>                       token のアカウントに token を入れる (見えない入力。パイプなら 1 行)。入れた時刻を控える",
+        "  list                                   既定と登録のアカウント (と素の claude) と、その状態を並べる",
         "  check <名前>                           使えるかを確かめる (0 = 使える / 1 = 用意が無い / 2 = 知らない名前)",
         "  remove <名前> [--purge]                登録のアカウントを消す (--purge なら ~/.claude-<名前> と token のファイルも消す)",
+        "  audit                                  token の置き場の宣言と、この PC の token・入れた時刻を値を見ずに並べ、判定を出す",
         "  help token [<名前>]                    token をこの PC とほかのマシンに置く手順",
         "",
-        "既定のアカウント: personal work (dotfiles apply が作る)。名前は英小文字・数字で始まり、英小文字・数字・- と _ だけ (account・selector は使えない)。",
-        "使い方の詳細は dotfiles の win/README.md「claude-personal・claude-work」。",
+        "既定のアカウント: personal work (dotfiles apply が作る)。名前は英小文字・数字で始まり、英小文字・数字・- と _ だけ (account・selector・default は使えない)。",
+        "素の claude (~/.claude) は名前 default で扱う (check default。Windows の素の claude は token を読まず、/login で使う)。",
+        "使い方の詳細は dotfiles の win/README.md「claude-personal・claude-work」「claude の token の置き場の宣言 ([claude.tokens])」。",
     ]
     .join("\n")
 }
@@ -81,6 +89,7 @@ pub fn run(args: &[String], io: &mut Io) -> i32 {
         Some("list") => list(rest, io),
         Some("check") => check(rest, io),
         Some("remove") => remove(rest, io),
+        Some("audit") => audit(rest, io),
         Some("-h" | "--help") => {
             let _ = writeln!(io.out, "{}", usage());
             0
@@ -92,6 +101,10 @@ pub fn run(args: &[String], io: &mut Io) -> i32 {
             }
             [t] if t == "token" => {
                 let _ = writeln!(io.out, "{}", token::help_text(None));
+                0
+            }
+            [t, n] if t == "token" && n == BARE_NAME => {
+                let _ = writeln!(io.out, "{}", token::bare_help_text());
                 0
             }
             [t, n] if t == "token" && accounts::name_ok(n) => {
@@ -264,12 +277,48 @@ fn state(io: &Io, home: &Path, name: &str, mode: Mode, origin: Origin) -> (i32, 
     }
 }
 
+/// 素の claude (default) の状態 (state と同じ形)。Windows の素の claude は /login で使うので、`~/.claude\.credentials.json` を見る
+fn state_bare(io: &Io, home: &Path) -> (i32, String, String) {
+    if home.join(".claude").join(".credentials.json").exists() {
+        (
+            0,
+            "claude: subscription (ログイン済み)".to_string(),
+            "ログイン済み".to_string(),
+        )
+    } else {
+        (
+            1,
+            format!(
+                "claude: まだログインしていません。{} の端末で claude を起こし、/login する。",
+                machine(io)
+            ),
+            "ログインしていない".to_string(),
+        )
+    }
+}
+
 fn check(args: &[String], io: &mut Io) -> i32 {
     let [name] = args else {
         return usage_err(io, "check に渡すのは名前 1 つだけです。");
     };
     if !accounts::name_ok(name) {
         return bad_name(io);
+    }
+    if name == BARE_NAME {
+        let home = match home(io) {
+            Ok(h) => h,
+            Err(e) => {
+                say_err(io, &e);
+                return 1;
+            }
+        };
+        let (code, text, _) = state_bare(io, &home);
+        if code == 0 {
+            let _ = writeln!(io.out, "{text}");
+        } else {
+            say_err(io, &text);
+        }
+        return code;
     }
     let (home, found) = match home(io).and_then(|h| lookup_name(&h, name).map(|f| (h, f))) {
         Ok(x) => x,
@@ -312,7 +361,16 @@ fn list(args: &[String], io: &mut Io) -> i32 {
         Ok(r) => (r, None),
         Err(e) => (Registry::default(), Some(e)),
     };
+    let (_, _, short) = state_bare(io, &home);
+    let _ = writeln!(
+        io.out,
+        "{BARE_NAME:<14} {:<13} 素の claude  {short}",
+        Mode::Subscription.as_str()
+    );
     for name in accounts::all_names(&claude_accounts::DEFAULT_ACCOUNTS, &reg) {
+        if name == BARE_NAME {
+            continue;
+        }
         if let Some((mode, origin)) =
             accounts::lookup(&name, &claude_accounts::DEFAULT_ACCOUNTS, &reg)
         {
@@ -350,6 +408,11 @@ fn new_name_ok(name: &str) -> Result<(), String> {
         return Err(
             "claude-account: selector は claude-selector (cs) の名前なので、アカウントには使えません。".to_string(),
         );
+    }
+    if name == BARE_NAME {
+        return Err(format!(
+            "claude-account: {BARE_NAME} は素の claude (~/.claude) の名前なので、アカウントには使えません (Windows の素の claude は token を読まず、/login で使う)。"
+        ));
     }
     if claude_accounts::DEFAULT_ACCOUNTS.contains(&name) {
         return Err(format!(
@@ -511,6 +574,15 @@ fn set_token(args: &[String], io: &mut Io) -> i32 {
     if !accounts::name_ok(name) {
         return bad_name(io);
     }
+    if name == BARE_NAME {
+        say_err(
+            io,
+            &format!(
+                "claude-account: Windows の素の claude ({BARE_NAME}) は token を読みません (Windows の素の claude は /login で使う)。\n  token で起こすアカウントが要るなら、claude-account add <名前> --mode token で足してください。"
+            ),
+        );
+        return 2;
+    }
     let (home, found) = match home(io).and_then(|h| lookup_name(&h, name).map(|f| (h, f))) {
         Ok(x) => x,
         Err(e) => {
@@ -550,16 +622,61 @@ fn set_token(args: &[String], io: &mut Io) -> i32 {
         );
         return 127;
     }
+    // 値を聞く前に、控えが読めない形なら止まる (token を書いたのに時刻を控えられない、を避ける)
+    let times = token_audit::times_path(&home);
+    if let Err(e) = token_audit::load_times(&times) {
+        say_err(io, &e);
+        return 1;
+    }
     match token::set_token(name, &token::file(&home, name), &powershell, io.input) {
         Ok(msg) => {
             let _ = writeln!(io.out, "{msg}");
-            0
+            let recorded = token_audit::now_epoch(io.env).and_then(|now| {
+                let at = token_audit::iso_jst(now);
+                token_audit::put_time(&times, name, Some(&at)).map(|()| at)
+            });
+            match recorded {
+                Ok(at) => {
+                    let _ = writeln!(io.out, "入れた時刻: {at} ({})", times.display());
+                    0
+                }
+                Err(e) => {
+                    say_err(
+                        io,
+                        &format!(
+                            "{e}\nclaude-account: token は書きましたが、入れた時刻を {} に控えられません (棚卸しは「回す」と出す)。直してから set-token を打ち直してください。",
+                            times.display()
+                        ),
+                    );
+                    1
+                }
+            }
         }
         Err((code, msg)) => {
             say_err(io, &msg);
             code
         }
     }
+}
+
+fn audit(args: &[String], io: &mut Io) -> i32 {
+    if !args.is_empty() {
+        return usage_err(io, "audit は引数を取りません。");
+    }
+    let home = match home(io) {
+        Ok(h) => h,
+        Err(e) => {
+            say_err(io, &e);
+            return 2;
+        }
+    };
+    let mut aio = token_audit::AuditIo {
+        env: io.env,
+        sys: io.sys,
+        out: &mut *io.out,
+        err: &mut *io.err,
+    };
+    token_audit::audit(&home, &mut aio)
 }
 
 /// dir を消す (中のリンクは辿らずにリンクだけを外す)。dir がリンク・`~/.claude` と同じ場所なら消さない
@@ -624,6 +741,15 @@ fn remove(args: &[String], io: &mut Io) -> i32 {
             io,
             &format!(
                 "claude-account: {name} は管理のコマンド・claude-selector の名前で、アカウントではありません。"
+            ),
+        );
+        return 2;
+    }
+    if name == BARE_NAME {
+        say_err(
+            io,
+            &format!(
+                "claude-account: {BARE_NAME} は素の claude (~/.claude) の名前で、消せるアカウントではありません。"
             ),
         );
         return 2;
@@ -717,6 +843,25 @@ fn remove(args: &[String], io: &mut Io) -> i32 {
         }
         let _ = writeln!(io.out, "消しました: {}", file.display());
     }
+    // 消した token の入れた時刻も控えから外す (残すと、同じ名前で足し直した token が古い時刻で並ぶ)
+    let times = token_audit::times_path(&home);
+    let recorded = token_audit::load_times(&times).map(|t| t.contains_key(name));
+    match recorded {
+        Ok(false) => {}
+        Ok(true) => match token_audit::put_time(&times, name, None) {
+            Ok(()) => {
+                let _ = writeln!(io.out, "控えから外しました: {name} の入れた時刻");
+            }
+            Err(e) => say_err(io, &e),
+        },
+        Err(_) => say_err(
+            io,
+            &format!(
+                "claude-account: 入れた時刻の控え ({}) から {name} を外せません。",
+                times.display()
+            ),
+        ),
+    }
     0
 }
 
@@ -734,13 +879,43 @@ mod tests {
     //! - remove: 既定と知らない名前は 2。launcher と登録を消し、dir を残して --purge を出す。--purge は登録の外でも dir と token のファイル
     //!   を消し、中のリンクの先 (~/.claude) は残す
     //! - set-token: subscription・知らない名前・ほかの引数は 2
+    //! - 素の claude (default): check default は ~/.claude\.credentials.json を見て 1・0 (どの PC かを添える)、list の先頭に素の claude の行、
+    //!   set-token default・add default・remove default は 2 (何も書かない)、help token default は Linux と同じ素の claude の手順
+    //! - (unix。偽の System32 の PowerShell) set-token は入れた時刻 (日本時間・秒まで。CLAUDE_ACCOUNT_NOW) を控え (1 行の JSON・キーの順)、ほかの
+    //!   名前の時刻は残す。控えが読めない形なら PowerShell を起こす前に 1 で止まり、token のファイルを書かない。remove --purge は控えからも外す
+    //! - audit (Linux の claude-account audit と同じ表・判定・数の行・終了コード): 宣言・登録・token のファイル・控えから ok・入れる (登録が無い・
+    //!   token が無い)・宣言漏れ (宣言の無い token のアカウントと default.env)・回す (330 日を超えた・控えが無い。ちょうど 330 日は ok)・直す
+    //!   (平文・ACL が広い・ACL を読めない) を出す。権限の列は ACL の要約 (本人だけ・SYSTEM・Administrators・本人・広い・?)。同じ呼び名の組を並べ、
+    //!   宣言・登録・控え・CLAUDE_ACCOUNT_NOW が読めない形・引数は 2。どの出力にも値が無い
 
     use super::*;
     use crate::process::{Exit, RunResult};
     use crate::testutil::{FakeSys, TempDir, fake_mklink};
+    use std::cell::RefCell;
+    use std::collections::BTreeMap;
+    use std::rc::Rc;
 
     struct World {
         t: TempDir,
+        /// 偽の Get-Acl の答え (ファイル名 → 行。無ければ本人だけ)
+        acl: Rc<RefCell<BTreeMap<String, Vec<String>>>>,
+    }
+
+    /// 偽の Get-Acl の答え: 本人だけ (set-token が付ける形)
+    fn acl_me() -> Vec<String> {
+        vec![
+            "me=S-1-5-21-1000".to_string(),
+            "owner=S-1-5-21-1000".to_string(),
+            "rule=Allow|2032127|0|S-1-5-21-1000|PC1\\me".to_string(),
+        ]
+    }
+
+    /// 偽の Get-Acl の答え: %USERPROFILE% から継いだ形 (SYSTEM・Administrators・本人)
+    fn acl_inherited() -> Vec<String> {
+        let mut v = acl_me();
+        v.push("rule=Allow|2032127|0|S-1-5-18|NT AUTHORITY\\SYSTEM".to_string());
+        v.push("rule=Allow|2032127|0|S-1-5-32-544|BUILTIN\\Administrators".to_string());
+        v
     }
 
     impl World {
@@ -750,7 +925,10 @@ mod tests {
             t.write("home/.claude/CLAUDE.md", "# 指示\n");
             t.write("home/.claude/projects/p1/s.jsonl", "{}\n");
             t.write("exe/dotfiles-win.exe", "runner-v1");
-            World { t }
+            World {
+                t,
+                acl: Rc::new(RefCell::new(BTreeMap::new())),
+            }
         }
 
         fn home(&self) -> PathBuf {
@@ -771,9 +949,30 @@ mod tests {
         /// 偽の外のコマンド: mklink (junction とファイルの symlink) と、置き場が入っているユーザーの PATH
         fn sys(&self) -> FakeSys {
             let bin_dir = self.local().join("dotfiles").join("bin");
+            let acl = Rc::clone(&self.acl);
             FakeSys::new(move |c| {
                 if let Some(r) = fake_mklink(c) {
                     return r;
+                }
+                if c.args_lossy().last().is_some_and(|a| a.contains("Get-Acl")) {
+                    let path = c
+                        .envs
+                        .iter()
+                        .find(|(k, _)| k == "DOTFILES_ACL_PATH")
+                        .and_then(|(_, v)| v.clone())
+                        .map(PathBuf::from)
+                        .unwrap();
+                    let name = path.file_name().unwrap().to_string_lossy().into_owned();
+                    let lines = acl.borrow().get(&name).cloned().unwrap_or_else(acl_me);
+                    let code = if lines.iter().any(|l| l.starts_with("error:")) {
+                        1
+                    } else {
+                        0
+                    };
+                    return RunResult {
+                        exit: Exit::Code(code),
+                        output: lines,
+                    };
                 }
                 if c.args_lossy()
                     .last()
@@ -796,8 +995,18 @@ mod tests {
 
         /// サブコマンドを流す: (終了コード, stdout, stderr)
         fn run(&self, args: &[&str]) -> (i32, String, String) {
+            self.run_env(args, &[])
+        }
+
+        /// 環境変数 `extra` (CLAUDE_ACCOUNT_NOW など) を足してサブコマンドを流す。SystemRoot は試験の家の win (偽の PowerShell の置き場)
+        fn run_env(&self, args: &[&str], extra: &[(&str, &str)]) -> (i32, String, String) {
             let home = self.home();
             let local = self.local();
+            let system_root = self.t.path().join("win");
+            let extra: Vec<(String, String)> = extra
+                .iter()
+                .map(|(k, v)| (k.to_string(), v.to_string()))
+                .collect();
             let env = move |k: &str| match k {
                 "USERPROFILE" => Some(home.to_string_lossy().into_owned()),
                 "APPDATA" => Some(
@@ -808,7 +1017,8 @@ mod tests {
                 ),
                 "LOCALAPPDATA" => Some(local.to_string_lossy().into_owned()),
                 "COMPUTERNAME" => Some("PC1".to_string()),
-                _ => None,
+                "SystemRoot" => Some(system_root.to_string_lossy().into_owned()),
+                _ => extra.iter().find(|(n, _)| n == k).map(|(_, v)| v.clone()),
             };
             let sys = self.sys();
             let (mut out, mut err) = (Vec::new(), Vec::new());
@@ -1038,5 +1248,415 @@ mod tests {
             (code, out.as_str()),
             (0, "claude-sub2: subscription (ログイン済み)\n")
         );
+    }
+
+    /// DPAPI の暗号文の形の字 (中身は作り物)
+    fn blob() -> String {
+        format!("{}{}", token::DPAPI_HEADER, "00".repeat(16))
+    }
+
+    /// 素の claude (default) は check・list で扱い、set-token・add・remove では断る (Windows の素の claude は /login)
+    #[test]
+    fn default_is_the_bare_claude() {
+        let w = World::new();
+        let (code, out, err) = w.run(&["check", "default"]);
+        assert_eq!(code, 1, "{out}");
+        assert_eq!(
+            err,
+            "claude: まだログインしていません。Windows (PC1) の端末で claude を起こし、/login する。\n"
+        );
+        let (_, out, _) = w.run(&["list"]);
+        assert_eq!(
+            out.lines().next(),
+            Some("default        subscription  素の claude  ログインしていない")
+        );
+        std::fs::write(w.home().join(".claude").join(".credentials.json"), "{}").unwrap();
+        let (code, out, _) = w.run(&["check", "default"]);
+        assert_eq!(
+            (code, out.as_str()),
+            (0, "claude: subscription (ログイン済み)\n")
+        );
+        let (_, out, _) = w.run(&["list"]);
+        assert_eq!(
+            out.lines().next(),
+            Some("default        subscription  素の claude  ログイン済み")
+        );
+        let (code, _, err) = w.run(&["set-token", "default"]);
+        assert_eq!(code, 2);
+        assert!(
+            err.contains("Windows の素の claude (default) は token を読みません"),
+            "{err}"
+        );
+        let (code, _, err) = w.run(&["add", "default", "--mode", "token"]);
+        assert_eq!(code, 2);
+        assert!(
+            err.contains("default は素の claude (~/.claude) の名前"),
+            "{err}"
+        );
+        let (code, _, err) = w.run(&["remove", "default", "--purge"]);
+        assert_eq!(code, 2);
+        assert!(err.contains("消せるアカウントではありません"), "{err}");
+        assert!(w.registry().accounts.is_empty());
+        assert!(!token::file(&w.home(), "default").exists());
+        let (code, out, _) = w.run(&["help", "token", "default"]);
+        assert_eq!(code, 0);
+        assert!(out.contains("claude-account set-token default"), "{out}");
+        assert!(out.contains("dotfiles.claude.tokens.default"), "{out}");
+        assert!(!out.contains("claude-account add default"), "{out}");
+    }
+
+    /// 偽の System32 の PowerShell (set-token の script の代わりに、暗号文の形の字を DOTFILES_TOKEN_OUT に書く。起こされたら印を残す)
+    #[cfg(unix)]
+    fn fake_powershell(w: &World) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let ps = token::system_powershell(&|k| {
+            (k == "SystemRoot").then(|| w.t.path().join("win").to_string_lossy().into_owned())
+        });
+        let marker = w.t.path().join("ps.called");
+        std::fs::create_dir_all(ps.parent().unwrap()).unwrap();
+        std::fs::write(
+            &ps,
+            format!(
+                "#!/bin/sh\ntouch '{}'\nprintf '%s' '{}' > \"$DOTFILES_TOKEN_OUT\"\n",
+                marker.display(),
+                blob()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&ps, std::fs::Permissions::from_mode(0o755)).unwrap();
+        marker
+    }
+
+    /// set-token は入れた時刻を控え、remove --purge は控えからも外す。控えが読めない形なら値を読む前に止まる
+    #[cfg(unix)]
+    #[test]
+    fn set_token_records_the_time() {
+        let w = World::new();
+        let marker = fake_powershell(&w);
+        w.t.write(
+            "home/.config/claude-accounts/accounts.json",
+            "{\"version\":1,\"accounts\":{\"token1\":{\"mode\":\"token\"},\"token2\":{\"mode\":\"token\"}}}\n",
+        );
+        let times = token_audit::times_path(&w.home());
+        let (code, out, err) = w.run_env(
+            &["set-token", "token1"],
+            &[("CLAUDE_ACCOUNT_NOW", "2026-11-28T21:00:00+09:00")],
+        );
+        assert_eq!(code, 0, "{out}\n{err}");
+        assert!(out.contains("書きました: "), "{out}");
+        assert!(
+            out.contains(&format!(
+                "入れた時刻: 2026-11-28T21:00:00+09:00 ({})",
+                times.display()
+            )),
+            "{out}"
+        );
+        let (code, _, err) = w.run_env(
+            &["set-token", "token2"],
+            &[("CLAUDE_ACCOUNT_NOW", "2026-11-28T23:30:15Z")],
+        );
+        assert_eq!(code, 0, "{err}");
+        assert_eq!(
+            std::fs::read_to_string(&times).unwrap(),
+            "{\"token1\":{\"set_at\":\"2026-11-28T21:00:00+09:00\"},\"token2\":{\"set_at\":\"2026-11-29T08:30:15+09:00\"}}\n"
+        );
+        assert!(matches!(
+            token::load(&token::file(&w.home(), "token1")),
+            Ok(token::Stored::Dpapi(_))
+        ));
+        // 控えが読めない形なら PowerShell を起こさずに 1 (token のファイルを書かない)
+        let keep = std::fs::read_to_string(&times).unwrap();
+        std::fs::write(&times, "not json\n").unwrap();
+        std::fs::remove_file(&marker).unwrap();
+        let before = std::fs::read_to_string(token::file(&w.home(), "token1")).unwrap();
+        let (code, _, err) = w.run(&["set-token", "token1"]);
+        assert_eq!(code, 1, "{err}");
+        assert!(err.contains("入れた時刻の控え"), "{err}");
+        assert!(!marker.exists());
+        assert_eq!(
+            std::fs::read_to_string(token::file(&w.home(), "token1")).unwrap(),
+            before
+        );
+        std::fs::write(&times, keep).unwrap();
+        // remove --purge は控えからも外し、ほかは残す
+        let (code, out, err) = w.run(&["remove", "token2", "--purge"]);
+        assert_eq!(code, 0, "{err}");
+        assert!(
+            out.contains("控えから外しました: token2 の入れた時刻"),
+            "{out}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&times).unwrap(),
+            "{\"token1\":{\"set_at\":\"2026-11-28T21:00:00+09:00\"}}\n"
+        );
+        assert!(!token::file(&w.home(), "token2").exists());
+    }
+
+    /// 棚卸しの世界: 宣言 (alt・x)・登録 (alt・token1 は token、sub2 は subscription)・token のファイル (alt・token1)・控え (alt)
+    fn audit_world(set_at: Option<&str>) -> World {
+        let w = World::new();
+        w.t.write(
+            "home/.local/state/dotfiles/claude-tokens.json",
+            "{\"accounts\":{\"alt\":{\"item\":null,\"label\":\"alt\"},\"x\":{\"item\":\"op://v/i/f\",\"label\":\"shared\"}}}\n",
+        );
+        w.t.write(
+            "home/.config/claude-accounts/accounts.json",
+            "{\"version\":1,\"accounts\":{\"alt\":{\"mode\":\"token\"},\"sub2\":{\"mode\":\"subscription\"},\"token1\":{\"mode\":\"token\"}}}\n",
+        );
+        for n in ["alt", "token1"] {
+            w.t.write(
+                &format!("home/.config/claude-accounts/{n}.env"),
+                &format!("CLAUDE_CODE_OAUTH_TOKEN={}\n", blob()),
+            );
+        }
+        if let Some(at) = set_at {
+            w.t.write(
+                "home/.local/state/claude-accounts/tokens.json",
+                &format!("{{\"alt\":{{\"set_at\":\"{at}\"}}}}\n"),
+            );
+        }
+        w
+    }
+
+    fn audit_at(w: &World, now: &str) -> (i32, String, String) {
+        w.run_env(&["audit"], &[("CLAUDE_ACCOUNT_NOW", now)])
+    }
+
+    /// 表の行 (`| <名前> |` で始まる行)
+    fn row<'a>(out: &'a str, name: &str) -> Option<&'a str> {
+        out.lines().find(|l| l.starts_with(&format!("| {name} |")))
+    }
+
+    #[test]
+    fn audit_lists_and_judges() {
+        let now = "2026-11-28T21:00:00+09:00";
+        let w = audit_world(Some("2026-11-18T21:00:00+09:00"));
+        let (code, out, err) = audit_at(&w, now);
+        assert_eq!(code, 1, "{out}\n{err}");
+        let head: Vec<&str> = out.lines().take(3).collect();
+        assert_eq!(
+            head,
+            vec![
+                "claude-account audit: PC1 (Windows) (2026-11-28 21:00 JST・入れてから 330 日を超えたら回す)",
+                "宣言: ~/.local/state/dotfiles/claude-tokens.json (2 件)",
+                "控え: ~/.local/state/claude-accounts/tokens.json (1 件)",
+            ]
+        );
+        assert!(out.contains("| アカウント | 呼び名 | 1Password の参照 | 置き方 | 権限 | 入れた時刻 | 日数 | 判定 |\n| --- | --- | --- | --- | --- | --- | --- | --- |\n"), "{out}");
+        assert_eq!(
+            row(&out, "alt"),
+            Some(
+                "| alt | alt | - | ローカル (DPAPI) | ACL 本人だけ | 2026-11-18 21:00 | 10 | ok |"
+            )
+        );
+        assert_eq!(
+            row(&out, "x"),
+            Some("| x | shared | op://v/i/f | 無い | - | - | - | 入れる |")
+        );
+        assert_eq!(
+            row(&out, "token1"),
+            Some("| token1 | - | - | ローカル (DPAPI) | ACL 本人だけ | - | - | 宣言漏れ |")
+        );
+        assert!(row(&out, "sub2").is_none(), "{out}");
+        assert!(out.contains("- x: 入れる — 登録が無い (claude-account add x --mode token を打ってから claude-account set-token x)\n"), "{out}");
+        assert!(out.contains("- token1: 宣言漏れ — 宣言 ([claude.tokens.token1]) が無い token の置き場 (回す対象から漏れている。宣言に足すか、要らなければ claude-account remove token1 --purge)\n"), "{out}");
+        assert!(out.contains("呼び名が同じ行は、ほかのホストの同じ呼び名の行とも同じ token。回すときは、その全部のホストで貼り直す。\n"), "{out}");
+        assert!(
+            out.ends_with("判定: ok 1・回す 0・入れる 1・直す 0・宣言漏れ 1\n"),
+            "{out}"
+        );
+        assert!(
+            !out.contains("0000000000000000") && !err.contains("0000000000000000"),
+            "{out}"
+        );
+        // 330 日を超えたら回す (期限までの残りの日数も)。ちょうど 330 日は ok
+        let w = audit_world(Some("2025-12-31T21:00:00+09:00"));
+        let (code, out, _) = audit_at(&w, now);
+        assert_eq!(code, 1);
+        assert_eq!(
+            row(&out, "alt"),
+            Some(
+                "| alt | alt | - | ローカル (DPAPI) | ACL 本人だけ | 2025-12-31 21:00 | 332 | 回す |"
+            )
+        );
+        assert!(
+            out.contains(
+                "- alt: 回す — 入れてから 332 日 (330 日を超えた。期限の 1 年まで残り 33 日)\n"
+            ),
+            "{out}"
+        );
+        let (_, out, _) = audit_at(&w, "2026-11-26T21:00:00+09:00");
+        assert_eq!(
+            row(&out, "alt"),
+            Some(
+                "| alt | alt | - | ローカル (DPAPI) | ACL 本人だけ | 2025-12-31 21:00 | 330 | ok |"
+            )
+        );
+        // 控えが無ければ回す (ファイルの時刻と、入れ直せば控えができることを添える)
+        let w = audit_world(None);
+        let (_, out, _) = audit_at(&w, now);
+        assert_eq!(
+            row(&out, "alt"),
+            Some("| alt | alt | - | ローカル (DPAPI) | ACL 本人だけ | - | - | 回す |")
+        );
+        assert!(
+            out.contains(
+                "- alt: 回す — 入れた時刻の控えが無い (set-token で入れていない。ファイルの時刻は "
+            ),
+            "{out}"
+        );
+        assert!(
+            out.contains("。同じ token を set-token で入れ直せば控えができる)\n"),
+            "{out}"
+        );
+        assert!(
+            out.contains("控え: なし (まだ set-token で入れていない)\n"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn audit_fixes_plain_tokens_and_wide_acls() {
+        let now = "2026-11-28T21:00:00+09:00";
+        // 平文は直す
+        let w = audit_world(Some("2026-11-18T21:00:00+09:00"));
+        w.t.write(
+            "home/.config/claude-accounts/alt.env",
+            "CLAUDE_CODE_OAUTH_TOKEN=dummy-plain-1\n",
+        );
+        let (_, out, err) = audit_at(&w, now);
+        assert_eq!(
+            row(&out, "alt"),
+            Some(
+                "| alt | alt | - | ローカル (平文) | ACL 本人だけ | 2026-11-18 21:00 | 10 | 直す |"
+            )
+        );
+        assert!(out.contains("- alt: 直す — token が平文で置かれている (claude-account set-token alt で入れ直すと DPAPI の暗号文になる)\n"), "{out}");
+        assert!(!out.contains("dummy") && !err.contains("dummy"), "{out}");
+        // 広い ACL は直す。継いだ形は ok。読めなければ ? で直す
+        let w = audit_world(Some("2026-11-18T21:00:00+09:00"));
+        let mut wide = acl_inherited();
+        wide.push("rule=Allow|1179785|0|S-1-5-32-545|BUILTIN\\Users".to_string());
+        w.acl.borrow_mut().insert("alt.env".to_string(), wide);
+        w.acl
+            .borrow_mut()
+            .insert("token1.env".to_string(), acl_inherited());
+        let (_, out, _) = audit_at(&w, now);
+        assert_eq!(
+            row(&out, "alt"),
+            Some("| alt | alt | - | ローカル (DPAPI) | ACL 広い | 2026-11-18 21:00 | 10 | 直す |")
+        );
+        assert!(out.contains("- alt: 直す — token のファイルを本人・SYSTEM・Administrators のほかも読める (BUILTIN\\Users。置き場所のディレクトリ ("), "{out}");
+        assert_eq!(
+            row(&out, "token1"),
+            Some(
+                "| token1 | - | - | ローカル (DPAPI) | ACL SYSTEM・Administrators・本人 | - | - | 宣言漏れ |"
+            )
+        );
+        w.acl
+            .borrow_mut()
+            .insert("alt.env".to_string(), vec!["error: denied".to_string()]);
+        let (_, out, _) = audit_at(&w, now);
+        assert_eq!(
+            row(&out, "alt"),
+            Some("| alt | alt | - | ローカル (DPAPI) | ? | 2026-11-18 21:00 | 10 | 直す |")
+        );
+        assert!(
+            out.contains("- alt: 直す — token のファイルの ACL を確かめられない ("),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn audit_other_rows() {
+        let now = "2026-11-28T21:00:00+09:00";
+        // 宣言した token のファイルが無ければ入れる。宣言の無い default.env は宣言漏れ (素の claude を先に並べる)。同じ呼び名の組
+        let w = audit_world(Some("2026-11-18T21:00:00+09:00"));
+        w.t.write(
+            "home/.local/state/dotfiles/claude-tokens.json",
+            "{\"accounts\":{\"alt\":{\"item\":null,\"label\":\"alt\"},\"x\":{\"item\":null,\"label\":\"shared\"},\"y\":{\"item\":null,\"label\":\"shared\"}}}\n",
+        );
+        std::fs::remove_file(
+            w.home()
+                .join(".config")
+                .join("claude-accounts")
+                .join("alt.env"),
+        )
+        .unwrap();
+        w.t.write(
+            "home/.config/claude-accounts/default.env",
+            &format!("CLAUDE_CODE_OAUTH_TOKEN={}\n", blob()),
+        );
+        let (_, out, _) = audit_at(&w, now);
+        let rows: Vec<&str> = out
+            .lines()
+            .filter(|l| l.starts_with("| ") && !l.starts_with("| ア") && !l.starts_with("| -"))
+            .collect();
+        assert_eq!(
+            rows[0],
+            "| default (素の claude) | - | - | ローカル (DPAPI) | ACL 本人だけ | - | - | 宣言漏れ |",
+            "{out}"
+        );
+        assert_eq!(
+            row(&out, "alt"),
+            Some("| alt | alt | - | 無い | - | 2026-11-18 21:00 | 10 | 入れる |")
+        );
+        assert!(out.contains("- alt: 入れる — token が無い (claude setup-token で出し、このホストで claude-account set-token alt で入れる)\n"), "{out}");
+        assert!(out.contains("- default: 宣言漏れ — 素の claude (default) の token のファイルがある (Windows の素の claude は token を読まず、/login で使う。要らなければ消す)\n"), "{out}");
+        assert!(
+            out.contains(
+                "同じ token (呼び名 shared) を置いたアカウント: x・y (回すときは、どれも貼り直す)\n"
+            ),
+            "{out}"
+        );
+        // 宣言も token も無ければ 0
+        let w = World::new();
+        let (code, out, _) = audit_at(&w, now);
+        assert_eq!(code, 0, "{out}");
+        assert!(out.contains("宣言: なし (~/.local/state/dotfiles/claude-tokens.json が無い。dotfiles が古いか、Claude Code を入れないホスト)\n"), "{out}");
+        assert!(out.contains("token の置き場はありません (宣言も、token のアカウントも、token のファイルも無い)。\n"), "{out}");
+        // 全部 ok なら 0
+        let w = audit_world(Some("2026-11-18T21:00:00+09:00"));
+        w.t.write(
+            "home/.local/state/dotfiles/claude-tokens.json",
+            "{\"accounts\":{\"alt\":{\"item\":null,\"label\":\"alt\"},\"token1\":{\"item\":null,\"label\":\"t1\"}}}\n",
+        );
+        w.t.write(
+            "home/.local/state/claude-accounts/tokens.json",
+            "{\"alt\":{\"set_at\":\"2026-11-18T21:00:00+09:00\"},\"token1\":{\"set_at\":\"2026-11-20T09:00:00+09:00\"}}\n",
+        );
+        let (code, out, _) = audit_at(&w, now);
+        assert_eq!(code, 0, "{out}");
+        assert!(
+            out.ends_with("判定: ok 2・回す 0・入れる 0・直す 0・宣言漏れ 0\n"),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn audit_stops_on_unreadable_files() {
+        const SECRET: &str = "sk-ant-oat01-do-not-print";
+        let now = "2026-11-28T21:00:00+09:00";
+        let w = audit_world(Some("2026-11-18T21:00:00+09:00"));
+        w.t.write(
+            "home/.local/state/dotfiles/claude-tokens.json",
+            &format!("{{\"accounts\":{{\"{SECRET}\":{{\"item\":null,\"label\":\"x\"}}}}}}\n"),
+        );
+        let (code, out, err) = audit_at(&w, now);
+        assert_eq!((code, out.as_str()), (2, ""), "{err}");
+        assert!(err.contains("宣言") && !err.contains(SECRET), "{err}");
+        let w = audit_world(Some("2026-11-18T21:00:00+09:00"));
+        w.t.write("home/.local/state/claude-accounts/tokens.json", "[1]\n");
+        let (code, _, err) = audit_at(&w, now);
+        assert_eq!(code, 2);
+        assert!(err.contains("入れた時刻の控え"), "{err}");
+        let w = audit_world(Some("2026-11-18T21:00:00+09:00"));
+        w.t.write("home/.config/claude-accounts/accounts.json", "{}\n");
+        assert_eq!(audit_at(&w, now).0, 2);
+        let w = audit_world(Some("2026-11-18T21:00:00+09:00"));
+        let (code, _, err) = audit_at(&w, "yesterday");
+        assert_eq!(code, 2);
+        assert!(err.contains("CLAUDE_ACCOUNT_NOW"), "{err}");
+        assert_eq!(w.run(&["audit", "x"]).0, 2);
     }
 }

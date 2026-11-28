@@ -574,9 +574,13 @@ scanData = "https://app.notion.com/p/…"
 [claude.notion.tokens.personal]              # このマシンで Notion の API キーを使うプロファイルと種類 (Nix の dotfiles.claude.notion.tokens と同じ名前と形。書かなければ空)
 kind = "personal"                            # integration (integration の API キー)・personal (個人用アクセストークン)
 item = "op://<vault の ID>/<項目の ID>/<欄の ID>"   # 元の値の 1Password の参照 (欄まで。値ではない)。書かなければ null
+
+[claude.tokens.alt]                          # この PC のアカウント alt に置いた claude setup-token の token (Nix の dotfiles.claude.tokens と同じ名前と形。書かなければ空)
+label = "alt"                                # token の呼び名 (同じ token を置いたホスト・アカウントで同じにする)。書かなければアカウントの名前
+item = "op://<vault の ID>/<項目の ID>/<欄の ID>"   # 元の token の 1Password の参照 (欄まで。値ではない)。書かなければ null
 ```
 
-- 書けるのは `group`・`[tools]`・`[runner] enable`・`[opReason] sshRelayMode`・`[sshd]` (`authorizedKeys`・`allowUsers`・`allowFrom`)・`[t3Code] clearClaudeEntrypoint`・`[claude.notion]` (`profile`・`routes`・`override`・`tokens`) だけ。道具の名前は `group.json` の `tools` と同じ
+- 書けるのは `group`・`[tools]`・`[runner] enable`・`[opReason] sshRelayMode`・`[sshd]` (`authorizedKeys`・`allowUsers`・`allowFrom`)・`[t3Code] clearClaudeEntrypoint`・`[claude.notion]` (`profile`・`routes`・`override`・`tokens`)・`[claude.tokens]` (`label`・`item`) だけ。道具の名前は `group.json` の `tools` と同じ
   (runner が使うのは `windowsClaudeCode`・`windowsClaudeAccounts`・`windowsClaudeDesktop`・`windowsHerdr`・`windowsNtn`・`windowsCodex`・`windowsTypeClipboard`・`windowsOpenssh`・`windowsTailscale`・`windowsSshd`・`windowsT3Code`・`claudePrivateSkills`・`herdrHub`・`devTracker`・`gitIdentity` と、
   `op-reason` の on/off の `onePassword`、SSH の中継の `opReasonSshRelay`、runner だけが読む `privateRepos`)。知らないキー・名前・`sshRelayMode` の知らない値・`authorizedKeys` の読めない値・
   `allowUsers`・`allowFrom` の書けない値は runner が止める (終了コード 2)
@@ -634,6 +638,9 @@ item = "op://<vault の ID>/<項目の ID>/<欄の ID>"   # 元の値の 1Passwo
 - `[claude.notion.tokens.<名前>]` (Notion の API キーの宣言) は `notion-tokens` の手順が `%USERPROFILE%\.local\state\dotfiles\notion-tokens.json` に
   書き、`~/.config/pjp/env` の行と ACL を確かめる。宣言の形は Nix の option と同じに runner が確かめ、`kind` と `item` に書いた字は止める文に出さない
   ([後述](#notion-の-api-キーの宣言-claudenotiontokens))
+- `[claude.tokens.<名前>]` (claude の setup-token の token の置き場の宣言) は `claude-tokens` の手順が
+  `%USERPROFILE%\.local\state\dotfiles\claude-tokens.json` に書く (`claude-account audit` が読む)。宣言の形は Nix の option と同じに runner が確かめ、
+  名前・`label`・`item` に書いた字は止める文に出さない。素の claude の `default` は書けない ([後述](#claude-の-token-の置き場の宣言-claudetokens))
 - dotfiles-private は、runner を build した dotfiles の clone の隣を探し、無ければ bootstrap の置き場 (`%USERPROFILE%\ghq\github.com\pollenjp\dotfiles-private`)
   を探す (一時の場所の clone から流しても見つかる)。どこを読んだかは出力の頭の「ホストの値:」に出る
 - ホストの値が無い・2 つあるときの振る舞いは、この節の頭の「引く順」のとおり。別のファイルを使うなら `--host-file <path>`
@@ -788,6 +795,7 @@ item = "op://<vault の ID>/<項目の ID>/<欄の ID>"   # 元の値の 1Passwo
 | 98 | `t3-code-settings` | T3 Code のテレメトリを切るユーザー環境変数 `T3CODE_TELEMETRY_ENABLED=false` と、`%USERPROFILE%\.t3\userdata\settings.json` の決めたキー (Claude の home・Launch arguments・新しいスレッドの既定・`CLAUDE_CODE_ENTRYPOINT`) を合わせる (ほかのキーと順は残す。Launch arguments は `claude-t3` の置き先に 2 つのファイルがそろっているときだけ書く。前の中身は `%LOCALAPPDATA%\dotfiles\state\t3-code-settings\backup\` へ。[後述](#t3-code)) | `windowsT3Code` | 有る (Windows だけ) |
 | 99 | `claude-accounts` | claude-<名前> (既定の personal・work と `claude-account add` で足したもの) の `%USERPROFILE%\.claude-<名前>\` を用意し (settings.json と CLAUDE.md は `~/.claude` へのファイルの symlink。足りなければ UAC の確認が 1 回出る)、launcher の `claude-<名前>.exe` と管理のコマンドの `claude-account.exe` を `%LOCALAPPDATA%\dotfiles\bin` に置いてユーザーの PATH に足す ([後述](#claude-personalclaude-work)) | `windowsClaudeAccounts` と `windowsClaudeCode` | 有る (Windows だけ) |
 | 99 | `claude-selector` | claude-selector (略語 `cs`。claude のアカウントと option を矢印キーで選んで Claude Code を起こす) を、Linux と同じ crate (`nix/pkgs/claude-selector`) から runner の toolchain で `cargo build` し、`%LOCALAPPDATA%\dotfiles\bin\claude-selector.exe` に置いてユーザーの PATH に足す。crate の元か toolchain が変わったときだけ作り直す (check と dry-run は cargo を打たない。[後述](#claude-selector-cs)) | `windowsClaudeCode` | 有る (Windows だけ) |
+| 99 | `claude-tokens` | ホストの値の `[claude.tokens]` から `%USERPROFILE%\.local\state\dotfiles\claude-tokens.json` を書く (Linux の home-manager と同じ中身。宣言が無くても `{"accounts":{}}`。check と dry-run は書かない。読むのは `claude-account audit`。[後述](#claude-の-token-の置き場の宣言-claudetokens)) | `windowsClaudeAccounts` と `windowsClaudeCode` | 有る (Windows だけ) |
 | 99 | `herdr-app-keys` | `herdr-app/keys.json` (dotfiles が持つキー) を herdr-app の home の `keys.json` に書き足す (ほかのキーと順は残し、dotfiles が書いた値でないキーは衝突として知らせる。`herdr-app/keys.defaults.json` に書いた herdr-app の既定の値は書き換える。keys.json が無ければ書かない。[後述](#herdr-app-のキー)) | `windowsHerdr` | 有る (Windows だけ) |
 | 99 | `international` | `international/managed.json` の値だけを、日付と時刻の形式 (`HKCU\Control Panel\International`) へ書く ([日付と時刻の形式](#日付と時刻の形式) と同じ判定。WSL と同じ PowerShell の本文を `pwsh` (PowerShell 7) に `-EncodedCommand` で渡し、SetLocaleInfoW で書いて WM_SETTINGCHANGE を送り、読み戻す。衝突は触らない。`--force` は衝突も書く。取り込みは `dotfiles import international`。check と dry-run は読むだけ。SSH の会話の apply は書く値があれば書かずに ⚠)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-international.applied.json` | いつも | 有る |
 | 99 | `port-forward` | dotfiles-private の `ssh/port-forward.toml` を確かめて JSON にし、`%USERPROFILE%\.config\port-forward\hosts.json` に置く ([port forwarding (pf)](#port-forwarding-pf) と同じ確かめ・中身・判定。`--force` は元を `hosts.json.dotfiles-bak-<日時>` に退避して上書き)。記録は `%LOCALAPPDATA%\dotfiles\state\windows-port-forward.deployed.json` | `privateRepos` | 有る |
@@ -896,7 +904,10 @@ gate が違うと、試験が落ちる
   入っている・いないとしたプロファイル・入れ方の行・宣言が無いときの知らせが同じかを突き合わせる (頭の BOM と空白だけの値の数え方、権限 (Linux は
   mode、Windows は ACL) は比べない)。`notion-tokens.json` の中身と宣言を止めるか通すかは、`tests/claude_parity.rs` が Linux の
   `nix/lib/notion-tokens.nix` の stateText と assertions (`nix eval`) と突き合わせる。ACL の読み方は、Windows の CI で本物の PowerShell と `icacls` で
-  確かめる。bash の版を直したら、Rust の写しも同じに直す
+  確かめる。`claude-tokens.json` の中身と `[claude.tokens]` を止めるか通すかも、`tests/claude_parity.rs` が `nix/lib/claude-tokens.nix` の stateText と
+  assertions と突き合わせる (素の claude の `default` だけは、Nix が通し Windows が止める)。`claude-account audit` (`src/token_audit.rs`) の表・判定・文は
+  Linux の `nix/pkgs/claude-account/claude-account.sh` の `cmd_audit` を写したもので、単体の試験 (`src/account_cli.rs`) が同じ字の行を見る。bash の版を
+  直したら、Rust の写しも同じに直す
 
 ### claude-skills と Windows のハブ (W0-2)
 
@@ -1117,7 +1128,7 @@ CLAUDE.md・skill・hook・設定・履歴と auto memory は素の `claude` (`%
 
 | コマンド | 使う config dir | ログイン |
 | --- | --- | --- |
-| `claude` | `%USERPROFILE%\.claude` (今まで通り) | 今まで通り |
+| `claude` | `%USERPROFILE%\.claude` (今まで通り) | 今まで通り (Windows の素の claude は token を読まない。Linux は宣言 `dotfiles.claude.tokens.default` のあるホストで token) |
 | `claude-personal` | `%USERPROFILE%\.claude-personal` | 個人のアカウント (初回に `/login`) |
 | `claude-work` | `%USERPROFILE%\.claude-work` | 会社のアカウント (初回に `/login`) |
 | `claude-<名前>` (`claude-account add` で足したもの) | `%USERPROFILE%\.claude-<名前>` | subscription は初回に `/login`。token は `claude setup-token` の token ([後述](#token-のアカウント-windows)) |
@@ -1175,9 +1186,16 @@ claude-account set-token token1                # token を見えない入力で�
 claude-account add sub2 --mode subscription    # /login で入るアカウント
 claude-account list                            # 既定と登録のアカウントと、その状態
 claude-account check token1                    # 0 = 使える / 1 = 用意が無い (stderr に手) / 2 = 知らない名前
-claude-account remove token1 [--purge]         # 登録と claude-token1.exe を消す (--purge なら ~/.claude-token1 と token のファイルも)
+claude-account check default                   # 素の claude (~/.claude) のログイン (~/.claude\.credentials.json の有る無し)
+claude-account remove token1 [--purge]         # 登録と claude-token1.exe を消す (--purge なら ~/.claude-token1 と token のファイルと入れた時刻の控えも)
+claude-account audit                           # token の置き場の宣言と、この PC の token・入れた時刻を値を見ずに並べる (後述)
 claude-account help token [token1]             # token をこの PC とほかのマシンに置く手順
 ```
+
+- 素の claude (`~/.claude`) は名前 `default` で扱う (`check default`・`list` の先頭の行)。Windows の素の claude は token を読まず `/login` で使うので、
+  `set-token default` は 2。`add`・`remove` に `default` は使えない
+- `set-token` は token を書いたあと、入れた時刻 (日本時間・秒まで) を `%USERPROFILE%\.local\state\claude-accounts\tokens.json` に控える (Linux と同じ形。
+  値は置かない)。控えが読めない形なら、token を読む前に止まる
 
 - 登録は**マシンごと** (`%USERPROFILE%\.config\claude-accounts\accounts.json`。Linux と同じ形)。Linux のマシンの子でも使うなら、そのマシンで
   add と set-token を打つ
@@ -1209,6 +1227,64 @@ claude-account help token [token1]             # token をこの PC とほかの
 - op-reason.exe は PATH か `%LOCALAPPDATA%\Programs\op-reason` (WSL の setup の `Install-OpReason` が入れる所) から探す。Smart App Control に
   止められるマシンの PowerShell の入口への回り道は、まだ無い (`set-token` でこの PC に置く)
 - token の会話の注意 (Remote Control・connector・`/login`・`auth status`・env を出さない) と、シークレットの決まりの例外・漏れたときは Linux と同じ
+
+#### claude の token の置き場の宣言 (`[claude.tokens]`)
+
+`claude setup-token` の token (1 年有効) をこの PC のどのアカウントに置いたかを、ホストの値に書く (Linux の `dotfiles.claude.tokens` と同じ名前と形。
+[`nix/README.md`「claude の token の置き場を宣言する」](../nix/README.md#claude-の-token-の置き場を宣言する-dotfilesclaudetokens))。値 (token) は書かない。
+設計は dotfiles-private の ADR 123 (`docs/adr/123_claude_token_watch_*`)。
+
+```toml
+[claude.tokens.alt]                                # claude-account add alt --mode token で足したアカウント
+label = "alt"                                      # token の呼び名。同じ token を置いたホスト・アカウントで同じにする。書かなければアカウントの名前
+item = "op://<vault の ID>/<項目の ID>/<欄の ID>"   # 元の token の 1Password の参照。欄まで書く。分かるまで書かない (null)
+```
+
+| キー | 値 |
+| --- | --- |
+| `tokens` の下の名前 | アカウントの名前 (claude-account の名前と同じ形。英小文字・数字で始め、英小文字・数字・`-` と `_` だけで 32 字まで。`account`・`selector` は使えない)。素の claude の `default` は書けない (Windows の素の claude は token を読まない) |
+| `label` | token の呼び名 (英小文字・数字で始め、英小文字・数字・`.`・`-`・`_` だけで 64 字まで)。書かなければアカウントの名前 |
+| `item` | 元の token を置いた 1Password の参照。欄まで書く: `op://<vault の ID>/<項目の ID>/<欄の ID>` (セクションがあれば `op://<vault>/<項目>/<セクション>/<欄>`)。書かなければ null |
+
+次のときは runner が止まる (終了コード 2): 名前の形が違う・`default`・表でない値・知らないキー・`label` の形が違う・`item` が欄まで書いた `op://` の参照でない
+(値そのものを書いたときも)。止める文には、規則に合わない名前・`label`・`item`・知らないキーの字を出さない (名前は数だけ。Nix の
+`nix/lib/claude-tokens.nix` と同じ見方に、Nix では型が見るものと `default` を足したもの)。
+
+手順 `claude-tokens` (order 99。`windowsClaudeAccounts` と `windowsClaudeCode` のホスト) は、check・dry-run・apply のたびに
+`%USERPROFILE%\.local\state\dotfiles\claude-tokens.json` を宣言に揃える (Linux と同じ中身。宣言が無くても `{"accounts":{}}`。check と dry-run は書かない)。
+token のファイルは見ない。
+
+```powershell
+dotfiles check --steps claude-tokens      # claude-tokens.json が宣言と同じかを見る (何も書かない)
+dotfiles apply --steps claude-tokens      # 書く
+claude-account audit                      # 棚卸し (下)
+```
+
+`claude-account audit` は、宣言と、この PC の登録の token のアカウント・token のファイル・入れた時刻の控えを和にして、アカウントごとに置き方・ACL・入れた時刻と
+経った日数を値を見ずに並べ、判定を出す。表・判定・終了コード (0 = 手を入れるものが無い / 1 = ある / 2 = 宣言・登録・控えを読めない) は Linux と同じ
+([`nix/README.md`「棚卸し (claude-account audit)」](../nix/README.md#棚卸し-claude-account-audit))。Windows で違うのは次だけ:
+
+- 頭の行のホストは `<PC の名前> (Windows)`
+- 置き方は `ローカル (DPAPI)`・`ローカル (平文)`・`1Password`・`無い`・`空`・`形が違う`。平文は直す (`claude-account set-token <名前>` で入れ直すと DPAPI の
+  暗号文になる)
+- 権限の列は mode でなく ACL の要約 (`ACL 本人だけ`・`ACL SYSTEM・Administrators・本人`・`ACL 広い`・読めなければ `?`)。DPAPI と平文の token の
+  ファイルを、本人・SYSTEM・Administrators のほかも読める・ACL を読めないなら直す。読み方と「広い」の数え方は手順 `notion-tokens` と同じ
+  (PowerShell の `Get-Acl`。runner は ACL を書き換えない)
+- 宣言の無い token の置き場の宣言漏れは、`[claude.tokens.<名前>]` に足すよう出す。素の claude の `default.env` があれば宣言漏れ (Windows の素の
+  claude は読まない)
+
+```text
+claude-account audit: EXAMPLE-PC (Windows) (2026-11-28 21:00 JST・入れてから 330 日を超えたら回す)
+宣言: ~/.local/state/dotfiles/claude-tokens.json (1 件)
+控え: ~/.local/state/claude-accounts/tokens.json (1 件)
+
+| アカウント | 呼び名 | 1Password の参照 | 置き方 | 権限 | 入れた時刻 | 日数 | 判定 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| alt | alt | - | ローカル (DPAPI) | ACL 本人だけ | 2026-11-18 21:00 | 10 | ok |
+
+呼び名が同じ行は、ほかのホストの同じ呼び名の行とも同じ token。回すときは、その全部のホストで貼り直す。
+判定: ok 1・回す 0・入れる 0・直す 0・宣言漏れ 0
+```
 
 #### 既に ~/.claude-<名前> があるとき
 

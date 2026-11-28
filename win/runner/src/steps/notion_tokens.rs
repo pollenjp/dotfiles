@@ -386,9 +386,9 @@ fn acl_row(ctx: &mut Ctx, path: &Path, vars: &[String]) -> Outcome {
     o
 }
 
-/// ACL の答え (`READ_ACL`)。
+/// ACL の答え (`READ_ACL`)。`claude-account audit` も token のファイルの ACL をこれで読む (同じ「広い」の数え方)。
 #[derive(Debug)]
-struct Acl {
+pub(crate) struct Acl {
     /// 今のユーザーの SID
     me: String,
     /// 持ち主の SID (読めなければ空)
@@ -410,8 +410,8 @@ struct AclRule {
     name: String,
 }
 
-/// PowerShell で env の ACL を読む。
-fn read_acl(sys: &dyn Sys, shell: &Path, path: &Path) -> Result<Acl, String> {
+/// PowerShell でファイルの ACL を読む。
+pub(crate) fn read_acl(sys: &dyn Sys, shell: &Path, path: &Path) -> Result<Acl, String> {
     let spec = CommandSpec::new(shell)
         .arg("-NoProfile")
         .arg("-NonInteractive")
@@ -466,11 +466,10 @@ fn parse_acl(lines: &[String]) -> Result<Acl, String> {
     Ok(Acl { me, owner, rules })
 }
 
-/// 本人 (今のユーザー)・SYSTEM・Administrators のほかに、中身を読む権限を許されている人 (名前、無ければ SID。並びは規則の順で、同じ人は 1 度)。
-/// 拒む規則・自分に効かない規則 (InheritOnly・CREATOR OWNER・CREATOR GROUP) は数えない。OWNER RIGHTS は持ち主として見る。拒む規則を
-/// 差し引かないので、読める側に寄せて知らせる
-fn wide_readers(acl: &Acl) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
+/// 中身を読む権限を許されている人 (OWNER RIGHTS は持ち主の SID に読み替えた SID と、名前 (無ければ規則の SID)。規則の順で、同じ人も並ぶ)。
+/// 拒む規則・自分に効かない規則 (InheritOnly・CREATOR OWNER・CREATOR GROUP) は数えない。拒む規則を差し引かないので、読める側に寄せる
+fn readers(acl: &Acl) -> Vec<(&str, String)> {
+    let mut out = Vec::new();
     for r in &acl.rules {
         if !r.allow
             || r.inherit_only
@@ -484,19 +483,54 @@ fn wide_readers(acl: &Acl) -> Vec<String> {
         } else {
             r.sid.as_str()
         };
-        if sid == acl.me || TRUSTED.contains(&sid) {
-            continue;
-        }
         let shown = if r.name.is_empty() {
             r.sid.clone()
         } else {
             r.name.clone()
         };
+        out.push((sid, shown));
+    }
+    out
+}
+
+/// 本人 (今のユーザー)・SYSTEM・Administrators のほかに、中身を読む権限を許されている人 (名前、無ければ SID。並びは規則の順で、同じ人は 1 度)。
+/// 数え方は `readers` (拒む規則・自分に効かない規則は数えない。OWNER RIGHTS は持ち主として見る。読める側に寄せて知らせる)
+pub(crate) fn wide_readers(acl: &Acl) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for (sid, shown) in readers(acl) {
+        if sid == acl.me || TRUSTED.contains(&sid) {
+            continue;
+        }
         if !out.contains(&shown) {
             out.push(shown);
         }
     }
     out
+}
+
+/// 読める人の要約 (棚卸しの表の権限の列。claude-skills の棚卸しの道具と同じ字): 広ければ「ACL 広い」、そうでなければ読める人を SYSTEM・
+/// Administrators・本人の順に並べ (本人だけなら「ACL 本人だけ」。set-token が付ける形)、誰も読めなければ「ACL 読める人なし」
+pub(crate) fn acl_summary(acl: &Acl) -> String {
+    if !wide_readers(acl).is_empty() {
+        return "ACL 広い".to_string();
+    }
+    let rs = readers(acl);
+    let has = |want: &str| rs.iter().any(|(sid, _)| *sid == want);
+    let mut parts = Vec::new();
+    if has(TRUSTED[0]) {
+        parts.push("SYSTEM");
+    }
+    if has(TRUSTED[1]) {
+        parts.push("Administrators");
+    }
+    if has(acl.me.as_str()) {
+        parts.push("本人");
+    }
+    match parts.as_slice() {
+        [] => "ACL 読める人なし".to_string(),
+        ["本人"] => "ACL 本人だけ".to_string(),
+        _ => format!("ACL {}", parts.join("・")),
+    }
 }
 
 #[cfg(test)]

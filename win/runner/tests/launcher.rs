@@ -10,7 +10,8 @@
 //! - 既定でも登録 (claude-account add) でもない名前は 2 (tester は試験の家の登録に subscription で書く)
 //! - (Unix) token のアカウント token1: token のファイルが無ければ 1 と忠告。平文なら claude に CLAUDE_CODE_OAUTH_TOKEN が届く。op の参照なら
 //!   PATH の op-reason に理由・read・参照を渡して読んだ値が届き、op-reason が 75 なら 75 で claude は起きない
-//! - exe の名前が claude-account なら管理のコマンド (help token を出す・知らない名前の check は 2)
+//! - exe の名前が claude-account なら管理のコマンド (help token を出す・知らない名前の check は 2・素の claude の check default は ~/.claude の
+//!   ログインが無ければ 1・audit は宣言の無い token のアカウント (token1) を宣言漏れとして並べて 1)
 
 mod common;
 
@@ -157,6 +158,20 @@ fn manager_runs_under_its_name() {
     );
     let (code, _, _) = w.run_as("account", &["check", "nosuch"]);
     assert_eq!(code, 2);
+    let (code, _, err) = w.run_as("account", &["check", "default"]);
+    assert_eq!(code, 1, "{err}");
+    assert!(err.contains("claude を起こし、/login する"), "{err}");
+    let (code, out, err) = w.run_as("account", &["audit"]);
+    assert_eq!(code, 1, "{out}\n{err}");
+    assert!(out.starts_with("claude-account audit: "), "{out}");
+    assert!(
+        out.contains("| token1 | - | - | 無い | - | - | - | 宣言漏れ |"),
+        "{out}"
+    );
+    assert!(
+        out.ends_with("判定: ok 0・回す 0・入れる 0・直す 0・宣言漏れ 1\n"),
+        "{out}"
+    );
 }
 
 /// token1 (登録の token のアカウント) の用意 (settings.json と projects のリンク) と偽の claude
