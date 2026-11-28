@@ -35,6 +35,7 @@
 #   dotfiles.claude.notion.routes                作業中の repo から宛先のプロファイルを決める、このマシンだけの規則
 #   dotfiles.claude.notion.override              プロファイルの値をこのマシンだけ差し替える
 #   dotfiles.claude.notion.tokens                このマシンで Notion の API キーを使うプロファイルと、その種類 (integration・personal)・1Password の項目の参照 (値は持たない)
+#   dotfiles.claude.tokens                       このホストのどのアカウント (default は素の claude) に、どの claude setup-token の token を置いたか (呼び名・1Password の参照。値は持たない)
 #   dotfiles.claude.videoOffer.autoStart.enable  設計・PR のときに解説動画の短尺を答えを待たずに作り始めるか (既定 false: 先に聞く)
 #   dotfiles.claude.heavyJobs.limitPercent       重い処理 (動画の書き出し・推論など) が使ってよい CPU とメモリの、マシン全体に対する割合 (既定 70)
 #   dotfiles.claude.sshAgentNotice.extraCommands 中で ssh を打つ道具のうち、Claude が打つ前に「1Password の承認が出るかも」と知らせるもの
@@ -542,6 +543,60 @@ in
           書き方は nix/README.md の「Notion の API キーの種類を宣言する」。
         '';
       };
+    };
+
+    tokens = lib.mkOption {
+      # 型は anything にし、形 (表か・名前・知らないキー・label・item) は lib/claude-tokens.nix の assertions (home/modules/claude.nix が
+      # 渡す) だけで見る。attrsOf submodule・str などの型の誤りの文は定義の値をそのまま出すので、宣言に token の値を書いてしまったとき
+      # (`claude.tokens.alt = "sk-ant-…"`・`{ token = "sk-ant-…"; }`) に、評価の誤りの文から端末や CI のログへ値が出る。値は表で、キーは
+      # 2 つ:
+      #   label  token の呼び名。同じ token (1 回の claude setup-token で出したもの) を置いたホスト・アカウントで同じにする (棚卸しは
+      #          呼び名で同じ token の置き場を並べ、回すときはその全部で貼り直す)。書かなければアカウントの名前。英小文字・数字で始め、
+      #          英小文字・数字・. - _ だけで 64 字まで
+      #   item   元の token を置いた 1Password の参照。欄まで書く (op://<vault の ID>/<項目の ID>/<欄の ID>。セクションがあれば
+      #          op://<vault>/<項目>/<セクション>/<欄>)。pjp-op-ref が出す ID の形の参照で、値ではない。分かるまで書かない (null)。
+      #          dotfiles は読まない。棚卸しが並べ、token を回す人がどの欄の値を貼るかを引く (op read '<item>' | claude-account set-token <名前>)
+      type = lib.types.anything;
+      default = { };
+      example = lib.literalExpression ''
+        {
+          default = { };          # 素の claude (~/.claude) が token で起きる
+          "alt" = {                # claude-account add alt --mode token で足したアカウント
+            item = null;
+          };
+        }
+      '';
+      description = ''
+        このホストのどのアカウントに、どの `claude setup-token` の token を置いたかの宣言。キーはアカウントの名前 (claude-account の
+        名前と同じ形。英小文字・数字で始まり、英小文字・数字・- と _ だけで 32 字まで。account・selector は使えない)。値 (token) は
+        ここに書かない。
+
+        - `default`: 素の `claude` (`~/.claude`)。宣言すると、素の `claude` が `~/.config/claude-accounts/default.env` の token で起きる
+          (`CLAUDE_CONFIG_DIR` は付けない)。wrapper `~/.local/share/claude-account/bin/claude` を置き、login の環境の PATH の頭と、
+          対話のシェルの PATH の頭 (mise の後) に足す。宣言の無いホストの素の `claude` は今のまま (`/login` の資格情報)
+        - ほかの名前: `claude-account add <名前> --mode token` で足したアカウント。宣言はアカウントを作らない (作るのは add)
+
+        値は表で、書けるのは `label` (token の呼び名。同じ token を置いたホスト・アカウントで同じにする。書かなければアカウントの名前。
+        英小文字・数字で始め、英小文字・数字・`.`・`-`・`_` だけで 64 字まで) と `item` (元の token を置いた 1Password の欄までの参照
+        `op://<vault の ID>/<項目の ID>/<欄の ID>`。値ではない。分かるまで書かない) だけ。
+
+        token の値は各ホストの `~/.config/claude-accounts/<名前>.env` に、ユーザーが自分の端末で `claude-account set-token <名前>` で
+        入れる (入れた時刻を `~/.local/state/claude-accounts/tokens.json` に控える)。Claude は値を読まない・書かない・出さない
+        (dotfiles-private の docs/adr/082_claude_token_accounts_* と docs/adr/123_claude_token_watch_*)。
+
+        home/modules/claude.nix が `~/.local/state/dotfiles/claude-tokens.json` に書き出す (宣言が無くても `{"accounts":{}}` を
+        置く。Claude Code を入れるホストだけ):
+
+            {"accounts": {"alt": {"item": null, "label": "alt"}}}
+
+        `claude-account audit` がこれを読み、ホストの実際のアカウント・token のファイルの有る無しと権限・入れた時刻・経った日数を、値を
+        見ずに並べて判定 (ok・回す・入れる・直す・宣言漏れ) を出す。入れてから 330 日を超えた・入れた時刻の控えが無い token は「回す」。
+        表でない・名前の形が違う・知らないキー・label・item の形が違うと評価で止まる (止めるときの文に、書いた字は出さない。型を anything に
+        して形を assertions だけで見るのは、型の誤りの文が値を出すため)。
+
+        mkHome の引数 (`claude.tokens = { … };`) でも、modules (`dotfiles.claude.tokens`) でも書ける。書き方は nix/README.md の
+        「claude の token の置き場を宣言する」。
+      '';
     };
 
     videoOffer.autoStart.enable = lib.mkOption {
