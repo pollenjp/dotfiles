@@ -36,7 +36,8 @@ let
         enable = true;
         privateSkills.enable = privateSkills;
       };
-      modules = [ { dotfiles.herdrCore.enable = herdrCore; } ];
+      # herdr-core は Linux のホストだけ (macOS で on にすると assertion で止まる)。macOS では core の組も off で組む
+      modules = [ { dotfiles.herdrCore.enable = herdrCore && isLinux; } ];
     }).config;
 
   files = cfg: cfg.home.file;
