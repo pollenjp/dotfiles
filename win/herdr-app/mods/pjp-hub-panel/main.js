@@ -33,7 +33,8 @@
 //
 // 題の貼り付け: 開いたトグル (節のカード・Q&A の項目・木のチケットの行) の題は、中身が一覧に残る間、一覧の上端に貼り付く (入れ子は親の題の
 //   下に段で並び、中身が流れ切ると次の題に押し上げられる)。貼り付いた題も押して畳め (畳むと、その題が貼り付いていた所まで送り戻す)、× と ID を
-//   写すボタンも効く。スクロールの位置は mod が持ち (on_scroll_wheel とつまみ)、題の位置は on_size_change で測った高さの和で決める。
+//   写すボタンと開け閉めのボタン (下の「開け閉めの覚え」) も効く。スクロールの位置は mod が持ち (on_scroll_wheel とつまみ)、題の位置は
+//   on_size_change で測った高さの和で決める。
 //
 // リンク: markdown の文 (markdown の節の text と、問いの body) の [字](URL)・<URL>・素の URL は、TextView がリンクにする (色・下線・
 //   ポインタの形は TextView が theme から決める)。押すと http と https の URL (host のあるもの。user@host の形は除く) だけを既定のブラウザで
@@ -95,14 +96,14 @@
 //   - 字下げ: 根の行から 1 段ずつ下げ、3 段まで (4 段目からは 3 段目と同じ字下げで、線も引かない)。字下げには、親の印の欄のまん中に
 //     縦の線を引き、子の行の印の欄へ短い横の線を出す (最後の子で縦の線を止める。色は theme の border)。
 //   - 開け閉め: steps か children を持つ ticket の行の印の欄に ▸ (畳んである)・▾ (開いている) を出し、押すと開け閉めする (ダブルクリック
-//     の 2 回目は数えない)。初めは、status が Done か Canceled (大文字小文字を問わない。Cancelled も) で、下 (自分の steps と、深さを
+//     の 2 回目は数えない)。初めて出る行は、status が Done か Canceled (大文字小文字を問わない。Cancelled も) で、下 (自分の steps と、深さを
 //     問わず children) に動いているもの (state が active か blocked の段・state が open か draft の PR) が無い行を畳み、ほかは開く
 //     (畳む行は済んだチケットの行で、小さな字で 1 行に出す。下の「済んだもの」)。
 //     段の state は段の札と同じく字のまま比べる ("Active" は動いているとみない)。畳んだ行は上の段だけを出し、その後ろに、下 (深さを
 //     問わず) の PR の数を state ごとに足す (例「PR 3 本 merged」「PR 2 本 merged・1 本 closed」。open・draft・merged・closed の順で、
 //     知らない state は出てきた順に字のまま、state の無い PR は数だけ。大文字小文字の違う同じ state は 1 つに数え、初めに出てきた字で
-//     出す。PR が無ければ足さない)。手で開け閉めした行は、節の畳みと同じくペインの中で覚え (鍵は節の id と行の id。id の無い行は木の
-//     中の位置。同じ id の行が木に 2 つあれば一緒に開け閉めする)、panel.json を書き直しても残し、version が変わると初めの形に戻す。
+//     出す。PR が無ければ足さない)。開け閉めは節と同じく下の「開け閉めの覚え」で覚える (閉じた行は、動き出しても閉じたまま。同じ id の
+//     行が木に 2 つあれば一緒に開け閉めする)。
 //   - related が true の根の行は関連の行 (束ねていないチケット・親の無い PR)。ほかの根の行 (ふつうは 1 つ目がハブのチケットで、子の
 //     チケットはその children) を上から順に出した下に点線を引き、その下に「関連」の字と並べて出す (ほかの根の行が無ければ点線は
 //     引かない)。根でない行の related は見ない (その場に出す)。
@@ -134,13 +135,13 @@
 //   - at: 時刻の字 (例 "11/23 14:12")。項目の頭の行の右に、小さく薄く出す。無い・空なら出さない。
 //   - a: 答え (markdown)。markdown の節の text と同じに出す (上の「リンク」と「ミニ絵」・入れ子の箇条書き。ミニ絵を大きく見る小窓の題は
 //     「Q. <問い>」)。無い・空 (空白だけも) なら、薄い字で「(まだ答えていない)」と出す。
-//   - open: 初めに開くか。boolean でなければ、items の 1 つ目だけを開き、ほかは畳む (ハブは新しい問いを items の頭に足す)。
+//   - open: 初めて出たときに開くか。boolean でなければ、items の 1 つ目だけを開き、ほかは畳む (ハブは新しい問いを items の頭に足す)。
+//     閉じている項目は、後から open を true にしても閉じたまま (下の「開け閉めの覚え」)。
 //   ほかの節と同じカード (節の頭の ▸・▾ と節の ×) の中に、items を panel.json の順に縦に並べ、節の題の後ろに、出している項目の数を
 //   「(N)」で足す (消す印で隠した項目は数えない)。項目は枠のついた小さなカードで、頭の行に開け閉めの印 (▸・▾)・「Q. <q>」・時刻・
 //   項目の × を並べる。頭の行を押すと開け閉めする (ダブルクリックの 2 回目は数えない。× と「戻す」を押しても開け閉めしない)。開いた
-//   項目は、頭の行の下に答えを 1 段 (印の欄と間の幅) 下げて出す。手で開け閉めした形は、work の行と同じくペインの中で覚え (鍵は節の id と
-//   項目の id。id の無い項目は items の中の位置)、panel.json を書き直しても残し、version が変わると初めの形に戻す。items が空・配列で
-//   ないなら「(項目はありません)」と出す。形の違う項目 (null・数など) でも落ちず、中身の無い項目として出す。
+//   項目は、頭の行の下に答えを 1 段 (印の欄と間の幅) 下げて出す。開け閉めは work の行と同じく下の「開け閉めの覚え」で覚える。items が空・
+//   配列でないなら「(項目はありません)」と出す。形の違う項目 (null・数など) でも落ちず、中身の無い項目として出す。
 //
 // 節を消す印: まとめのペイン (role が summary か無い) の、id (空でない文字列) のある節の右上に「×」を出す。押すと印が付き (枠が warn の
 //   点線になり、題に取り消し線が引かれ、中身が薄くなって「次の更新で消える」と出る)、「戻す」を押すと外れる (ダブルクリックの 2 回目は
@@ -218,16 +219,67 @@
 //   - done の節 (どの type の節も。欄 done が true): 見出しを小さく muted の色で出し、カードの上下の余白を 6 px (DONE.pad) に詰め (左右は
 //     今までの 12 px)、初めは畳む。開いた中身の字・札と、× と ID を写すボタンも小さく出す (図とミニ絵の大きさは今までのまま)。済んでいない
 //     行は、done の節の中でも薄くしない (薄くするのは済んだ行とその下)。
-//   - 節の初めの開け閉め: done が true か collapsed が真の節を畳み、ほかは開く。描くたびに今の panel.json の欄で決めるので、version を
-//     替えずに後から足した節 (初めて出す id)・後から done か collapsed を書いた節も畳んで出る (この「済んだもの:」の前の mod は、version が
-//     替わったとき (初めて読んだときも) だけ collapsed を読んだ)。手で開け閉めした節は id で覚え (初めの形より先に効く)、panel.json を
-//     書き直しても残し、version が変わると忘れて初めの形に戻す (木の行と Q&A の項目の開け閉めと同じ)。
+//   - 節の初めの開け閉め: 初めて出る節 (初めて出す id) は、done が true か collapsed が真なら畳み、ほかは開く。version を替えずに後から
+//     done か collapsed を書いた節も、手で開けていなければ畳む (この「済んだもの:」の前の mod は、version が替わったとき (初めて読んだときも)
+//     だけ collapsed を読んだ)。後から done や collapsed を外しても、閉じた節は閉じたまま。手で開け閉めした形が初めの形より先に効き、
+//     version が替わっても残る (下の「開け閉めの覚え」。木の行と Q&A の項目も同じ)。
 //   - 小さく出す: 字の大きさの値を 0.8 倍 (DONE.text) にして整数に丸め、9 (DONE.min) より小さくしない (ID と題・節の見出しの 13 と markdown の
 //     本文の 12 は 10、note・段の札・PR の数の 11 と札の 10 は 9)。字を囲む札・段の札と、× と ID を写すボタンの高さ・余白・角は 0.7 倍
 //     (DONE.box。押した段の確かめの「送る」「やめる」は、押しやすいように今の大きさ)。どちらも panel の文字の % (下の「文字の大きさ」) に従う。
 //     問いと、上の帯・答えの欄は小さくしない。
 //   - ハブがすること: 済んだものも消さずに残す (要らない節は、ユーザーが節の × で消す)。済んだ話の節には done: true を書く。この「済んだもの:」
 //     の字の無い古い mod は done を読まないので、collapsed: true も一緒に書くと、古い mod でも version が替わったときには畳む。
+//
+// 開け閉めの覚え: まとめのペイン (role が summary か無い) は、トグル (節 (どの type も)・木の ticket の行 (steps か children を持つもの)・Q&A の
+//   項目) の開け閉めをトグルごとに覚え、panel.json の隣のファイルに控える。閉じて見えているトグルは、panel.json がどう書き換わっても (version が
+//   替わっても・ハブが collapsed や done を外しても・行が動き出しても・Q&A の項目の open が true になっても) 閉じたままにし、開くのはユーザーの手
+//   (▸ を押す・下の開け閉めの帯のボタン) だけ。閉じたまま中身が変わったトグルには、頭の行に 🆕 を出す。ペインを同じ panel.json で開き直しても
+//   (herdr-app を上げ直しても) 開け閉めと 🆕 は残る。
+//   - 初めて出るトグルは初めの形: 節は done が true か collapsed が真なら畳み (上の「済んだもの」)、木の行は済んだ行を畳み (上の「チケット・
+//     進み具合・PR の木」)、Q&A の項目は open が boolean ならそれ、ほかは items の 1 つ目だけを開く (上の「Q&A」)。
+//   - 開いているトグルのうち、ユーザーが手で開けていないもの (初めの形で開いたもの) は、ハブが閉じる向きに書くと閉じる (collapsed や done を
+//     付けた・行が済んだ・Q&A の項目の open を false にした・頭に項目を足して 1 つ目でなくなった。今までの初めの形の決まりと同じ)。ユーザーが
+//     手で開けたものは、閉じる向きに書かれても開いたまま。閉じたトグルは、手で閉じたものも初めの形で閉じたものも閉じたまま。
+//   - version が替わったときに捨てるのは、選んだ答えとわけの字だけ (下の「ファイルのフォルダを見張り」)。開け閉めの覚えは残す。
+//   - 覚える鍵: 節は id (空でない字)。id の無い節は type と title と、前の id の無い節に同じ type と title が何回出たか (前に節を足しても、題が
+//     同じでなければずれない)。木の行は節の鍵と行の id (数なら字にしたもの。同じ id の行が木に 2 つあれば一緒に開け閉めする)。id の無い行は、
+//     親の行の名前と title と、同じ親の下で前に同じ title が何回出たか。Q&A の項目は節の鍵と項目の id。id の無い項目は q と、前に同じ q が何回
+//     出たか。id の無いトグルの鍵が替わったら (id が付いた・題が変わった)、前の鍵の覚えを引き継ぐ: 読み直しで初めて出た鍵に、今の木から消えた
+//     id の無いトグル (同じ種類・同じ節) のうち、題が同じもの (同じ題が 2 つなら位置も同じもの)、無ければ位置 (節は sections の、項目は items の
+//     何番目か。行は木の中の位置) が同じものが 1 つに決まれば、その覚えを移す。題と位置が一度に変わったとき・id のあるトグルどうし (ハブが別の
+//     id にした) は引き継がず、初めて出たトグルとみる。
+//   - 控えのファイル: 名前は panel.json の名前の .json を .view.json に替えたもの (panel.json → panel.view.json)。消す印・押した印のファイルと
+//     同じく mod だけが書き、ハブは読みも書きもしない (無くてよい。消すと、次の読み直しで初めの形から覚え直す)。1 つのトグルを 1 行に書く:
+//       { "file": "panel.json", "toggles": [{ "section": "<節の鍵>", "row": "<行の鍵>" か "item": "<項目の鍵>", "open": false,
+//         "by": "user" | "auto", "seen": "<見た中身の指紋>", "at": "<位置>", "t": "<題の指紋>", "gone": true }] }
+//     row も item も無い行は節。by は user (ユーザーの手で開け閉めした) か auto (初めの形・ハブが閉じる向きに書いた)。seen は、開いて見えて
+//     いない (閉じた・閉じたトグルの中にある) トグルにだけ書く。at・t は id の無いトグルにだけ書き (鍵が替わったときの引き継ぎ)、gone はその
+//     トグルが panel.json から消えたら書く (消えた読み直しの次からは引き継ぎの相手にしない)。panel.json を読めた読み直しのたびに読んで今の木に
+//     揃え、変わったときだけ書く (開いて見えている節の中身が変わっただけでは書かず、自分の書き込みで起きた読み直しでは揃えても変わらないので、
+//     見張りが回り続けない。panel.json が読めない間は読むだけ)。写しのペインどうしは同じファイルを読み (開け閉めがそろう)、書き違いは
+//     writeTextFile の expected で防ぐ。panel.json に無いトグルの行も残し (ハブが節を外して戻しても閉じたまま)、500 行を超えたら、panel.json に
+//     無いものを控えに入った順に外す。読み書きできなければ、わけを出し、押した開け閉めはペインの中に残して、次に書くときに書く (戻さない)。
+//     問いのペインは読みも書きもしない。
+//   - 🆕 (更新の印): 閉じたトグルの頭の行の、開け閉めの印 (▸) のすぐ後ろ (木の行は ID の前) に出す。字の大きさは panel の文字の % に従い、
+//     小さく出す節・行でも小さくしない。ポインタを載せると「閉じている間に中身が変わった (開くと消える)」。ユーザーが最後に見た中身と今の中身を、
+//     キーの順と空白によらない指紋で比べて、違えば出す。見た中身は、開いて見えている間 (自分と上のトグルが全部開いている。同じ id の行が 2 つ
+//     あれば、どちらかが) は持たず、見えなくなった時 (閉じた・上のトグルが閉じた) の中身にする。初めて出たときに閉じていたトグルは、初めて出た
+//     ときの中身。ハブが閉じる向きに書いて閉じたトグルは、その書き込みの後の中身 (済んだ行・節に、閉じるたびに 🆕 が付かないように)。比べる
+//     のは、節は節の欄 (title・中身。collapsed と done と、Q&A の節の項目の open は除く)、木の行は行の欄と steps・children (深さを問わず)、Q&A の
+//     項目は q・a・at。開くと消える (開いた時点の中身を見たことにする)。閉じた節の中の閉じた行が変わると節にも出て、節を開くと行にも出ている。
+//     字は定数 NEW_MARK (豆腐になる版に当たったら ● などに替える)。
+//   - 開け閉めのボタン: 子のトグルを持つトグル (畳めるチケットの行 (steps か children を持つ ticket の行) か Q&A の項目を下に持つ節、畳めるチケットの
+//     行を下に持つ木の行) の頭の行の右 (節は × の左) と、上の帯 (題と更新の時刻の右、文字の大きさの組の左) に、小さなボタン (mod のフォルダの
+//     fold.svg を字の色で塗ったアイコン) を出す。押すと、そのボタンの頭の行のすぐ下 (上の帯は帯の下に右寄せ) に開け閉めの帯 (「入れ子ごと ▾ 開く
+//     ▸ 閉じる」「直下だけ ▾ 開く ▸ 閉じる」。上の帯は「入れ子ごと」「節だけ」) を出し、もう一度押すと畳む。帯は panel に 1 つだけで、押した
+//     ボタンのそばにだけ出す (貼り付けた題の写しのボタンなら写しの中。同じ id の行が 2 つあっても、押した方だけ)。帯のボタンを押すと畳む。開け閉めの
+//     ボタン (帯を出し入れするボタン) を押しても、トグルそのものは開け閉めしない。子のトグルの無いトグル (markdown・図などの節・Q&A の項目・
+//     畳めるチケットの行を下に持たない行) には出さない。
+//     - 入れ子ごと: そのトグルと、その下 (深さを問わず) の全部のトグルを開く・閉じる。上の帯は、全部の節と、その中の行・項目
+//     - 直下だけ: 開くは、そのトグルと、直下の子のトグル (間に開け閉めの無い行 (PR・item) を挟むときは、その下の一番近いトグル) を開き、閉じるは
+//       直下の子のトグルを閉じる (そのトグルは今のまま)。孫より下は今のまま。上の帯の「節だけ」は、全部の節を開く・閉じる (中の行と項目は今のまま)
+//     - 帯で開け閉めしたものはユーザーの手の開け閉めとして覚え、開いたトグルの 🆕 は消える。写しの帯のボタンを押すと、そのトグルの上の端が写しを
+//       貼っていた所に来るまで送り戻す (上の「題の貼り付け」)。
 //
 // 文字の大きさ: どの role のペインも、上の行 (題・更新の時刻の行) の「− <今の %> +」で、panel (この mod) の文字だけを上げ下げする。
 //   1 回で 10% ずつ、70%〜200%。% を押すと既定 (100%) に戻す (既定のときは押せない)。100% は、ここに書いた字の大きさの値
@@ -282,7 +334,7 @@
 //                 | { kind: "dot", x1, y1, x2, y2, period, size, color }  (行って戻る点)
 //                 | { kind: "label", x, y, text, size, color }] } ] }
 //   collapsed と done は、どの type の節にも書ける。collapsed が真なら初めに畳み、done が true なら済んだ節 (小さく出して初めに畳む)。
-//   どちらも、初めの開け閉めの決まりは上の「済んだもの」の「節の初めの開け閉め」。
+//   どちらも、初めの開け閉めの決まりは上の「済んだもの」の「節の初めの開け閉め」、その後の開け閉めは上の「開け閉めの覚え」。
 //   marks の座標は画像の px (width・height と同じ空間) で、図と同じ倍率で置く。color は "#rrggbb" か
 //   theme の名前 (accent・ok・warn・blocked・muted など)。width・height が数でない・0 以下なら 520×300 とみる。
 //   図の置き場所: herdr-app の home の pjp-hub-panel-media/ (Windows は %USERPROFILE%\.config\herdr-app\pjp-hub-panel-media)。ミニ絵の図も同じ。
@@ -324,7 +376,8 @@
 //     "pjp-hub-panel.sendingUntil" (名前は MOD から作る) にこの時刻 (Date.now() の ms) までは送らないという値を置き、ほかの写しはその時刻まで
 //     送らずにわけを出す。送り終えたら 0 に戻す (herdr-app が送る途中で落ちても、35 秒で送れるようになる。hc() が hc を止める 30 秒より長くし、
 //     送る仕事の間に印が切れないようにする)。ID を写すボタン (上の「ID を写すボタン」) は、印のある間は写さない (写す側は印を置かない)。
-// ファイルのフォルダを見張り、書き換わったら読み直す (version が変わったら、選んだものと段の確かめのわけの字を消す。押した印は段が同じなら残す)。
+// ファイルのフォルダを見張り、書き換わったら読み直す (version が変わったら、選んだものと段の確かめのわけの字を消す。押した印は段が同じなら残す。
+// 開け閉めの覚えは残す)。
 
 import { View, div, image, svg } from "gpui-kit";
 import { writeTextFile } from "herdr"; // 節を消す印・段の押した印のファイル (panel.json の隣) を書く
@@ -654,6 +707,292 @@ const markdownTexts = (secs) => {
   return out;
 };
 
+// ---- 開け閉めの覚え (頭のコメントの「開け閉めの覚え」) ----
+// 控えのファイル: panel.json の隣に、名前の末尾の .json を .view.json に替えて置く (.json で終わらなければ足す)
+const viewPathOf = (file) => file.replace(/(\.json)?$/i, ".view.json");
+// 控えに残す行の上限。超えたら、panel.json に無いトグルの行を、控えに入った順に外す
+const VIEW_CAP = 500;
+// 閉じたまま中身が変わったトグルの印。Windows の herdr-app は、mod の字体に無い絵文字を OS の絵文字の字体 (Segoe UI Emoji) で引き当てて出す
+// (pjp-spaces の 🌱・🗑️・🎬 と同じ)。豆腐になる版に当たったら、この字を ● などに替える (ほかに直す所は無い)
+const NEW_MARK = "🆕";
+// 印の字の大きさ (fs に渡す値)。小さく出す節・行でも小さくしない (読めるように)
+const NEW_SIZE = 12;
+// 開け閉めのボタンのアイコン (この mod のフォルダの SVG。字の色で塗る)。MOD から作るので、MOD を書き換えた写しは写しのフォルダのものを読む
+const FOLD_ICON = `${MOD}/fold.svg`;
+// トグルの鍵: 種類 (s: 節・r: 木の行・q: Q&A の項目)・節の名前・行か項目の名前 (節は空の字) の組
+const toggleKey = (kind, sec, sub = "") => `${kind}\u0000${sec}\u0000${sub}`;
+// id の無いものの名前に足す数: 同じ字が、その並びの前に何回出たか (並びごとに作る)
+const counter = () => {
+  const seen = new Map();
+  return (s) => {
+    const n = seen.get(s) ?? 0;
+    seen.set(s, n + 1);
+    return n;
+  };
+};
+// 節の名前 (sections の位置ごと)。id (空でない字) か、id の無い節は "@<type>:<title>#<前の id の無い節に同じ type と title が出た回数>"
+// (前に節を足しても、題が同じでなければずれない)
+const sectionNames = (secs) => {
+  const k = counter();
+  return secs.map((s) => {
+    const id = markKey(s);
+    if (id != null) return id;
+    const t = `${str(s?.type)}:${str(s?.title)}`;
+    return `@${t}#${k(t)}`;
+  });
+};
+// 木の行の名前 (行の位置 path → 名前)。id (数なら字にしたもの) か、id の無い行は "@<親の行の名前>/<title>#<同じ親の下で前に同じ title が
+// 出た回数>" (根の行の親の名前は空の字)。段の押した印の row (rowName) とは別 (印の row は位置のまま)
+const rowToggleNames = (rows) => {
+  const out = new Map();
+  const walk = (list, path, parent) => {
+    const k = counter();
+    listOf(list).forEach((v, i) => {
+      const r = objOr(v);
+      const p = path === "" ? String(i) : `${path}.${i}`;
+      const rid = str(r.id);
+      const name = rid !== "" ? rid : `@${parent}/${str(r.title)}#${k(str(r.title))}`;
+      out.set(p, name);
+      walk(r.children, p, name);
+    });
+  };
+  walk(rows, "", "");
+  return out;
+};
+// Q&A の項目の名前 (items の位置ごと)。id (空でない字) か、id の無い項目は "@<q>#<前に同じ q が出た回数>"
+const qaToggleNames = (items) => {
+  const k = counter();
+  return items.map(({ it }) => markKey(it) ?? `@${str(it.q)}#${k(str(it.q))}`);
+};
+// 開け閉めの印を出す木の行か (steps か children を持つ ticket の行)
+const foldableRow = (r) => kindOf(r) === "ticket" && (listOf(r.steps).length > 0 || listOf(r.children).length > 0);
+// 初めて出るトグルの開け閉め (初めの形)。節: done が true か collapsed が真なら畳む。木の行: 済んだ行 (isDoneRow) を畳む。Q&A の項目: open が
+// boolean ならそれ、ほかは items の 1 つ目 (i が 0) だけを開く
+const sectionOpenByDefault = (s) => !(s.done === true || !!s.collapsed);
+const rowOpenByDefault = (r) => !isDoneRow(r);
+const qaOpenByDefault = (it, i) => (typeof it.open === "boolean" ? it.open : i === 0);
+// 🆕 で比べる節の中身: 開け閉めの欄 (collapsed・done と、Q&A の節の項目の open) を除いたもの
+const sectionContent = (s) => {
+  const { collapsed: _c, done: _d, ...rest } = s;
+  if (rest.type === "qa" && Array.isArray(rest.items)) {
+    rest.items = rest.items.map((v) => {
+      if (v === null || typeof v !== "object" || Array.isArray(v)) return v;
+      const { open: _o, ...o } = v;
+      return o;
+    });
+  }
+  return rest;
+};
+// panel.json (data) のトグルの木。roots は節の鍵の並び、nodes は鍵 → { kind, sec, sub, def: 初めの形で開くか, fp: 🆕 で比べる中身の指紋,
+// kids: 直下の子の鍵, anon: id の無いトグルか, slot: 位置 (節は sections の、項目は items の何番目か。木の行は行の位置 path), tf: 題の指紋 (節は
+// type と title、木の行は title、項目は q) }。anon・slot・tf は、id の無いトグルの鍵が替わったとき (id が付いた・題が変わった) に、前の鍵の覚えを
+// 引き継ぐのに使う (settleView)。子は、節には木の行 (開け閉めの印の無い行の下は、その下の一番近い畳める行) か Q&A の項目、木の行には同じく一番
+// 近い畳める子孫の行。同じ鍵が 2 つあれば (同じ id の行) 1 つにまとめ、中身を並べて指紋にし、子も合わせる。secNames は sections の位置ごとの節の
+// 名前、rowNames は節の名前 → 行の名前 (rowToggleNames)、qaNames は節の名前 → 項目の名前の並び (items の位置ごと)
+const toggleTree = (data) => {
+  const secs = Array.isArray(data?.sections) ? data.sections : [];
+  const nodes = new Map();
+  const parts = new Map();
+  const roots = [];
+  const add = (kind, sec, sub, def, content, parent, anon, slot, title) => {
+    const key = toggleKey(kind, sec, sub);
+    if (!nodes.has(key)) {
+      nodes.set(key, { kind, sec, sub, def, fp: "", kids: [], anon, slot, tf: fingerprint(title) });
+      parts.set(key, []);
+      if (parent == null) roots.push(key);
+    }
+    parts.get(key).push(content);
+    if (parent != null && parent !== key) {
+      const kids = nodes.get(parent).kids;
+      if (!kids.includes(key)) kids.push(key);
+    }
+    return key;
+  };
+  const secNames = sectionNames(secs);
+  const rowNames = new Map();
+  const qaNames = new Map();
+  secs.forEach((v, i) => {
+    const s = objOr(v);
+    const sn = secNames[i];
+    const skey = add("s", sn, "", sectionOpenByDefault(s), sectionContent(s), null, markKey(s) == null, String(i), [str(s.type), str(s.title)]);
+    if (s.type === "work") {
+      const names = rowToggleNames(s.rows);
+      rowNames.set(sn, names);
+      const walk = (list, path, parent) =>
+        listOf(list).forEach((rv, ri) => {
+          const r = objOr(rv);
+          const p = path === "" ? String(ri) : `${path}.${ri}`;
+          if (foldableRow(r)) walk(r.children, p, add("r", sn, names.get(p), rowOpenByDefault(r), r, parent, str(r.id) === "", p, str(r.title)));
+          else walk(r.children, p, parent);
+        });
+      walk(s.rows, "", skey);
+    } else if (s.type === "qa") {
+      const items = qaItemsOf(s);
+      const names = qaToggleNames(items);
+      qaNames.set(sn, names);
+      items.forEach(({ it, i: at }, j) =>
+        add("q", sn, names[j], qaOpenByDefault(it, at), { q: it.q, a: it.a, at: it.at }, skey, markKey(it) == null, String(at), str(it.q)),
+      );
+    }
+  });
+  for (const [key, n] of nodes) {
+    const ps = parts.get(key);
+    n.fp = fingerprint(ps.length === 1 ? ps[0] : ps);
+  }
+  return { data, roots, nodes, secNames, rowNames, qaNames };
+};
+// 控えのファイルの中身 (鍵 → { kind, sec, sub, open, user, seen, at, t, gone })。user はユーザーの手 (▸ の押下・開け閉めのボタン) で開け閉め
+// したか、seen は開いて見えていないトグルの見た中身の指紋 (開いて見えているトグルは null)。at・t は id の無いトグルだけが持つ位置と題の指紋
+// (toggleTree の slot・tf)、gone は id の無いトグルが panel.json から消えた印 (settleView)。無い・読めない・形の違う行は無いものとみる (次に書く
+// ときに正しい形で書き直る)。同じ鍵の行が 2 つあれば前のもの
+const parseView = (text) => {
+  const out = new Map();
+  let o = null;
+  try {
+    o = text == null ? null : JSON.parse(text);
+  } catch {
+    o = null;
+  }
+  for (const v of Array.isArray(o?.toggles) ? o.toggles : []) {
+    const e = objOr(v);
+    if (typeof e.section !== "string" || typeof e.open !== "boolean") continue;
+    const row = typeof e.row === "string" ? e.row : null;
+    const item = typeof e.item === "string" ? e.item : null;
+    if (row != null && item != null) continue;
+    const kind = row != null ? "r" : item != null ? "q" : "s";
+    const sub = row ?? item ?? "";
+    const key = toggleKey(kind, e.section, sub);
+    if (out.has(key)) continue;
+    const m = { kind, sec: e.section, sub, open: e.open, user: e.by === "user", seen: typeof e.seen === "string" ? e.seen : null };
+    if (typeof e.at === "string" && typeof e.t === "string") {
+      m.at = e.at;
+      m.t = e.t;
+      if (e.gone === true) m.gone = true;
+    }
+    out.set(key, m);
+  }
+  return out;
+};
+// 控えのファイルに書く字 (1 つのトグルを 1 行に)
+const viewJson = (file, m) => {
+  const rows = [...m.values()].map((e) =>
+    JSON.stringify({
+      section: e.sec,
+      ...(e.kind === "r" ? { row: e.sub } : e.kind === "q" ? { item: e.sub } : {}),
+      open: e.open,
+      by: e.user ? "user" : "auto",
+      ...(e.seen != null ? { seen: e.seen } : {}),
+      ...(e.at != null ? { at: e.at, t: e.t } : {}),
+      ...(e.gone ? { gone: true } : {}),
+    }),
+  );
+  const list = rows.length === 0 ? "[]" : `[\n    ${rows.join(",\n    ")}\n  ]`;
+  return `{\n  "file": ${JSON.stringify(baseName(file))},\n  "toggles": ${list}\n}\n`;
+};
+// 2 つの控えが同じか (行の並びは見ない)
+const sameView = (a, b) => {
+  if (a.size !== b.size) return false;
+  for (const [k, e] of b) {
+    const o = a.get(k);
+    if (!o || o.open !== e.open || o.user !== e.user || o.seen !== e.seen || o.at !== e.at || o.t !== e.t || !!o.gone !== !!e.gone) return false;
+  }
+  return true;
+};
+// 初めて出る鍵 (fresh) のうち id の無いトグルに替わったもの・id の無いトグルから替わったものに、前の鍵の覚えを引き継ぐ (next を書き換える)。
+// 相手は、前の木にあって今の木に無い id の無いトグルの行 (at があり gone が無い) で、同じ種類・同じ節 (節どうしは問わない) のもの。題の指紋が同じ
+// ものを先に (id が付いた。同じ題が 2 つあれば位置も同じもの)、次に位置が同じもの (題が変わった) を、1 つに決まるときだけ引き継ぐ。引き継いだ
+// 前の鍵の行は外す。id のあるトグルどうし (ハブが別の id にした) は引き継がない
+const adoptRenamed = (next, tree, fresh) => {
+  const pool = [...next].filter(([k, e]) => !tree.nodes.has(k) && e.at != null && !e.gone);
+  if (pool.length === 0) return;
+  const used = new Set();
+  for (const pass of ["t", "at"]) {
+    for (const key of fresh) {
+      if (next.has(key)) continue;
+      const n = tree.nodes.get(key);
+      const cands = pool.filter(([k, e]) => !used.has(k) && e.kind === n.kind && (n.kind === "s" || e.sec === n.sec));
+      let hit = pass === "t" ? cands.filter(([, e]) => e.t === n.tf) : cands.filter(([, e]) => e.at === n.slot);
+      if (pass === "t" && hit.length > 1) hit = hit.filter(([, e]) => e.at === n.slot);
+      if (hit.length !== 1) continue;
+      const [ok, oe] = hit[0];
+      used.add(ok);
+      next.delete(ok);
+      next.set(key, { ...oe, kind: n.kind, sec: n.sec, sub: n.sub });
+    }
+  }
+};
+// 控え (m) を panel.json の木 (tree) に揃えた新しい控え (m は変えない。頭のコメントの「開け閉めの覚え」):
+// 1. id の無いトグルの鍵が替わったら、前の鍵の覚えを引き継ぐ (adoptRenamed)
+// 2. 初めて出るトグルに初めの形を入れ、ユーザーが手で開けていない開いたトグルは、初めの形が閉じる向きになっていたら閉じる (閉じたトグルは閉じた
+//    まま。手で開けたトグルは開いたまま)。id の無いトグルには位置と題の指紋を持たせ、panel.json から消えたら gone の印を付ける
+// 3. 開いて見えている (自分と上のトグルが全部開いている。同じ鍵が 2 つあればどちらかが) トグルは見た中身を持たず、見えなくなったら、その時の
+//    中身を見た中身にする
+// panel.json に無いトグルの行は残し、VIEW_CAP を超えたら、無いものを控えに入った順に外す
+const settleView = (m, tree) => {
+  const next = new Map(m);
+  const fresh = [...tree.nodes.keys()].filter((k) => !next.has(k));
+  if (fresh.length > 0) adoptRenamed(next, tree, fresh);
+  for (const [key, n] of tree.nodes) {
+    const old = next.get(key);
+    const e = old ? { ...old } : { kind: n.kind, sec: n.sec, sub: n.sub, open: n.def, user: false, seen: null };
+    if (old && e.open && !e.user && !n.def) e.open = false;
+    delete e.gone;
+    if (n.anon) {
+      e.at = n.slot;
+      e.t = n.tf;
+    } else {
+      delete e.at;
+      delete e.t;
+    }
+    next.set(key, e);
+  }
+  for (const [k, e] of next) if (!tree.nodes.has(k) && e.at != null && !e.gone) next.set(k, { ...e, gone: true });
+  const shown = new Set();
+  const walk = (keys) => {
+    for (const k of keys) {
+      if (shown.has(k) || !next.get(k).open) continue;
+      shown.add(k);
+      walk(tree.nodes.get(k).kids);
+    }
+  };
+  walk(tree.roots);
+  for (const [key, n] of tree.nodes) {
+    const e = next.get(key);
+    if (shown.has(key)) e.seen = null;
+    else if (e.seen == null) e.seen = n.fp;
+  }
+  if (next.size > VIEW_CAP) {
+    for (const k of [...next.keys()]) {
+      if (next.size <= VIEW_CAP) break;
+      if (!tree.nodes.has(k)) next.delete(k);
+    }
+  }
+  return next;
+};
+// 鍵の並び (keys) のトグルを、ユーザーの手で開けた (open が true)・閉じた控え (木 tree に揃え直したもの)。変わらなければ null
+const foldWith = (m, tree, keys, open) => {
+  const next = new Map(m);
+  for (const key of keys) {
+    const n = tree.nodes.get(key);
+    if (!n) continue;
+    const old = next.get(key) ?? { kind: n.kind, sec: n.sec, sub: n.sub, open: n.def, user: false, seen: null };
+    next.set(key, { ...old, open, user: true });
+  }
+  const settled = settleView(next, tree);
+  return sameView(m, settled) ? null : settled;
+};
+// 鍵の下 (深さを問わず) のトグルの鍵の全部
+const descendants = (tree, key, out = []) => {
+  for (const k of tree.nodes.get(key)?.kids ?? []) {
+    if (out.includes(k)) continue;
+    out.push(k);
+    descendants(tree, k, out);
+  }
+  return out;
+};
+// 控えのファイルの種類 (消す印・押した印と同じ読み書きの手で扱う)
+const VIEW = { what: "開け閉めの覚え", pathOf: viewPathOf, parse: parseView, json: viewJson };
+
 // ---- ミニ絵 (頭のコメントの「ミニ絵」) ----
 // 縦横の比を決める大きさ (この mod を書いたときの px。幅を知るまでは fs() で panel の % に従うこの大きさで出す)、文とミニ絵の間 (px。% に
 // 従わない)、置き場の幅に対する枠の縦横の比 (16:9。この枠に収まるいっぱいで出す)、小窓で大きくする上限 (w・h の何倍か)
@@ -786,9 +1125,11 @@ export default class HubPanel extends View {
     this.data = null;
     this.error = null;
     this.picked = {};
-    this.collapsed = {};
-    this.rowOpen = {}; // 木の行を手で開け閉めした形 (鍵は rowKey。無い行は初めの形)
-    this.qaOpen = {}; // Q&A の項目を手で開け閉めした形 (鍵は qaKey。無い項目は初めの形)
+    // 開け閉めの覚え (頭のコメントの「開け閉めの覚え」): 控えのファイル (panel.view.json) の控え (cur はトグルの鍵 → 開け閉め。消す印・押した印と
+    // 同じ形の本)、開け閉めの帯を出しているトグルの鍵 (上の帯は "panel"。null は出していない)、panel.json のトグルの木 (treeOf が作って持つ)
+    this.vw = { kind: VIEW, cur: new Map(), pending: [], error: null };
+    this.foldMenu = null; // { eid: 帯を出したボタンの要素の id, key: そのトグルの鍵 (上の帯は null) }
+    this.treeCache = null;
     this.miniCheck = new Map(); // ミニ絵の図を確かめた結果 (図のパス → { why } か { ok })。panel.json を読み直すたびに作り直す
     this.probe = {}; // ミニ絵の物差しで測った記号の欄の幅 (rulerKey の "c:<1 段の幅>:<記号の欄の字>" → zoom を掛けた後の logical px)
     this.status = "";
@@ -887,21 +1228,24 @@ export default class HubPanel extends View {
     await this.serial(async () => {
       const marks = await this.syncMarks(this.dm, fresh, liveIds);
       const presses = await this.syncMarks(this.sp, fresh, liveSteps);
+      // 開け閉めの覚えも読み直し、読めた panel.json の木に揃える (変わったときだけ書く。自分の書き込みで起きた読み直しでは書かない)
+      const views = await this.syncView(fresh);
       if (fresh && this.data?.version !== fresh.version) {
         this.picked = {};
         this.status = "";
-        this.collapsed = {};
-        this.rowOpen = {};
-        this.qaOpen = {};
         // 確かめのわけの字は消す (送っている段の「送っています…」は残す)
         const keep = this.sending != null && this.sending in this.stepMsg ? { [this.sending]: this.stepMsg[this.sending] } : {};
         this.stepMsg = keep;
-        // 節の初めの開け閉め (done か collapsed の節を畳む) は、ここで入れずに描くたびに今の panel.json から決める (section)。version を
-        // 替えずに後から足した節・後から done を書いた節も畳んで出る
+        // 開け閉めの覚えは捨てない (頭のコメントの「開け閉めの覚え」。閉じたトグルは version が替わっても閉じたまま)
       }
       this.data = next.data;
       this.hash = next.hash;
       this.error = next.error;
+      // 控えのまだ書けていない押下は、新しい panel.json の木で当て直す (this.data を入れた後に入れる)
+      if (views) this.takeView(views);
+      // 開け閉めの帯を出していたトグルが子のトグルを持たなくなったら (消えたも)、帯を畳む
+      const fm = this.foldMenu;
+      if (fm && (fm.key == null ? this.treeOf(this.data).roots.length === 0 : !this.hasKids(fm.key))) this.foldMenu = null;
       if (marks) this.takeMarks(this.dm, marks);
       if (presses) {
         this.takeMarks(this.sp, presses);
@@ -1282,15 +1626,17 @@ export default class HubPanel extends View {
     const id = s.id ?? `s${i}`;
     // 済んだ節 (done が true) は、見出しを小さく薄く、中身の字も小さく出す (頭のコメントの「済んだもの」)
     const done = s.done === true;
-    return this.withTiny(done, () => this.sectionCard(s, id, done, c, pin));
+    // 開け閉めを覚える節の名前 (頭のコメントの「開け閉めの覚え」の鍵。id か、id の無い節は type と title から)
+    const sn = this.treeOf(this.data).secNames[i] ?? str(id);
+    return this.withTiny(done, () => this.sectionCard(s, id, sn, done, c, pin));
   }
 
-  // 節のカード (section が小さく出す間を決めてから呼ぶ)。初めの開け閉めは、done か collapsed の節を畳み、ほかは開く。描くたびに今の
-  // panel.json の欄で決めるので、version を替えずに後から足した節・後から done を書いた節も畳んで出る。手で開け閉めした節は this.collapsed に
-  // id で覚え (version が変わると忘れる)、初めの形より先に効く。pin は題の貼り付けの控え ({ y: カードの上の端 (中身の中の px), list: 貼り付ける
-  // 題を足す並び }。頭のコメントの「題の貼り付け」)。null なら控えない
-  sectionCard(s, id, done, c, pin = null) {
-    const closed = this.collapsed[id] ?? (done || !!s.collapsed);
+  // 節のカード (section が小さく出す間を決めてから呼ぶ)。開け閉めは開け閉めの覚え (頭のコメントの「開け閉めの覚え」) の控えから引き、控えに
+  // まだ無ければ初めの形 (done か collapsed の節を畳む)。sn は覚える節の名前。pin は題の貼り付けの控え ({ y: カードの上の端 (中身の中の px),
+  // list: 貼り付ける題を足す並び }。頭のコメントの「題の貼り付け」)。null なら控えない
+  sectionCard(s, id, sn, done, c, pin = null) {
+    const skey = toggleKey("s", sn);
+    const closed = !this.isOpen(skey, sectionOpenByDefault(s));
     // 消す印 (頭のコメントの「節を消す印」)。ボタンを出すのは、まとめのペインの id のある節だけ
     const key = this.marksOn() ? markKey(s) : null;
     const marked = this.markState(s) === "marked";
@@ -1309,22 +1655,22 @@ export default class HubPanel extends View {
     let body = null;
     if (!closed) {
       if (s.type === "markdown") body = this.markdownBody(s, id, c);
-      else if (s.type === "qa") body = this.qaBody(s, id, c, inner);
+      else if (s.type === "qa") body = this.qaBody(s, id, c, inner, sn);
       else if (s.type === "flow") body = this.flow(s, id, c);
       else if (s.type === "image") body = this.picture(s, id, c);
       else if (s.type === "tickets") body = this.ticketList(s, id, c);
       else if (s.type === "prs") body = this.prList(s, id, c);
-      else if (s.type === "work") body = this.workTree(s, id, c, inner);
+      else if (s.type === "work") body = this.workTree(s, id, c, inner, sn);
       else body = div().text_color(c.dim).child(`知らない節: ${s.type ?? "(type が無い)"}`);
     }
     if (node && body) {
       // 写しの題: 題の行の上下に余白 (済んだ節は詰める) と、下の区切りの線 (1) を足した高さ。字の大きさを継ぐ字 (印の ▸・▾) はカードと
-      // 同じ大きさにする (pinStrip が ts(13) を当てる)
+      // 同じ大きさにする (pinStrip が ts(13) を当てる)。題の行の高さは、本物の帯を除き、写しの帯を足したもの (barH)
       const pad = done ? PIN.secDone : PIN.sec;
-      node.h = this.hOf(hk) + pad * 2 + 1;
+      node.h = this.hOf(hk) - this.barH(`hp-sf-${id}`, `hp-sfb-${id}`) + this.barH(`hp-sf-${id}-pin`, `hp-sfb-${id}-pin`) + pad * 2 + 1;
       node.clone = (top, at) =>
         this.withTiny(done, () =>
-          this.pinStrip(top, node.h, c, this.sectionHeadRow(s, id, done, c, closed, marked, key, { y: node.y, at }).px(PIN.card)),
+          this.pinStrip(top, node.h, c, this.sectionHeadRow(s, id, done, c, closed, marked, key, skey, { y: node.y, at }).px(PIN.card)),
         );
       pin.list.push(node);
     }
@@ -1343,19 +1689,22 @@ export default class HubPanel extends View {
         .when(done, (el) => el.text_size(this.ts(13))),
       `hp-s-${id}`,
     )
-      // 題の行と、その右の印のボタン (題の行の外に置き、押しても節は開け閉めしない)
-      .child(this.measure(this.sectionHeadRow(s, id, done, c, closed, marked, key, null).id(hk), hk))
+      // 題の行と、その右の開け閉めのボタン・印のボタン (題の行の外に置き、押しても節は開け閉めしない)
+      .child(this.measure(this.sectionHeadRow(s, id, done, c, closed, marked, key, skey, null).id(hk), hk))
       .when(marked, (el) =>
         el.child(this.measure(div().id(nk).text_size(this.ts(11)).text_color(c.warn).child("次の更新で消える (「戻す」で残す)"), nk)),
       )
       .when(!!body, (el) => el.child(marked ? div().opacity(0.45).child(body) : body));
   }
 
-  // 節の題の行: 開け閉めの印と題 (押すと開け閉めする) | 消す印のボタン。pin ({ y: カードの上の端, at: 写しを貼った所 }) なら貼り付けた写しの
+  // 節の題の行: 開け閉めの印・🆕・題 (押すと開け閉めする) | 開け閉めのボタン (子のトグルを持つ節) | 消す印のボタン。開け閉めの帯を出していれば、
+  // その下に帯 (頭のコメントの「開け閉めの覚え」)。skey は節のトグルの鍵。pin ({ y: カードの上の端, at: 写しを貼った所 }) なら貼り付けた写しの
   // 題で、要素の id を替え、押すと畳んでから、カードの上の端が写しを貼った所に来るまで送り戻す (畳んだ題が欄の中に見える。頭のコメントの
   // 「題の貼り付け」)
-  sectionHeadRow(s, id, done, c, closed, marked, key, pin) {
+  sectionHeadRow(s, id, done, c, closed, marked, key, skey, pin) {
     const sfx = pin ? "-pin" : "";
+    const nm = closed ? this.newMark(skey, `hp-sn-${id}${sfx}`, c) : null;
+    const fold = this.hasKids(skey);
     const head = h_flex()
       .id(`hp-sh-${id}${sfx}`)
       .flex_1()
@@ -1363,12 +1712,9 @@ export default class HubPanel extends View {
       .gap(6)
       .items_center()
       .cursor_pointer()
-      .on_click((_, cx) => {
-        this.collapsed[id] = !closed;
-        if (pin) this.scrollY = Math.max(0, pin.y - pin.at);
-        cx.notify();
-      })
+      .on_click((_, cx) => this.setFold([skey], closed, cx, pin))
       .child(div().flex_none().w(this.fs(12)).text_color(c.dim).child(closed ? "▸" : "▾"))
+      .when(!!nm, (el) => el.child(nm))
       .child(
         div()
           .flex_1()
@@ -1379,10 +1725,13 @@ export default class HubPanel extends View {
           .when(marked, (el) => el.line_through())
           .child(s.type === "qa" ? this.qaTitle(s) : (s.title ?? "")),
       );
-    return h_flex()
+    const line = h_flex()
       .gap(6)
       .items_center()
       .child(head)
+      .when(fold, (el) =>
+        el.child(this.foldButton(`hp-sf-${id}${sfx}`, skey, c, "開け閉めのボタンを出す (この節の入れ子ごと・直下だけを開く・閉じる)")),
+      )
       .when(key != null, (el) =>
         el.child(
           this.markButton(`hp-dm-${key}${sfx}`, marked, c, ["印を外す (この節を残す)", "次の更新でこの節を消す (もう一度押すと戻せる)"], (cx) =>
@@ -1390,6 +1739,12 @@ export default class HubPanel extends View {
           ),
         ),
       );
+    if (!fold || !this.foldOpen(`hp-sf-${id}${sfx}`)) return line;
+    // 開け閉めの帯は題の行のすぐ下に、題の字の頭 (印の欄と間の後ろ) にそろえて置く
+    return v_flex()
+      .gap(4)
+      .child(line)
+      .child(this.foldBar(`hp-sfb-${id}${sfx}`, this.toggleGroups(skey), c, pin).pl(this.fs(12) + 6));
   }
 
   // ---- 節を消す印 (頭のコメントの「節を消す印」) と、印のファイルの読み書き (段の押した印も同じ手。頭のコメントの「段の answer」) ----
@@ -1479,6 +1834,243 @@ export default class HubPanel extends View {
       const next = new Map([...m].filter(([k]) => keys.has(k)));
       return next.size === m.size ? null : next;
     }, book.kind);
+  }
+
+  // 開け閉めの覚えのファイルを読み、まだ書けていない押下 (this.vw.pending) を当ててから panel.json (data) のトグルの木に揃え (settleView)、変わった
+  // ときだけ書く (自分の書き込みで起きた読み直しでは、揃えても変わらないので書かない)。書けたら (変わらなかったときも)、当てた押下を pending から
+  // 外す。書けなければ pending に残し、次に書くときに書く。data が無い (panel.json が無い・読めない) ときは読むだけ (前に読めた中身で揃えて書くと、
+  // 中身の違う写しのペインと書き合う)。返すのは editMarks の結果 (控えか、わけ)。serial の中で呼ぶ
+  async writeView(data) {
+    const ops = [...this.vw.pending];
+    const res = await this.editMarks((m) => {
+      if (!data) return null;
+      const next = settleView(
+        ops.reduce((a, op) => op(a) ?? a, m),
+        this.treeOf(data),
+      );
+      return sameView(m, next) ? null : next;
+    }, VIEW);
+    if (res.marks && data) this.vw.pending = this.vw.pending.filter((o) => !ops.includes(o));
+    return res;
+  }
+
+  // 読み直したとき: 開け閉めの覚えのファイルを読み、この読み直しで読めた panel.json (fresh) に揃えて書く (writeView)。問いのペインは null。reload が
+  // serial の中で呼ぶ
+  syncView(fresh) {
+    return this.marksOn() ? this.writeView(fresh) : Promise.resolve(null);
+  }
+
+  // writeView の結果を控えに入れる (this.data を入れた後に呼ぶ)。読めたら、ファイルの中身にまだ書けていない押下を当て直して今の木に揃える (写しの
+  // ペインが書いた開け閉めもここで入る)。読み書きできなければ、わけを残し、ペインの中の控えを今の木に揃える (押した形は戻さない。閉じたトグルは
+  // 閉じたまま)
+  takeView(res) {
+    if (res.marks) {
+      this.vw.error = null;
+      const m = this.vw.pending.reduce((a, op) => op(a) ?? a, res.marks);
+      this.vw.cur = this.data ? settleView(m, this.treeOf(this.data)) : m;
+    } else {
+      this.vw.error = res.error;
+      if (this.data) this.vw.cur = settleView(this.vw.cur, this.treeOf(this.data));
+    }
+  }
+
+  // ---- 開け閉めの覚え (頭のコメントの「開け閉めの覚え」) ----
+
+  // panel.json (data) のトグルの木 (toggleTree)。同じ data なら作り直さない
+  treeOf(data) {
+    if (this.treeCache?.data !== data) this.treeCache = toggleTree(data);
+    return this.treeCache;
+  }
+
+  // トグルが開いているか。控えに無ければ (読み直しで揃える前) 初めの形 (def)
+  isOpen(key, def) {
+    const e = this.vw.cur.get(key);
+    return e ? e.open : def;
+  }
+
+  // 閉じたまま中身が変わったか (🆕 を出すか): 閉じていて、見た中身の指紋が今の中身の指紋と違う
+  isNew(key) {
+    const e = this.vw.cur.get(key);
+    if (!e || e.open || e.seen == null) return false;
+    const n = this.treeOf(this.data).nodes.get(key);
+    return !!n && n.fp !== e.seen;
+  }
+
+  // keys のトグルをユーザーの手で開ける (open が true)・閉じる (▸ の押下と開け閉めの帯のボタン)。見た目はすぐ変え、控えのファイルへは後で書く
+  // (writeView。書けなければ、わけを出し、押した形はペインの中に残して次に書く)。pin ({ y: トグルの上の端, at: 写しを貼った所 }) は貼り付けた
+  // 写しから押したときで、トグルの上の端が写しを貼っていた所に来るまで送り戻す (頭のコメントの「題の貼り付け」)
+  setFold(keys, open, cx, pin = null) {
+    if (pin) this.scrollY = Math.max(0, pin.y - pin.at);
+    const op = (m) => foldWith(m, this.treeOf(this.data), keys, open);
+    this.vw.cur = op(this.vw.cur) ?? this.vw.cur;
+    cx.notify();
+    if (!this.marksOn()) return;
+    this.vw.pending.push(op);
+    // await をまたぐ仕事は cx.spawn の cx でする (クリックの cx は、await の後には使えない)
+    cx.spawn(async (cx) => {
+      const res = await this.serial(() => this.writeView(this.data));
+      this.takeView(res);
+      cx.notify();
+    });
+  }
+
+  // 🆕 (閉じたまま中身が変わったトグルの印)。出さないなら null。字は小さく出す間も小さくしない (NEW_SIZE)。eid は要素の id (ヒントに要る)
+  newMark(key, eid, c) {
+    if (!this.isNew(key)) return null;
+    return div()
+      .id(eid)
+      .flex_none()
+      .text_size(this.fs(NEW_SIZE))
+      .text_color(c.accent) // 絵文字で出ずに字で出たときの色
+      .tooltip("閉じている間に中身が変わった (開くと消える)")
+      .child(NEW_MARK);
+  }
+
+  // 子のトグルを持つトグルか (開け閉めのボタンを出すか)
+  hasKids(key) {
+    return (this.treeOf(this.data).nodes.get(key)?.kids.length ?? 0) > 0;
+  }
+
+  // 要素の id が eid の開け閉めのボタンが、帯を出しているか
+  foldOpen(eid) {
+    return this.foldMenu?.eid === eid;
+  }
+
+  // 帯を出しているときの、題の行に足される高さ (測った帯の高さと、題の行との間 4)。出していなければ 0。trigger は開け閉めのボタンの要素の id、bar は
+  // 帯の要素の id。貼り付けた題の写しの高さは、本物の題の行の高さから本物の帯の分を引き、写しの帯の分を足して決める (帯は押したボタンのそばに
+  // だけ出るので、写しから出した帯は一覧の中身の高さを変えない)
+  barH(trigger, bar) {
+    return this.foldOpen(trigger) ? this.hOf(bar) + 4 : 0;
+  }
+
+  // 開け閉めのボタン: 押すと、このボタンのそばに開け閉めの帯 (foldBar) を出し、もう一度押すと畳む (帯は panel に 1 つだけ。帯を出したボタンの
+  // 要素の id で覚えるので、同じトグルの写し・同じ id の行の帯は出ない)。押してもトグルそのものは開け閉めしない。key はトグルの鍵 (上の帯は null)。
+  // base なら上の帯のボタン (panel の文字の % に従わず、「− % +」の組と同じ高さ)。小さく出す間は小さい
+  foldButton(eid, key, c, tip, base = false) {
+    const on = this.foldOpen(eid);
+    const H = base ? BAR_H : this.bs(20);
+    return h_flex()
+      .id(eid)
+      .flex_none()
+      .h(H)
+      .min_w(H)
+      .justify_center()
+      .items_center()
+      .rounded(base ? atBase(6) : this.bs(5))
+      .border_1()
+      .border_color(on ? c.accent : c.border)
+      .cursor_pointer()
+      .hover((st) => st.bg(c.raised))
+      .tooltip(on ? "開け閉めのボタンを畳む" : tip)
+      .on_click((e, cx) => {
+        cx.stop_propagation();
+        // ダブルクリックの 2 回目は数えない (出してすぐ畳まない)
+        if ((e?.click_count ?? 1) > 1) return;
+        this.foldMenu = on ? null : { eid, key };
+        cx.notify();
+      })
+      .child(
+        svg(FOLD_ICON)
+          .flex_none()
+          .size(base ? atBase(13) : this.bs(12))
+          .text_color(on ? c.accent : c.dim),
+      );
+  }
+
+  // 開け閉めの帯: 組 (groups。{ label, items: [{ text, tip, keys, open }] }) ごとに、名前と小さなボタンを並べる (狭ければ組ごとに次の行へ回る)。
+  // 押すと keys のトグルをユーザーの手で開け閉めし、帯を畳む。pin は貼り付けた写しの帯のときの { y, at } (setFold)。base は上の帯の帯。高さを eid で
+  // 測る (貼り付けた題の写しの高さに入れる。barH)
+  foldBar(eid, groups, c, pin = null, base = false) {
+    const B = (n) => (base ? atBase(n) : this.bs(n));
+    const T = (n) => (base ? atBase(n) : this.ts(n));
+    return this.measure(h_flex().id(eid), eid)
+      .flex_wrap()
+      .when(base, (el) => el.justify_end())
+      .gap_x(10)
+      .gap_y(4)
+      .items_center()
+      .children(
+        groups.map((g, gi) =>
+          h_flex()
+            .flex_none()
+            .gap(B(4))
+            .items_center()
+            .child(div().text_size(T(10)).text_color(c.muted).child(g.label))
+            .children(
+              g.items.map((it, ii) =>
+                h_flex()
+                  .id(`${eid}-${gi}-${ii}`)
+                  .flex_none()
+                  .h(B(18))
+                  .px(B(6))
+                  .items_center()
+                  .rounded(B(5))
+                  .border_1()
+                  .border_color(c.border)
+                  .bg(c.raised)
+                  .text_size(T(11))
+                  .text_color(c.fg)
+                  .cursor_pointer()
+                  .hover((st) => st.opacity(0.85))
+                  .tooltip(it.tip)
+                  .on_click((e, cx) => {
+                    cx.stop_propagation();
+                    // ダブルクリックの 2 回目は数えない
+                    if ((e?.click_count ?? 1) > 1) return;
+                    this.foldMenu = null;
+                    this.setFold(it.keys, it.open, cx, pin);
+                  })
+                  .child(it.text),
+              ),
+            ),
+        ),
+      );
+  }
+
+  // トグル (key) の開け閉めの帯の組: 入れ子ごと (そのトグルと、その下の全部) と、直下だけ (開くはそのトグルと直下の子のトグル、閉じるは直下の
+  // 子のトグル。孫より下は今のまま)
+  toggleGroups(key) {
+    const t = this.treeOf(this.data);
+    const kids = t.nodes.get(key)?.kids ?? [];
+    const all = [key, ...descendants(t, key)];
+    return [
+      {
+        label: "入れ子ごと",
+        items: [
+          { text: "▾ 開く", tip: "このトグルと、その下のトグルを全部開く", keys: all, open: true },
+          { text: "▸ 閉じる", tip: "このトグルと、その下のトグルを全部閉じる", keys: all, open: false },
+        ],
+      },
+      {
+        label: "直下だけ",
+        items: [
+          { text: "▾ 開く", tip: "このトグルと、直下のトグルを開く (その下は今のまま)", keys: [key, ...kids], open: true },
+          { text: "▸ 閉じる", tip: "直下のトグルを閉じる (このトグルと、その下は今のまま)", keys: kids, open: false },
+        ],
+      },
+    ];
+  }
+
+  // 上の帯 (panel 全体) の開け閉めの帯の組: 入れ子ごと (全部の節と、その中の行・項目) と、節だけ (中の行と項目は今のまま)
+  panelGroups() {
+    const t = this.treeOf(this.data);
+    const all = [...t.nodes.keys()];
+    return [
+      {
+        label: "入れ子ごと",
+        items: [
+          { text: "▾ 開く", tip: "全部の節と、その中の行・項目を開く", keys: all, open: true },
+          { text: "▸ 閉じる", tip: "全部の節と、その中の行・項目を閉じる", keys: all, open: false },
+        ],
+      },
+      {
+        label: "節だけ",
+        items: [
+          { text: "▾ 開く", tip: "全部の節を開く (中の行・項目は今のまま)", keys: t.roots, open: true },
+          { text: "▸ 閉じる", tip: "全部の節を閉じる (中の行・項目は今のまま)", keys: t.roots, open: false },
+        ],
+      },
+    ];
   }
 
   // 押下の op を book の見た目にすぐ当て、まだ書いていない押下に積む (印のファイルへ書くのは writeMarks)
@@ -1709,36 +2301,27 @@ export default class HubPanel extends View {
     return t === "" ? n : `${t} ${n}`;
   }
 
-  // 項目の開け閉めを覚える鍵 (節の id と項目の id。id の無い項目は items の中の位置)
-  qaKey(id, it, i) {
-    const k = markKey(it);
-    return `${id}\u0000${k != null ? k : `@${i}`}`;
-  }
-
-  // 項目の初めの開け閉め: open が boolean ならそれ、ほかは items の 1 つ目だけを開く
-  qaOpenByDefault(it, i) {
-    return typeof it.open === "boolean" ? it.open : i === 0;
-  }
-
-  // Q&A の節の中身。項目を panel.json の順に縦に並べる。pin は題の貼り付けの控え ({ y: 中身の上の端, x, list }。sectionCard)。null なら控えない
-  qaBody(s, id, c, pin = null) {
+  // Q&A の節の中身。項目を panel.json の順に縦に並べる。pin は題の貼り付けの控え ({ y: 中身の上の端, x, list }。sectionCard)。null なら控えない。
+  // sn は開け閉めを覚える節の名前
+  qaBody(s, id, c, pin = null, sn = str(id)) {
     const shown = this.qaShown(s);
     if (shown.length === 0) return div().text_color(c.muted).child("(項目はありません)");
     const QA_GAP = 8;
     let y = pin ? pin.y : 0;
     const items = shown.map(({ it, i }) => {
-      const el = this.qaItem(s, it, i, id, c, pin ? { y, x: pin.x, list: pin.list } : null);
+      const el = this.qaItem(s, it, i, id, c, pin ? { y, x: pin.x, list: pin.list } : null, sn);
       y += this.hOf(`hp-qa-${id}-${i}`) + QA_GAP;
       return el;
     });
     return v_flex().gap(QA_GAP).children(items);
   }
 
-  // 項目: 枠のついた小さなカード。頭の行 (印・「Q. <q>」・時刻・×) と、開いていれば、その下に 1 段下げた答え。pin ({ y: 項目の上の端, x, list })
-  // があり、開いて答えを出すなら、頭の行を貼り付ける控えを list に足す (頭のコメントの「題の貼り付け」)
-  qaItem(s, it, i, id, c, pin = null) {
-    const key = this.qaKey(id, it, i);
-    const open = this.qaOpen[key] ?? this.qaOpenByDefault(it, i);
+  // 項目: 枠のついた小さなカード。頭の行 (印・🆕・「Q. <q>」・時刻・×) と、開いていれば、その下に 1 段下げた答え。開け閉めは開け閉めの覚え
+  // (頭のコメントの「開け閉めの覚え」。鍵は節の名前 sn と項目の名前) から引く。pin ({ y: 項目の上の端, x, list }) があり、開いて答えを出すなら、
+  // 頭の行を貼り付ける控えを list に足す (頭のコメントの「題の貼り付け」)
+  qaItem(s, it, i, id, c, pin = null, sn = str(id)) {
+    const key = toggleKey("q", sn, this.treeOf(this.data).qaNames.get(sn)?.[i] ?? markKey(it) ?? `@${i}`);
+    const open = this.isOpen(key, qaOpenByDefault(it, i));
     const mkey = this.marksOn() ? markKey(it) : null; // × を出すのは、まとめのペインの id のある項目だけ
     const marked = this.markState(it) === "marked";
     const q = str(it.q);
@@ -1808,6 +2391,7 @@ export default class HubPanel extends View {
   qaHeadRow(s, it, i, id, c, o, pin) {
     const sfx = pin ? "-pin" : "";
     const at = str(it.at).trim();
+    const nm = o.open ? null : this.newMark(o.key, `hp-qn-${id}-${i}${sfx}`, c);
     const head = h_flex()
       .id(`hp-qh-${id}-${i}${sfx}`)
       .flex_1()
@@ -1819,11 +2403,10 @@ export default class HubPanel extends View {
       .on_click((e, cx) => {
         // ダブルクリックの 2 回目は数えない (開いてすぐ畳まない)
         if ((e?.click_count ?? 1) > 1) return;
-        this.qaOpen[o.key] = !o.open;
-        if (pin) this.scrollY = Math.max(0, pin.y - pin.at);
-        cx.notify();
+        this.setFold([o.key], !o.open, cx, pin);
       })
       .child(div().flex_none().w(o.S).text_color(c.dim).child(o.open ? "▾" : "▸"))
+      .when(!!nm, (el) => el.child(nm))
       .child(
         div()
           .flex_1()
@@ -2062,11 +2645,13 @@ export default class HubPanel extends View {
   }
 
   // 木の節 (type "work")。根の行 (related でないもの) を上から順に出し、related が true の根の行は、その下の点線の下に「関連」の字と
-  // 並べて出す (ほかの根の行が無ければ点線は引かない)。pin は題の貼り付けの控え ({ y: 中身の上の端, x, list }。sectionCard)。null なら控えない
-  workTree(s, id, c, pin = null) {
+  // 並べて出す (ほかの根の行が無ければ点線は引かない)。pin は題の貼り付けの控え ({ y: 中身の上の端, x, list }。sectionCard)。null なら控えない。
+  // sn は開け閉めを覚える節の名前 (頭のコメントの「開け閉めの覚え」)
+  workTree(s, id, c, pin = null, sn = str(id)) {
     const roots = listOf(s.rows).map((r, i) => ({ r: objOr(r), path: String(i) }));
     if (roots.length === 0) return div().text_color(c.muted).child("(行はありません)");
-    const g = this.treeGeom();
+    // 木の寸法に、行の開け閉めを覚える鍵を作る節の名前 (sn) と行の名前 (rn。行の位置 → 名前) を添えて、木の行へ渡す
+    const g = { ...this.treeGeom(), sn, rn: this.treeOf(this.data).rowNames.get(sn) ?? rowToggleNames(s.rows) };
     const sec = markKey(s) ?? ""; // 押した印の section (頭のコメントの「段の answer」。id の無い節は空の字)
     // 根の行を上から並べる。行の間は TREE.gap で、小さく出す行 (済んだ行・done の節の中) が続く間は DONE.gap に詰める。y0 と x は並びの
     // 上の端と左の字下げ (題の貼り付けの控え。pin が無ければ使わない)。並びの高さ (h) も返す
@@ -2132,9 +2717,10 @@ export default class HubPanel extends View {
     const kind = kindOf(r);
     const steps = listOf(r.steps);
     const kids = listOf(r.children).map((k, i) => ({ r: objOr(k), path: `${path}.${i}` }));
-    const foldable = kind === "ticket" && (steps.length > 0 || kids.length > 0);
-    const key = this.rowKey(id, r, path);
-    const open = !foldable || (this.rowOpen[key] ?? this.openByDefault(r));
+    const foldable = foldableRow(r);
+    // 開け閉めは開け閉めの覚え (頭のコメントの「開け閉めの覚え」) から引く。鍵は節の名前と行の名前 (id か、id の無い行は親の名前と題から)
+    const key = toggleKey("r", g.sn, g.rn.get(path) ?? rowName(r, path));
+    const open = !foldable || this.isOpen(key, rowOpenByDefault(r));
     // 子を出すか・子へ線を引いて字下げするか (TREE.indent 段まで。それより深い子は字下げも線もなしで、すぐ下に並べる)
     const showKids = open && kids.length > 0;
     const lined = showKids && depth < TREE.indent;
@@ -2143,7 +2729,16 @@ export default class HubPanel extends View {
     const o = { foldable, open, key, tick, tail: lined, summary: open ? "" : prSummary(r), faint, small };
     // 題の貼り付け: 開いた畳める行 (チケットの行) は、上の段を貼り付ける控えを作り、子の控えをその kids に足す。畳めない行 (PR・item) の子は
     // 親の並びに足す (その行の上の段は貼り付けない)
-    const node = pin && foldable && open ? { y: pin.y, end: pin.y, h: this.hOf(tk) + PIN.row * 2 + 1, kids: [], clone: null } : null;
+    const node =
+      pin && foldable && open
+        ? {
+            y: pin.y,
+            end: pin.y,
+            h: this.hOf(tk) - this.barH(`hp-wf-${id}-${path}`, `hp-wfb-${id}-${path}`) + this.barH(`hp-wf-${id}-pin-${path}`, `hp-wfb-${id}-pin-${path}`) + PIN.row * 2 + 1,
+            kids: [],
+            clone: null,
+          }
+        : null;
     const kidList = node ? node.kids : pin?.list;
     let h = this.hOf(tk);
     const rest = [];
@@ -2208,21 +2803,10 @@ export default class HubPanel extends View {
     };
   }
 
-  // 木の行の初めの開け閉め: 済んだ行 (isDoneRow。畳めるのは ticket の行だけなので、status が Done か Canceled で、下に動いているもの
-  // (isMoving) が無い行) を畳む
-  openByDefault(r) {
-    return !isDoneRow(r);
-  }
-
-  // 木の行の開け閉めを覚える鍵 (節の id と行の名前。行の id か、id の無い行は木の中の位置)
-  rowKey(id, r, path) {
-    return `${id}\u0000${rowName(r, path)}`;
-  }
-
-  // 行の上の段: 印の欄 | ID・札・題・who (・畳んだ行の PR の数)。入らなければ右の欄の中で折り返す (一覧の行と同じ)。o.small なら字・札・
+  // 行の上の段: 印の欄 | 🆕・ID・札・題・who (・畳んだ行の PR の数)。入らなければ右の欄の中で折り返す (一覧の行と同じ)。o.small なら字・札・
   // ボタンを小さく、o.faint (済んだ行とその下) なら ID と題を muted の色で出す。畳んだ済んだ行 (brief) は 1 行に収める: 題と PR の数を、ID と札の
   // 後ろの伸びる箱に入れ、題は入るだけ出して後ろを … で省き (開くと全部出る)、PR の数は省かずに右に寄せ、who の札を出さない (頭のコメントの
-  // 「済んだもの」)
+  // 「済んだもの」)。🆕 は閉じたまま中身が変わった行 (頭のコメントの「開け閉めの覚え」) の頭に出す
   workTop(r, kind, path, id, g, c, o) {
     const url = webUrl(r.url);
     const rid = str(r.id);
@@ -2239,6 +2823,7 @@ export default class HubPanel extends View {
             .min_w(0)
             .when(rid === "", (e) => e.font_semibold());
     const sum = o.summary === "" ? null : div().text_size(this.ts(11)).text_color(c.muted).child(o.summary);
+    const nm = o.foldable && !o.open ? this.newMark(o.key, `hp-wn-${id}-${path}`, c) : null;
     const head = h_flex()
       .flex_1()
       .min_w(0)
@@ -2246,6 +2831,7 @@ export default class HubPanel extends View {
       .gap_x(o.small ? 4 : 6)
       .gap_y(2)
       .items_center()
+      .when(!!nm, (el) => el.child(nm))
       // ticket の行は、ID の右に ID を写すボタン (idCell)
       .when(rid !== "", (el) => el.child(this.idCell(`hp-wid-${id}-${path}`, `hp-wcp-${id}-${path}`, rid, url, c, kind === "ticket", o.faint)))
       .children(chips);
@@ -2284,15 +2870,31 @@ export default class HubPanel extends View {
     );
   }
 
-  // 行の上の段の外枠: 印の欄 | head (workTop が作った ID・札・題などの並び)
+  // 行の上の段の外枠: 印の欄 | head (workTop が作った ID・札・題などの並び)。子のトグル (畳める子孫の行) を持つ行は、head の右に開け閉めのボタンを
+  // 置き、帯を出していれば head の下に帯を置く (頭のコメントの「開け閉めの覚え」。帯も印の欄の右に入れ、印の欄の縦の線が帯の高さも通る)
   workTopRow(head, path, id, g, c, o) {
+    const fold = o.foldable && this.hasKids(o.key);
+    const right = !fold
+      ? head
+      : v_flex()
+          .flex_1()
+          .min_w(0)
+          .gap(4)
+          .child(
+            h_flex()
+              .items_start()
+              .gap(6)
+              .child(head)
+              .child(this.foldButton(`hp-wf-${id}-${path}`, o.key, c, "開け閉めのボタンを出す (この行の入れ子ごと・直下だけを開く・閉じる)")),
+          )
+          .when(this.foldOpen(`hp-wf-${id}-${path}`), (el) => el.child(this.foldBar(`hp-wfb-${id}-${path}`, this.toggleGroups(o.key), c, o.pin ?? null)));
     return h_flex()
       .items_start()
       .gap(g.gap)
       // 小さく出す行は、大きさを継ぐ字 (印の ▸・▾ と ID・題) も小さくする (札・PR の数は自分で ts を引く)
       .when(o.small, (el) => el.text_size(this.ts(13)))
       .child(this.treeSlot(path, id, g, c, o))
-      .child(head);
+      .child(right);
   }
 
   // 印の欄: 上に印 (▸・▾。畳めない行は空き) を 1 行の高さで置き、その下は上の段の高さまで伸ばす。tail なら印の下に縦の線 (この行から
@@ -2309,10 +2911,8 @@ export default class HubPanel extends View {
         .on_click((e, cx) => {
           // ダブルクリックの 2 回目は数えない (開いてすぐ畳まない)
           if ((e?.click_count ?? 1) > 1) return;
-          this.rowOpen[o.key] = !o.open;
-          // 貼り付けた写しの印なら、畳んでから行の上の端を写しを貼った所まで送り戻す (頭のコメントの「題の貼り付け」)
-          if (o.pin) this.scrollY = Math.max(0, o.pin.y - o.pin.at);
-          cx.notify();
+          // 貼り付けた写しの印なら、畳んでから行の上の端を写しを貼った所まで送り戻す (頭のコメントの「題の貼り付け」。setFold の pin)
+          this.setFold([o.key], !o.open, cx, o.pin ?? null);
         })
         .child(div().text_color(c.dim).child(o.open ? "▾" : "▸"));
     } else {
@@ -3037,7 +3637,8 @@ export default class HubPanel extends View {
     if (!known) body.push(div().text_color(c.blocked).child(`props.role が分からない: ${JSON.stringify(role)} (summary か questions。無ければ両方を出す)`));
     if (this.error) body.push(div().text_color(c.blocked).child(this.error));
     // 印のファイル (消す印・押した印) を読み書きできなかったわけ
-    if (this.marksOn()) for (const b of [this.dm, this.sp]) if (b.error) body.push(div().text_color(c.blocked).child(b.error));
+    // (開け閉めの覚えのファイルも。頭のコメントの「開け閉めの覚え」)
+    if (this.marksOn()) for (const b of [this.dm, this.sp, this.vw]) if (b.error) body.push(div().text_color(c.blocked).child(b.error));
     if (r === "questions") {
       qs.forEach((q, qi) => body.push(this.questionCard(q, qi, c)));
       if (!this.error && d && qs.length === 0) body.push(div().text_color(c.muted).child("問いはありません"));
@@ -3062,6 +3663,8 @@ export default class HubPanel extends View {
     }
     // 上の帯の題。問いのペインは見出しと件数 (updated も出さない)、ほかは panel.json の title
     const heading = r === "questions" ? (qs.length > 0 ? `問い (${qs.length})` : "問い") : (d?.title ?? "ハブ");
+    // 上の帯の開け閉めのボタン (panel 全体)。節を出し、開け閉めを覚えるペインで、節が 1 つでもあるときだけ (頭のコメントの「開け閉めの覚え」)
+    const foldAll = r !== "questions" && this.marksOn() && this.treeOf(d).roots.length > 0;
 
     const hint = this.status || (text ? "Enter (このペインで) か「送信」で送る" : "");
     // 答えの欄: 上の帯のすぐ下に置き、下の区切りで一覧と分ける (頭のコメントの role の「答えの欄」。下端は herdr-app の通知と重なる)
@@ -3118,31 +3721,40 @@ export default class HubPanel extends View {
       .text_size(this.fs(13))
       .text_color(c.fg)
       .child(
-        // 上の行: 題と更新の時刻の欄 | 文字の大きさの組。組は折り返さずに右上に留め (items_start)、押しても動かない。
-        // 狭いときは欄の中で、更新の時刻が次の行へ回り、題は縮んで折り返す
-        h_flex()
+        // 上の行: 題と更新の時刻の欄 | 開け閉めのボタン (節を出すペイン) | 文字の大きさの組。ボタンと組は折り返さずに右上に留め (items_start)、
+        // 押しても動かない。狭いときは欄の中で、更新の時刻が次の行へ回り、題は縮んで折り返す。開け閉めの帯を出していれば、上の行の下に右寄せで
+        // 置く (頭のコメントの「開け閉めの覚え」)
+        v_flex()
           .px(14)
           .py(10)
-          .gap(8)
-          .items_start()
+          .gap(6)
           .border_b_1()
           .border_color(c.border)
           .child(
             h_flex()
-              .flex_1()
-              .min_w(0)
-              .min_h(BAR_H) // 1 行の題を組と上下の中ほどにそろえる (題が組より高くなれば欄が伸び、組は上に留まる)
-              .flex_wrap()
-              .content_center()
-              .gap_x(8)
-              .gap_y(2)
-              .items_center()
-              .child(div().flex_auto().min_w(0).text_size(this.fs(15)).font_semibold().child(heading))
-              .when(r !== "questions" && !!d?.updated, (el) =>
-                el.child(div().flex_none().ml_auto().text_size(this.fs(11)).text_color(c.dim).child(d.updated)),
-              ),
+              .gap(8)
+              .items_start()
+              .child(
+                h_flex()
+                  .flex_1()
+                  .min_w(0)
+                  .min_h(BAR_H) // 1 行の題を組と上下の中ほどにそろえる (題が組より高くなれば欄が伸び、組は上に留まる)
+                  .flex_wrap()
+                  .content_center()
+                  .gap_x(8)
+                  .gap_y(2)
+                  .items_center()
+                  .child(div().flex_auto().min_w(0).text_size(this.fs(15)).font_semibold().child(heading))
+                  .when(r !== "questions" && !!d?.updated, (el) =>
+                    el.child(div().flex_none().ml_auto().text_size(this.fs(11)).text_color(c.dim).child(d.updated)),
+                  ),
+              )
+              .when(foldAll, (el) =>
+                el.child(this.foldButton("hp-fold-all", null, c, "開け閉めのボタンを出す (panel の全部の入れ子ごと・節だけを開く・閉じる)", true)),
+              )
+              .child(this.zoomControls(z, c)),
           )
-          .child(this.zoomControls(z, c)),
+          .when(foldAll && this.foldOpen("hp-fold-all"), (el) => el.child(this.foldBar("hp-fold-bar", this.panelGroups(), c, null, true))),
       )
       .when(!!answerBar, (el) => el.child(answerBar))
       .child(this.listView(body, pins, c))
