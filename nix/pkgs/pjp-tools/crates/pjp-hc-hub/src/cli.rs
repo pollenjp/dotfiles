@@ -16,15 +16,15 @@ pjp hub — herdr-app と hc のハブ (pjp-hc-hub) の道具
   pjp hub init [--dir DIR] [--check]   DIR (既定は ~/h) をハブにする。打ち直すと雛形との差だけを直す
   pjp hub check [--dir DIR]            書かずに雛形との差を出す (差があれば終了コード 1)。init --check と同じ
   pjp hub guard                        Claude Code の PreToolUse の hook (stdin の JSON を読む。ハブの .claude/settings.json が登録する)
-  pjp hub hello                        ハブの会話の始めの点検 (ハブの中か・雛形・この端末・見回り役・hc の machine)
+  pjp hub hello                        ハブの会話の始めの点検 (ハブの中か・雛形・この端末・hc の machine。足し分があれば見回り役も)
   pjp hub bake PANEL ID... --out DIR [--home HOME]
                                        panel.json (PANEL) の image の節 ID の図に marks の動きを焼いた写しを DIR に書き、
-                                       チケットの図のキャプションを出す (会話のチケットにも図を上げるため)。ID にミニ絵の
+                                       図のキャプションを出す (panel の外にも図を上げる・見せるため)。ID にミニ絵の
                                        図のパス (TKT-n/mini-x.svg) を渡すと、焼かずに写す
 
 hello は、T3 Code の会話 (env に HC_TERMINAL_ID が無く T3CODE_THREAD_ID がある) では、この端末の代わりに T3 のスレッド・
 T3 のリンク (子のスレッドを立てる先。T3CODE_CLI_PATH の t3 environment list)・T3 の設定 (~/.claude/t3/ のファイルと
-T3 の Launch arguments) を見て、見回り役は立てない。
+T3 の Launch arguments) を見る。
 
 init は git init・決まりのファイル 3 つ (CLAUDE.md・.claude/settings.json・.gitignore)・git config pjp.devtracker.repo と
 pjp.hub.skill・署名しない commit をする。別の repo の中・remote を持つ repo・ハブの worktree・ほかの skill のハブ・まだハブで

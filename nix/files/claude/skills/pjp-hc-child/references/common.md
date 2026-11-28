@@ -167,7 +167,8 @@ compact の送り方・立て直し方) は、それぞれの delegate.md の「
 - 子の作業に、子のマシンで確かめられない所 (Windows でしか見られないなど) があれば、報告の形に「<マシン> での確かめ:
   <指揮役が流す手順>」の行を足す
 - 子に Claude in Chrome を使わせるなら、PR の無いブラウザの作業は pjp-herdr-other-repo の `references/chrome.md` の
-  「依頼の雛形」を使う。PR を出す子なら、下の雛形にその雛形の Chrome の行 (背景・段階・しないこと) を足す
+  「依頼の雛形」を使う。PR を出す子なら、下の雛形にその雛形の Chrome の行 (背景・段階・しないこと) を足す。skill の一覧に
+  pjp-herdr-other-repo が無いホストでは、Chrome を使う子は立てずにユーザーに伝える (`references/chrome.md`)
 
 ```text
 <今の会話の repo> の会話から、ユーザーの指示を渡します。

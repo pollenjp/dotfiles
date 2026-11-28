@@ -386,7 +386,8 @@ worktree と一緒に Claude Code を起こすキー・`c` は素の claude の�
   `<machine>`)。`hc exec` は shell を通さないので `~` は使えない)
 - 続きの依頼の頭に「この子は effort <level> で立て直した (<理由>)」と書く。引き継がせる新しい子には、
   前の子の branch・PR を使わせる (チケットがあれば、新しく切らせずに前の子のチケットを使わせる)
-- どの手でも、上げたことと理由をユーザーへの報告で伝える (Dev Tracker のチケットに残す手は足し分の skill)
+- どの手でも、上げたことと理由をユーザーへの報告で伝える (Dev Tracker のチケットに残す手は、skill の一覧に pjp-hc-child-private が
+  あれば、その skill)
 
 ## 罠
 
@@ -459,7 +460,7 @@ merge の後、片付ける前に、子の報告の「merge の後にするこ�
      doc を読めないときは `note:` を出して進める (一時に読めないときは、待つ間は読み直す)
 5. worktree を消し (`git worktree remove`)、作業の branch を `-d` で消す。squash で merge した branch は `-d` が通らないので、
    PR が merge 済みと確かめたときだけ `-D`。`worktree/<名前>` は切った元 (`origin/main` など) の祖先 (commit が無い) なら `-D`。
-   消せなかった branch は、そう出して残す (`pjp-git-worktree-cleanup` で片付ける)
+   消せなかった branch は、そう出して残す (skill の一覧に `pjp-git-worktree-cleanup` があれば、それで片付ける)
 6. 控えに cleaned を書く (英字は使い回さない)
 
 - 打ち直してよい (片付けた子には「もう片付けてある」と出す)

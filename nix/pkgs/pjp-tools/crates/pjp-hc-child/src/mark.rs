@@ -70,7 +70,7 @@ hc の doc herdr-app (herdr-app が space を置く) の、この端末の herdr
 doc.set。版が合わなければ読み直して打ち直す)、herdr-app がそれを読んで描き直す。doc か space が無い・hc が答えないときは note を
 出して名前は替えない (label は付ける。終了コード 0)。
 asking は、ユーザーに直に問いを出す会話 (ハブ) が、文で問いを出してターンを終える直前に打つ。答えが届くと (panel からでも
-端末でも Notion のコメントでも)、ハブの雛形の hook (hook prompt) が外して要旨を pjp.asked に移す。答えを読み、問いが済んだら
+端末でも。足し分があれば Notion のコメントでも)、ハブの雛形の hook (hook prompt) が外して要旨を pjp.asked に移す。答えを読み、問いが済んだら
 answered、まだ答えを待つ問いを出してターンを終えるなら asking を打つ (打たずに終えると hook stop が 1 回確かめさせる。hook の
 無い worktree では、答えが届いたら answered を打つ)。要旨は 1 行で短く (pjp-spaces のホバーでは 60 字で切れる)。- で始まる
 要旨は pjp mark asking -- '<要旨>' と渡す。子は親 (指揮役) に聞くので打たない。確認の画面 (blocked)・エラー (error) の ❓ は
@@ -451,9 +451,10 @@ fn set_finished(r: &dyn Runner, hc: &Hc<'_>, target: &str, out: &mut dyn Write) 
     Ok(())
 }
 
-/// `pjp ticket` が Status を書いた後に、hc の端末 `target` の済んだ印を合わせる (spec §8.4。pjp-dev-tracker の herdr.rs が
-/// 呼ぶ)。`finished` なら `pjp mark finished --terminal <target>`、でなければ `unfinished` と同じ (日時の形・worktree の会話に
-/// だけ付ける・打ち直しても日時を替えない)。hc が無い・答えないときは Err (呼ぶ側が注意を 1 行にする)。
+/// hc の端末 `target` の済んだ印を合わせる (spec §8.4)。`finished` なら `pjp mark finished --terminal <target>`、でなければ
+/// `unfinished` と同じ (日時の形・worktree の会話にだけ付ける・打ち直しても日時を替えない)。hc が無い・答えないときは Err (呼ぶ側が
+/// 注意を 1 行にする)。足し分の `pjp ticket` は、この関数でなく `pjp mark finished|unfinished --terminal` を子の process で打つ
+/// (dotfiles-private の ADR 124)。
 pub fn tell(r: &dyn Runner, target: &str, finished: bool, out: &mut dyn Write) -> Result<()> {
     let hc = Hc::new(r);
     hc.require()?;

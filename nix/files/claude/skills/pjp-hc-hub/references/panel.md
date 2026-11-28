@@ -340,7 +340,8 @@ else { $o = (herdr-app do pane.close --pane $id | Out-String).Trim(); "close: $L
    なる)
 4. 作ったペインの ID を控え (panes.json) の `summary` に書く (`file`・`terminal`・`terminalPane` (2. のペイン) も。`questions` は
    `null`)。同じ ID と props (file・terminal) と端末のペインを、返答にも 1 行で書いておく (scratchpad が消えたとき・会話を立て直した
-   とき (`claude -c` など) に、会話の記録から引く。Dev Tracker を使うホストでチケットのメモに残す手は、足し分の skill)。split が `{ "error": … }` を返したら控えを書かず、返答の文
+   とき (`claude -c` など) に、会話の記録から引く。Dev Tracker を使うホストでチケットのメモに残す手は、skill の一覧に pjp-hc-hub-private が
+   あれば、その skill)。split が `{ "error": … }` を返したら控えを書かず、返答の文
    だけで進める
 
 - まとめのペインは、開き直すとき (下の「開き直す・置き場所を移す」) だけ閉じる。会話の終わりにも、最後の状況を出したまま残す

@@ -38,8 +38,8 @@ pjp-spaces が space の行の 3 行目から 1 本 1 行で 🎬⏳:<名前>・
 使い方:
   pjp mark video start '<名前>' [--terminal <t>]              作っている印 (🎬⏳) を付ける (作り始めに。同じ名前の ⏳ が
                                                              あれば何もせず、✅ なら作り直しとして ⏳ に戻す)
-  pjp mark video done ['<名前>'] [--terminal <t>]             作っている印を済んだ印 (🎬✅) にする (書き出して Notion に
-                                                             載せ終えたら。⏳ が無ければ ✅ を新しく付ける)
+  pjp mark video done ['<名前>'] [--terminal <t>]             作っている印を済んだ印 (🎬✅) にする (書き出して載せ
+                                                             終えたら。⏳ が無ければ ✅ を新しく付ける)
   pjp mark video stop ['<名前>'] [--all] [--terminal <t>]     作りかけの印を外す (止めた・止まった。この端末と子孫から探す)
   pjp mark video watched ['<名前>'] [--all] [--terminal <t>]  見た動画の印を外す (ユーザーが見たと言ったら。この端末と、
                                                              hc の親子をたどった子孫の端末から探す)

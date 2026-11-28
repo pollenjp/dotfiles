@@ -1,7 +1,7 @@
 //! `pjp hub bake`: panel (herdr-app の mod `pjp-hub-panel`) に載せた図 (panel.json の image の節) の marks を、SVG の中の
-//! CSS の動き (`@keyframes`) に焼き込んだ写しを作る。ハブの会話が、panel に載せた図を会話のチケット (Notion) にも上げるときに
-//! 使う (pjp-hc-hub の `references/panel.md` の「チケットにも上げる」)。panel の SVG には動きが無く (marks は panel.json の節に
-//! あり、mod が図の上に重ねて描く)、SVG をそのまま上げるとチケットの図から動きが落ちる。
+//! CSS の動き (`@keyframes`) に焼き込んだ写しを作る。ハブの会話が、panel に載せた図を panel の外 (足し分があれば会話のチケット
+//! (Notion) など) にも上げる・見せるときに使う。panel の SVG には動きが無く (marks は panel.json の節にあり、mod が図の上に重ねて
+//! 描く)、SVG をそのまま上げると図から動きが落ちる。
 //!
 //! 写しは `--out` のディレクトリに、panel の図と同じ名前で書く。panel に載せた SVG は書き換えず、写しは panel に載せない
 //! (panel の image は SVG の中の動きを描かない)。標準出力には、節ごとに書いた写しのパス・焼いた marks の数・チケットの図の
@@ -541,8 +541,8 @@ pub fn quote_safe(text: &str) -> String {
 }
 
 /// Windows のドライブのパス (`C:\…`) を、同じ PC の WSL から見たパス (`/mnt/c/…`) にする。ほかの形なら None。
-/// `pjp ticket figure` が Windows で動くまで (W1-4)、WSL のハブの `ticket.sh figure` に写しを渡すのに使う
-/// (`references/transition.md`)。figure が Windows で動くようになったら、この行と報告の `wsl:` の行は消す。
+/// 足し分の道具 (`pjp ticket figure`) が Windows で動くまで、WSL のハブの `ticket.sh figure` に写しを渡すのに使う (報告の `wsl:` の
+/// 行は、足し分があるときだけ出す)。figure が Windows で動くようになったら、この関数と報告の `wsl:` の行は消す。
 pub fn wsl_path(path: &str) -> Option<String> {
     let p = path.strip_prefix(r"\\?\").unwrap_or(path);
     let b = p.as_bytes();

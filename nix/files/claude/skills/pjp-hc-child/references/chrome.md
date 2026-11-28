@@ -4,6 +4,7 @@
 hc 版で変わる所。ブラウザの側の決まり (ブラウザを選ぶ・ログインの受け渡し・書き換えは 2 段に分ける・画面に写る秘密の黒塗り
 (`redact.sh`)・罠・依頼の雛形) は、旧版と同じなので pjp-herdr-other-repo の `references/chrome.md` の同じ名前の節を読む
 (旧 herdr をやめる W4 で、こちらへ移す。pjp-herdr-other-repo は private な claude-skills の skill で、skill の一覧に無いホストでは読めない)。
+skill の一覧に pjp-herdr-other-repo が無いホストでは、Claude in Chrome を使う子は立てず、ユーザーにそう伝えて進め方を聞く。
 
 **ユーザーの決まり (2026-11-15):** 子の claude は基本 `--no-chrome` で立て、Claude in Chrome を使わせる作業の子だけ `--chrome`
 を付ける。
