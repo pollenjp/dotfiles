@@ -29,10 +29,12 @@ pub use read::{CANON_HINT, ENTRY_PREFIX, is_pack_name};
 /// 同期された skill の名前の頭 (`--settings` の key)。
 pub const SYNCED_PREFIX: &str = "anthropic-skills:";
 
-/// ハブの雛形 (root からの相対。`/` 区切り)。旧 herdr のハブと hc 版のハブ。
-pub const HUB_TEMPLATES: [&str; 2] = [
+/// ハブの雛形 (root からの相対。`/` 区切り)。旧 herdr のハブ、hc 版のハブ (claude-skills の写しの雛形。片付けの PR まで)、hc 版の
+/// ハブの足し分の重ね (公開の pjp-hc-hub には雛形のファイルが無い。skillOverrides は足し分が重ねる。dotfiles-private の ADR 124)。
+pub const HUB_TEMPLATES: [&str; 3] = [
     "pjp-herdr-hub/assets/hub/settings.json",
     "pjp-hc-hub/assets/hub/settings.json",
+    "pjp-hc-hub-private/assets/hub/settings.overlay.json",
 ];
 
 const USAGE: &str = "\

@@ -941,6 +941,26 @@ fn check_hub_reads_both_templates() {
 }
 
 #[test]
+fn check_hub_reads_the_private_overlay() {
+    // 公開の pjp-hc-hub の skill には雛形の settings.json が無い (雛形は pjp hub に埋め込み)。hc 版のハブの skillOverrides は足し分の
+    // 重ね (pjp-hc-hub-private の settings.overlay.json。形は {"skillOverrides": …}) にあるので、それも同じ決まりで見る
+    let (t, whole) = hub_tree();
+    t.hub(&whole);
+    t.hub_raw(
+        HUB_TEMPLATES[2],
+        &json!({"skillOverrides": without(&whole, "pjp-v")})
+            .to_string()
+            .replace("\"pjp-a\":\"on\"", "\"pjp-a\":\"on\",\"pjp-typo\":\"on\""),
+    );
+    let r = t.check(true);
+    assert_eq!(r.code, 1);
+    assert_eq!(
+        r.hub_errors(HUB_TEMPLATES[2]),
+        ["pjp-typo はどの入口の目録にもありません (名前の打ち間違いか、pack の skill ではない)"]
+    );
+}
+
+#[test]
 fn check_hub_partial_pack_through_overlap_is_fine() {
     // notion (pjp-shared の主) を丸ごと on にすると、docs は pjp-shared だけが on になる。重なりのためなので咎めない
     let (t, whole) = hub_tree();
