@@ -15,7 +15,7 @@
 //! - 手元の変更 (`git status --porcelain -- nix/pkgs/pjp-tools` が空でない): 写しを使わず・作らず、cargo で作って bin に直に置く (`PJP_TOOLS_KEY`
 //!   は外す。手元の build は key を名乗らない)。cargo が無ければ止まる (手元の変更は Release に無い)
 //! - bin に写す: 写しと sha256 が違う exe だけを、動いていても上書きできる `claude_files::replace_file` で。入口の `pjp` は最後に写す (ほかの
-//!   4 つが置けてから入口が現れる。入口は隣の道具が無いと止まり、ハブの hook の `pjp hub guard` が書き込みを止めうる)。PATH は claude-selector
+//!   4 つが置けてから入口が現れる。隣の道具の無い入口は終了コード 127 で終わり、ハブの hook の `pjp hub guard` が黙って効かなくなる)。PATH は claude-selector
 //!   と同じ
 //! - check は何も落とさず・作らず、写しと印・bin の一致を見る (写しが無ければ、bin の `pjp --version` の key も添える)。dry-run は打つもの
 //!   (落とす URL・作る cargo・写すファイル・消す古い写し) を出す。どちらも Release があるかは見ない (ネットワークに出ない)
@@ -658,7 +658,7 @@ fn same(source: Source) -> State {
 }
 
 /// 写す順 (入口の pjp を最後に)。入口は hub・child・mark・pack を隣の `pjp-<道具>` で起こすので、ほかが置けてから現れるようにする (途中で
-/// 落ちても、隣の道具の無い入口を置かない。ハブの hook の `pjp hub guard` が入口ごと落ちて書き込みを止めないため)
+/// 落ちても、隣の道具の無い入口を置かない。そういう入口は 127 で終わり、ハブの hook の `pjp hub guard` が黙って効かなくなるため)
 fn placing_order<'a>(names: impl IntoIterator<Item = &'a String>) -> Vec<&'a String> {
     let entry = exe_name("pjp");
     let (last, mut order): (Vec<&String>, Vec<&String>) =
