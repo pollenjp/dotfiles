@@ -4,17 +4,26 @@
 //! | 置くもの | 置き方 |
 //! | --- | --- |
 //! | `CLAUDE.md` | `win/claude-code/CLAUDE.windows.md` (Windows の冒頭) + 空行 + `nix/files/claude/CLAUDE.md` の最初の「## 」の行から後ろ (+ ホストの値の道具 `devTracker` が true なら、空行と `CLAUDE.dev-tracker.md`)。Linux の冒頭 (Nix 管理の話) を差し替える形は cloud の bootstrap-claude-cloud.sh と同じ。記録つきのコピー (Windows 側で変えたら衝突) |
-//! | `skills/`・`agents/`・`commands/` | `nix/files/claude/<種類>/` の中身を 1 つずつ。ディレクトリは junction、ファイルは記録つきのコピー (claude-skills の手順と同じ `linker`)。`win/claude-code/skip-skills.txt` の skill は張らない |
+//! | `skills/`・`agents/`・`commands/` | `nix/files/claude/<種類>/` の中身を 1 つずつ。ディレクトリは junction、ファイルは記録つきのコピー (claude-skills の手順と同じ `linker`)。`win/claude-code/skip-skills.txt` の skill は張らない。skill の依存の表 (`groups.json` の skills。ハブと子の土台の skill) の skill は、表の道具 (herdrHub) が off のホストには張らず (前に張ったものは外す)、claude-skills の片付けの PR までは claude-skills の写しに譲る (下) |
 //! | `hooks\dotfiles-claude.exe` | この runner の exe の写し。hook と status line の口 (`claude-hook <名前>`・`claude-statusline`。中身は `crate::hooks`)。dotfiles が持つ生成物なので、違えば書き直す |
 //!
 //! 記録は `%LOCALAPPDATA%\dotfiles\state\claude-files.deployed.json`。clone を pull したら `dotfiles apply` で配り直す
 //! (dotfiles-private の docs/adr/065_win_claude_config_*)。
+//!
+//! ハブと子の土台の skill (pjp-hc-hub など) は claude-skills から dotfiles に移した (dotfiles-private の ADR 124)。claude-skills の片付けの PR まで
+//! claude-skills にも同じ名前の写しがあり、その間は claude-skills の写しを使う (dotfiles が譲る。Linux の bootstrap-claude-skills.sh と同じ考え):
+//! claudePrivateSkills のホストで claude-skills の clone (claude-skills の手順と同じ決まり) に `skills/<名前>/SKILL.md` があるか、置き先が clone への
+//! junction (先がある) なら張らない (clone への junction には触らずに知らせ、この手順の前の junction は外す。同じ order 50 で名前の順に後ろの
+//! claude-skills の手順が clone へ張る)。clone に無ければ (片付けの PR の後・clone が無い) 張り、先の無い clone への junction (片付けの後の残り)
+//! は張り替える。claudePrivateSkills が off なら (claude-skills の手順が流れない)、clone に同じ名前があっても張る。
 
 use super::claude_settings::hook_exe;
+use super::claude_skills::clone_dir;
 use super::linker::{Linker, Source};
 use super::{Gate, Mode, Outcome, Step, StepInfo};
 use crate::context::Ctx;
 use crate::fsutil;
+use crate::link::{is_under, link_target};
 use crate::record::Records;
 use crate::report::Kind;
 use std::path::Path;
@@ -27,6 +36,8 @@ pub const RECORD_FILE: &str = "claude-files.deployed.json";
 pub const WINDOWS_HEAD: &str = "win/claude-code/CLAUDE.windows.md";
 /// Windows に張らない skill の一覧
 pub const SKIP_SKILLS: &str = "win/claude-code/skip-skills.txt";
+/// claude-skills の片付けの PR まで、同じ名前の土台の skill を claude-skills の写しに譲るわけ
+const YIELD: &str = "claude-skills の写しを使う。claude-skills の片付けの PR まで";
 
 pub struct ClaudeFiles;
 
@@ -76,6 +87,7 @@ impl Step for ClaudeFiles {
             step: "claude-files",
         };
         let mut w = Linker::new(src, claude.clone(), mode, records);
+        plan_base_skills(ctx, &mut w, &root, &claude);
         match claude_md(ctx.repo.as_path(), ctx.host.tool("devTracker")) {
             Ok(bytes) => w.copy_bytes(ctx, &bytes, &claude.join("CLAUDE.md"), "CLAUDE.md"),
             Err(why) => w.fail(ctx, why),
@@ -83,6 +95,38 @@ impl Step for ClaudeFiles {
         w.run(ctx);
         let exe = sync_exe(ctx, mode);
         w.finish(ctx, &record_path, exe)
+    }
+}
+
+/// skill の依存の表 (`groups.json` の skills) にある skill (ハブと子の土台) の張り方を `w` に渡す: 表の道具が off のホストでは張らない。
+/// claude-skills の片付けの PR までは claude-skills の写しに譲る (claudePrivateSkills のホストで clone に `skills/<名前>/SKILL.md` がある・置き先が
+/// clone への junction で先がある)。どちらでもなければ張り、先の無い clone への junction (片付けの PR の後の残り) は張り替える。
+fn plan_base_skills(ctx: &Ctx, w: &mut Linker, root: &Path, claude: &Path) {
+    let clone = clone_dir(ctx).join("skills");
+    let private = ctx.host.tool("claudePrivateSkills");
+    for name in ctx.host.table_skills() {
+        if !root.join("skills").join(name).is_dir() {
+            continue;
+        }
+        let off = ctx.host.skill_off_tools(name);
+        if !off.is_empty() {
+            w.hold(
+                name,
+                format!(
+                    "このホストでは使わない。skill の依存の表の {} が off",
+                    off.join("・")
+                ),
+            );
+            continue;
+        }
+        let theirs = clone.join(name);
+        let to_clone = link_target(&claude.join("skills").join(name))
+            .is_some_and(|t| is_under(&t, &clone) && t.exists());
+        if to_clone || (private && theirs.join("SKILL.md").is_file()) {
+            w.hold(name, YIELD);
+        } else {
+            w.adopt_dangling(theirs);
+        }
     }
 }
 
@@ -239,6 +283,13 @@ mod tests {
     //! - Windows 側で変えた CLAUDE.md は衝突 (--force で上書き)
     //! - hook の口は runner の exe と同じ中身に揃え、違えば書き直す。exe の場所が分からなければ failed
     //! - repo の CLAUDE.md と冒頭・skip-skills.txt から組み立てられる (本物の repo)
+    //! - skill の依存の表の skill (ハブと子の土台の 4 つ) は、表の道具 (herdrHub) が off のホストには張らず、前にこの手順が張ったものは外す
+    //!   (ほかのリンクには触らない)。on なら張る
+    //! - claude-skills の片付けの PR までは claude-skills の写しに譲る: claudePrivateSkills のホストで clone に同じ名前があれば張らず、置き先が
+    //!   clone への junction なら触らずに知らせ (飛ばしたにしない)、この手順の前の junction は外す (続く claude-skills の手順が clone へ張る)。
+    //!   clone から消えたら (片付けの PR の後) 張り、先の無い clone への junction は張り替える。claudePrivateSkills が off なら clone に同じ名前が
+    //!   あっても張る (claude-skills の手順が流れないので)
+    //! - 本物の repo: 表の skill は全部 dotfiles の skill にあり、skip-skills.txt に無い
 
     use super::*;
     use crate::host::{Groups, parse};
@@ -246,6 +297,19 @@ mod tests {
     use crate::manifest::Roots;
     use crate::testutil::{FakeSys, TempDir, fake_mklink};
     use std::path::PathBuf;
+
+    /// skill の依存の表の skill (groups.json の skills。ハブと子の土台)
+    const BASE: [&str; 4] = [
+        "pjp-hc-child",
+        "pjp-hc-hub",
+        "pjp-hc-hub-panel",
+        "pjp-pack-hc",
+    ];
+    /// ハブのホスト (herdrHub = true。claude-skills は使わない)
+    const HUB: &str = "[tools]\nwindowsClaudeCode = true\nwindowsHerdr = true\nherdrHub = true\n";
+    /// ハブで claude-skills も使うホスト
+    const HUB_PRIVATE: &str = "[tools]\nwindowsClaudeCode = true\nwindowsHerdr = true\nherdrHub = true\nprivateRepos = true\nclaudePrivateSkills = true\n";
+    const APPLY: Mode = Mode::Apply { force: false };
 
     struct Env {
         t: TempDir,
@@ -320,6 +384,60 @@ mod tests {
                 "[tools]\ndevTracker = true\n",
                 Some("exe/dotfiles-win.exe"),
             )
+        }
+
+        /// dotfiles にハブと子の土台の skill (表の 4 つ) を置く
+        fn add_base_skills(&self) {
+            for name in BASE {
+                self.t.write(
+                    &format!("g/dotfiles/nix/files/claude/skills/{name}/SKILL.md"),
+                    "base\n",
+                );
+            }
+        }
+
+        /// claude-skills の clone (dotfiles の clone の隣) に同じ名前の skill を置く
+        fn add_clone_skills(&self) {
+            for name in BASE {
+                self.t.write(
+                    &format!("g/claude-skills/skills/{name}/SKILL.md"),
+                    "private\n",
+                );
+            }
+        }
+
+        fn clone_skill(&self, name: &str) -> PathBuf {
+            self.t
+                .path()
+                .join("g")
+                .join("claude-skills")
+                .join("skills")
+                .join(name)
+        }
+
+        fn base_src(&self, name: &str) -> PathBuf {
+            self.repo()
+                .join("nix")
+                .join("files")
+                .join("claude")
+                .join("skills")
+                .join(name)
+        }
+
+        /// `~/.claude/skills/<name>` に `target` への junction を張る (前の手順・claude-skills の手順が張ったものの代わり)
+        fn junction(&self, name: &str, target: &Path) {
+            std::fs::create_dir_all(self.claude("skills")).unwrap();
+            let sys = FakeSys::new(|c| fake_mklink(c).unwrap());
+            crate::link::create_junction(&sys, &self.claude(&format!("skills/{name}")), target)
+                .unwrap();
+        }
+
+        fn target(&self, name: &str) -> Option<PathBuf> {
+            link_target(&self.claude(&format!("skills/{name}")))
+        }
+
+        fn run_on(&self, mode: Mode, host: &str) -> (Vec<Outcome>, String) {
+            self.run_with(mode, host, Some("exe/dotfiles-win.exe"))
         }
     }
 
@@ -546,6 +664,205 @@ mod tests {
             .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
             .collect();
         assert_eq!(left, vec!["x.exe".to_string()]);
+    }
+
+    /// 表の道具 (herdrHub) が off のホストには土台の skill を張らず、on なら張る。off に戻すと、この手順が張ったものだけを外す
+    #[test]
+    fn base_skills_follow_the_host() {
+        let e = Env::new();
+        e.add_base_skills();
+        let (o, out) = e.run_on(APPLY, "");
+        assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}\n{out}");
+        for name in BASE {
+            assert!(!e.claude(&format!("skills/{name}")).exists(), "{name}");
+            assert!(
+                out.contains(&format!(
+                    "張らない (このホストでは使わない。skill の依存の表の herdrHub が off): skills/{name}"
+                )),
+                "{out}"
+            );
+        }
+        let (o, out) = e.run_on(APPLY, HUB);
+        assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}\n{out}");
+        assert!(o[0].text.contains("追加 4"), "{o:?}");
+        for name in BASE {
+            assert!(
+                same_path(&e.target(name).unwrap(), &e.base_src(name)),
+                "{name}"
+            );
+        }
+        // off に戻す: この手順が張った junction は外し (先は残す)、ほかの先へのリンクには触らない
+        let elsewhere = e.t.path().join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        crate::link::remove_link(&e.claude("skills/pjp-pack-hc")).unwrap();
+        e.junction("pjp-pack-hc", &elsewhere);
+        let (o, out) = e.run_on(Mode::Check, "");
+        assert_eq!(kinds(&o), vec![Kind::Fix], "{o:?}\n{out}");
+        assert!(
+            out.contains("外す (apply で): skills/pjp-hc-hub")
+                && out.contains("このホストでは使わない"),
+            "{out}"
+        );
+        let (o, out) = e.run_on(APPLY, "");
+        assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}\n{out}");
+        assert!(o[0].text.contains("削除 3"), "{o:?}");
+        for name in ["pjp-hc-child", "pjp-hc-hub", "pjp-hc-hub-panel"] {
+            assert!(!e.claude(&format!("skills/{name}")).exists(), "{name}");
+            assert!(e.base_src(name).join("SKILL.md").is_file(), "先は残す");
+        }
+        assert!(same_path(&e.target("pjp-pack-hc").unwrap(), &elsewhere));
+    }
+
+    /// claude-skills の片付けの PR までは claude-skills の写しに譲る: 張らず、clone への junction は触らずに知らせ、この手順の前の junction は外して
+    /// claude-skills の手順 (claude-files の後に流れる) に clone へ張らせる
+    #[test]
+    fn yields_to_the_claude_skills_copy() {
+        let e = Env::new();
+        e.add_base_skills();
+        e.add_clone_skills();
+        // pjp-hc-hub は claude-skills の手順が張った clone への junction、pjp-hc-child はこの手順が前に張った dotfiles への junction
+        e.junction("pjp-hc-hub", &e.clone_skill("pjp-hc-hub"));
+        e.junction("pjp-hc-child", &e.base_src("pjp-hc-child"));
+        let (o, out) = e.run_on(Mode::Check, HUB_PRIVATE);
+        assert_eq!(kinds(&o), vec![Kind::Fix], "{o:?}\n{out}");
+        assert!(
+            out.contains("外す (apply で): skills/pjp-hc-child"),
+            "{out}"
+        );
+        let (o, out) = e.run_on(APPLY, HUB_PRIVATE);
+        assert_eq!(kinds(&o), vec![Kind::Ok], "飛ばしたにしない: {o:?}\n{out}");
+        assert!(o[0].text.contains("追加 3 / 更新 0 / 削除 1"), "{o:?}");
+        for name in BASE {
+            assert!(
+                out.contains(&format!(
+                    "張らない (claude-skills の写しを使う。claude-skills の片付けの PR まで): skills/{name}"
+                )),
+                "{out}"
+            );
+        }
+        assert!(same_path(
+            &e.target("pjp-hc-hub").unwrap(),
+            &e.clone_skill("pjp-hc-hub")
+        ));
+        assert!(!e.claude("skills/pjp-hc-child").exists());
+        assert!(!e.claude("skills/pjp-hc-hub-panel").exists());
+        // 続く claude-skills の手順が clone へ張る (衝突しない)
+        let sys = FakeSys::new(|c| fake_mklink(c).expect("mklink だけを打つ"));
+        let mut buf = Vec::new();
+        let o = {
+            let mut ctx = Ctx {
+                repo: e.repo(),
+                roots: Roots::from_home(&e.t.path().join("home")),
+                state_dir: e.t.path().join("state"),
+                host: parse(
+                    HUB_PRIVATE,
+                    Path::new("h.toml"),
+                    Groups::embedded().unwrap(),
+                )
+                .unwrap(),
+                sys: &sys,
+                out: &mut buf,
+            };
+            super::super::claude_skills::ClaudeSkills.run(&mut ctx, APPLY)
+        };
+        assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}");
+        for name in BASE {
+            assert!(
+                same_path(&e.target(name).unwrap(), &e.clone_skill(name)),
+                "{name}"
+            );
+        }
+        // 2 回目の claude-files は clone への junction に触らない
+        let (o, out) = e.run_on(Mode::Check, HUB_PRIVATE);
+        assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}\n{out}");
+    }
+
+    /// clone から消えたら (片付けの PR の後) 張る。先の無い clone への junction (片付けの後の残り) は張り替える
+    #[test]
+    fn links_after_claude_skills_drops_it() {
+        let e = Env::new();
+        e.add_base_skills();
+        e.add_clone_skills();
+        for name in BASE {
+            e.junction(name, &e.clone_skill(name));
+        }
+        std::fs::remove_dir_all(e.t.path().join("g").join("claude-skills").join("skills")).unwrap();
+        let (o, out) = e.run_on(Mode::Check, HUB_PRIVATE);
+        assert_eq!(kinds(&o), vec![Kind::Fix], "{o:?}\n{out}");
+        assert!(
+            out.contains("張り替える (apply で): skills/pjp-hc-hub"),
+            "{out}"
+        );
+        let (o, out) = e.run_on(APPLY, HUB_PRIVATE);
+        assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}\n{out}");
+        assert!(o[0].text.contains("更新 4"), "{o:?}");
+        for name in BASE {
+            assert!(
+                same_path(&e.target(name).unwrap(), &e.base_src(name)),
+                "{name}"
+            );
+        }
+        // clone そのものが無いホストでも張る
+        let e = Env::new();
+        e.add_base_skills();
+        let (o, out) = e.run_on(APPLY, HUB_PRIVATE);
+        assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}\n{out}");
+        assert!(same_path(
+            &e.target("pjp-hc-hub").unwrap(),
+            &e.base_src("pjp-hc-hub")
+        ));
+    }
+
+    /// claudePrivateSkills が off なら (claude-skills の手順が流れない) clone に同じ名前があっても張る。ただし置き先が clone への junction (先が
+    /// ある) なら触らずに知らせる
+    #[test]
+    fn links_when_claude_skills_is_off() {
+        let e = Env::new();
+        e.add_base_skills();
+        e.add_clone_skills();
+        e.junction("pjp-hc-hub", &e.clone_skill("pjp-hc-hub"));
+        let (o, out) = e.run_on(APPLY, HUB);
+        assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}\n{out}");
+        // CLAUDE.md・pjp-a・commands/pjp-c.md と、土台の 3 つ
+        assert!(o[0].text.contains("追加 6"), "{o:?}");
+        for name in ["pjp-hc-child", "pjp-hc-hub-panel", "pjp-pack-hc"] {
+            assert!(
+                same_path(&e.target(name).unwrap(), &e.base_src(name)),
+                "{name}"
+            );
+        }
+        assert!(same_path(
+            &e.target("pjp-hc-hub").unwrap(),
+            &e.clone_skill("pjp-hc-hub")
+        ));
+        assert!(
+            out.contains("張らない (claude-skills の写しを使う。claude-skills の片付けの PR まで): skills/pjp-hc-hub"),
+            "{out}"
+        );
+    }
+
+    /// 本物の repo の表の skill は、全部 dotfiles の skill にあり、Windows に張らない一覧 (skip-skills.txt) に無い
+    #[test]
+    fn real_repo_carries_the_table_skills() {
+        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
+        let host =
+            crate::host::HostValues::missing(Path::new("h.toml"), Groups::embedded().unwrap());
+        let skip = names(&std::fs::read_to_string(repo.join(SKIP_SKILLS)).unwrap());
+        let table = host.table_skills();
+        assert!(!table.is_empty());
+        for name in table {
+            assert!(
+                repo.join("nix/files/claude/skills")
+                    .join(name)
+                    .join("SKILL.md")
+                    .is_file(),
+                "{name} が dotfiles の skill に無い"
+            );
+            assert!(
+                !skip.iter().any(|s| s == name),
+                "{name} が skip-skills.txt にある"
+            );
+        }
     }
 
     /// 本物の repo の冒頭・共通の CLAUDE.md・skip-skills.txt から組み立てられ、skip の skill は dotfiles にある

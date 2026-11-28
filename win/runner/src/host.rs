@@ -760,6 +760,23 @@ impl HostValues {
             .is_none_or(|tools| tools.iter().all(|k| self.tool(k)))
     }
 
+    /// skill の依存の表 (`groups.json` の skills) にある skill の名前 (名前の順)
+    pub fn table_skills(&self) -> Vec<&str> {
+        self.groups.skills.keys().map(String::as_str).collect()
+    }
+
+    /// skill name が Windows で要る道具のうち、このホストで off のもの (表の並び。表に無い skill・全部 on なら空)
+    pub fn skill_off_tools(&self, name: &str) -> Vec<&str> {
+        self.groups
+            .skills
+            .get(name)
+            .into_iter()
+            .flatten()
+            .filter(|k| !self.tool(k))
+            .map(String::as_str)
+            .collect()
+    }
+
     /// 道具の switch の値がどこで決まったか (一覧と off の行に添える)。
     pub fn tool_origin(&self, key: &str) -> String {
         if self.overrides.contains_key(key) {
@@ -1623,6 +1640,29 @@ mod tests {
         }
         assert!(minimum.skill_on("pjp-nix-flake"));
         assert!(host("group = \"all\"\n").unwrap().skill_on("pjp-hc-hub"));
+    }
+
+    /// skill の依存の表の skill の名前と、このホストで off の要る道具 (claude-files が表の skill を張り分けるときに読む)
+    #[test]
+    fn skill_table_and_off_tools() {
+        let minimum = host("").unwrap();
+        assert_eq!(
+            minimum.table_skills(),
+            vec![
+                "pjp-hc-child",
+                "pjp-hc-hub",
+                "pjp-hc-hub-panel",
+                "pjp-pack-hc"
+            ]
+        );
+        assert_eq!(minimum.skill_off_tools("pjp-hc-hub"), vec!["herdrHub"]);
+        assert!(
+            minimum.skill_off_tools("pjp-nix-flake").is_empty(),
+            "表に無い"
+        );
+        let hub = host("[tools]\nwindowsClaudeCode = true\nwindowsHerdr = true\nherdrHub = true\n")
+            .unwrap();
+        assert!(hub.skill_off_tools("pjp-hc-hub").is_empty());
     }
 
     /// --host-file が無いときは、手元の host.toml → dotfiles-private の順に引く。両方あれば手元を読んで Both、どちらも無ければ 2 つの場所を並べる
