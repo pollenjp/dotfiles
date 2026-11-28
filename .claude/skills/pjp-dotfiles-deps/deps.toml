@@ -68,7 +68,7 @@ when = ["win/google-japanese-input/"]
 [[checks]]
 name = "win-ntn"
 run = ["nix", "shell", "--inputs-from", "./nix", "nixpkgs#powershell", "--command", "pwsh", "-NoProfile", "-NonInteractive", "-File", "win/ntn/Install-Ntn.Tests.ps1"]
-when = ["win/ntn/"]
+when = ["win/ntn/", "win/winget/"]
 
 [[checks]]
 name = "win-claude-code"
@@ -98,22 +98,29 @@ when = ["win/tailscale/"]
 [[checks]]
 name = "win-ghq"
 run = ["nix", "shell", "--inputs-from", "./nix", "nixpkgs#powershell", "--command", "pwsh", "-NoProfile", "-NonInteractive", "-File", "win/ghq/Install-Ghq.Tests.ps1"]
-when = ["win/ghq/"]
+when = ["win/ghq/", "win/winget/"]
 
 [[checks]]
 name = "win-fzf"
 run = ["nix", "shell", "--inputs-from", "./nix", "nixpkgs#powershell", "--command", "pwsh", "-NoProfile", "-NonInteractive", "-File", "win/fzf/Install-Fzf.Tests.ps1"]
-when = ["win/fzf/"]
+when = ["win/fzf/", "win/winget/"]
 
 [[checks]]
 name = "win-starship"
 run = ["nix", "shell", "--inputs-from", "./nix", "nixpkgs#powershell", "--command", "pwsh", "-NoProfile", "-NonInteractive", "-File", "win/starship/Install-Starship.Tests.ps1"]
-when = ["win/starship/"]
+when = ["win/starship/", "win/winget/"]
 
 [[checks]]
 name = "win-winget"
 run = ["nix", "shell", "--inputs-from", "./nix", "nixpkgs#powershell", "--command", "pwsh", "-NoProfile", "-NonInteractive", "-File", "win/winget/Install-WinGet.Tests.ps1"]
 when = ["win/winget/"]
+
+# winget の portable の道具の共通の枠 (win/winget/WingetPortable.ps1)。道具ごとの入口 (ntn・ghq・fzf・starship) の試験も、枠を読むので
+# when に win/winget/ を持つ。この試験は枠を使う入口を全部起こすので、入口の版を上げたときも流す
+[[checks]]
+name = "win-winget-portable"
+run = ["nix", "shell", "--inputs-from", "./nix", "nixpkgs#powershell", "--command", "pwsh", "-NoProfile", "-NonInteractive", "-File", "win/winget/WingetPortable.Tests.ps1"]
+when = ["win/winget/", "win/ntn/", "win/ghq/", "win/fzf/", "win/starship/"]
 
 [[checks]]
 name = "win-codex"

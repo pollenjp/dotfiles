@@ -48,6 +48,10 @@ Google 日本語入力・ntn・Claude Code・Tailscale・ghq・fzf・starship・
 | `git`・`gh`・`pwsh`・`vs-buildtools`・`rustup` | `win/bootstrap/Install-Bootstrap.ps1` の名前ごとの param (`-GitVersion`・`-GhVersion`・`-PwshVersion`・`-VsBuildToolsVersion`・`-RustupVersion`) の既定値 | 「bootstrap (新しい Windows で最初に流す)」の道具の表の版 | 「bootstrap の固定した版の新しい版が出たとき」(Build Tools はワークロードと部品の ID が残っているか、rustup は `--default-host x86_64-pc-windows-msvc --default-toolchain none` と自己更新の止めが効くかも見る。pwsh は 7.6 の線 (MSI がある。普段のアカウントが管理者でない PC には MSI で入れる) の版だけが候補に出る。線を移すなら、MSIX の package の名前と MSI があるかを確かめて `check-winget-version.sh` の `series_re` と runner の `series` も直す) |
 
 - テスト (名前ごとの ps1 のテストと herdr-core の build) は `deps.toml` の `[[checks]]` にあり、依存の更新の skill が PR の前に流す
+- winget の portable の道具で共通の枠 (`win/winget/WingetPortable.ps1`) を使うものは、上げる版の manifest (`microsoft/winget-pkgs` の
+  `<ID>.installer.yaml`) の依存 (`Dependencies`) が変わっていないかも見る。依存を入れる道具 (`--skip-dependencies` を付けない道具) に依存が増えたら、
+  道具の表の `InstallerType` を `$null` にする (名指ししたままだと winget が `--installer-type` を依存の解決にも効かせ、burn しか無い VCRedist などで
+  `0x8A150104` で落ちる。`win/README.md` の「道具を足す」の 3)
 - 上げる前に、その節のとおり release notes (CHANGELOG) を読み、設定・置き場所・更新の仕組みに触る変更が無いかを見る。気になる
   変更があれば、PR を出す前にユーザーに伝える (定期実行なら PR の本文に書く)
 - herdr-app (app) を上げるときは、既定のキーが増えた・変わったかも見る。dotfiles (Windows の runner の `herdr-app-keys`) がキーを書き足した
@@ -87,6 +91,10 @@ Google 日本語入力・ntn・Claude Code・Tailscale・ghq・fzf・starship・
 | `herdr-app`・`herdr-core` | setup がフィードを書き直して揃える (Linux のホストは switch で新しい herdr-core が入る)。`win/herdr-app/keys.json` にキーを足したなら、Windows で `dotfiles --self-update apply --steps herdr-app-keys` (clone を進めてから流す) を流す (受け持ちが WSL のホストでも流す) |
 | `git`・`gh`・`pwsh`・`vs-buildtools`・`rustup` | setup は揃えない (WSL の setup は Windows のこの 5 つを入れない)。新しい Windows は、bootstrap が新しい版で入れる。入っている Windows では bootstrap の `-Check` が版のずれを ⚠ で出すので、`win/README.md` の「版のずれを手で揃える」の手順 (名指しの `winget upgrade --id <ID> --exact --version <版> --include-pinned`。`--include-pinned` が無いと bootstrap が足した pin に止められる) で手で揃える (runner の `bootstrap` の手順も `-Check` で確かめるだけで、揃えない)。`pwsh` は版を揃えない (入れ方を問わず 7.6.0 より古くなければよい。普段のアカウントが管理者でない PC は MSIX でない PowerShell 7 も要る。上げた版は、PowerShell 7 の入っていない Windows に bootstrap が入れる版で、管理者の PC は MSIX、管理者でない PC は MSI で入る) |
 
+- winget の portable の道具 (`ntn`・`ghq`・`fzf`・`starship` は共通の枠 `win/winget/WingetPortable.ps1`。`claude-code`・`herdr`・`codex` も portable) は、
+  昇格していない端末 (デスクトップの普通の PowerShell か、そこから開いた WSL) で流す。winget 1.30 は昇格した会話からの user スコープの portable を
+  `0x8A15007D` で断り、枠の道具は winget を打たずに「昇格した PowerShell では winget が <道具> を入れない」と ⚠ で止まる (`win/README.md` の
+  「winget の portable の道具」)。版は今までどおり各 `Install-*.ps1` の `-Version` の既定値に書く (`$packageId` の行も残す)
 - 設定グループ・道具の switch でその名前を入れないマシン (`dotfiles.wsl.windowsFiles` の `ntn`・`claudeCode`・`herdr`・`tailscale` の
   `enable` が false。herdr-app・herdr-core は `herdr` の値。グループ minimum では、どれも足さなければ false) では、setup はその名前を確かめも
   揃えもしない (`nix/README.md` の「設定グループ」)。受け持ちを runner に切り替えたホストでは、Nix の値でなく、Windows のホストの値の `[tools]`
