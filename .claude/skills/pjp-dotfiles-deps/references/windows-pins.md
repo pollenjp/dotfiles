@@ -87,6 +87,10 @@ Google 日本語入力・ntn・Claude Code・Tailscale・ghq・fzf・starship・
 | `herdr-app`・`herdr-core` | setup がフィードを書き直して揃える (Linux のホストは switch で新しい herdr-core が入る)。`win/herdr-app/keys.json` にキーを足したなら、Windows で `dotfiles --self-update apply --steps herdr-app-keys` (clone を進めてから流す) を流す (受け持ちが WSL のホストでも流す) |
 | `git`・`gh`・`pwsh`・`vs-buildtools`・`rustup` | setup は揃えない (WSL の setup は Windows のこの 5 つを入れない)。新しい Windows は、bootstrap が新しい版で入れる。入っている Windows では bootstrap の `-Check` が版のずれを ⚠ で出すので、`win/README.md` の「版のずれを手で揃える」の手順 (名指しの `winget upgrade --id <ID> --exact --version <版> --include-pinned`。`--include-pinned` が無いと bootstrap が足した pin に止められる) で手で揃える (runner の `bootstrap` の手順も `-Check` で確かめるだけで、揃えない)。`pwsh` は版を揃えない (入れ方を問わず 7.6.0 より古くなければよい。普段のアカウントが管理者でない PC は MSIX でない PowerShell 7 も要る。上げた版は、PowerShell 7 の入っていない Windows に bootstrap が入れる版で、管理者の PC は MSIX、管理者でない PC は MSI で入る) |
 
+- winget の portable の道具 (`ntn`・`ghq`・`fzf`・`starship` は共通の枠 `win/winget/WingetPortable.ps1`。`claude-code`・`herdr`・`codex` も portable) は、
+  昇格していない端末 (デスクトップの普通の PowerShell か、そこから開いた WSL) で流す。winget 1.30 は昇格した会話からの user スコープの portable を
+  `0x8A15007D` で断り、枠の道具は winget を打たずに「昇格した PowerShell では winget が <道具> を入れない」と ⚠ で止まる (`win/README.md` の
+  「winget の portable の道具」)。版は今までどおり各 `Install-*.ps1` の `-Version` の既定値に書く (`$packageId` の行も残す)
 - 設定グループ・道具の switch でその名前を入れないマシン (`dotfiles.wsl.windowsFiles` の `ntn`・`claudeCode`・`herdr`・`tailscale` の
   `enable` が false。herdr-app・herdr-core は `herdr` の値。グループ minimum では、どれも足さなければ false) では、setup はその名前を確かめも
   揃えもしない (`nix/README.md` の「設定グループ」)。受け持ちを runner に切り替えたホストでは、Nix の値でなく、Windows のホストの値の `[tools]`

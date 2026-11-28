@@ -1999,8 +1999,9 @@ nix/scripts/bootstrap-windows-files.sh --force
 ## winget
 
 dotfiles の Windows の道具は **winget 1.30 以降**を前提にする。1.30 で portable の入れ方が変わり (昇格した会話からの user スコープの portable を
-`0x8A15007D` で断る・symlink を作れないときは置き場所に別名の hardlink を作って PATH に足す)、`Install-Codex` はそれに合わせてある
-([Codex CLI](#codex-cli)。1.29 以前で開発者モードが off なら入れずに止まる)。新しく入れた Windows の winget は古いことがあり (入れたての Windows 11 で
+`0x8A15007D` で断る・symlink を作れないときは置き場所に別名の hardlink を作って PATH に足す)、winget の portable の道具は昇格した会話では入れずに止まる
+([winget の portable の道具](#winget-の-portable-の道具))。`Install-Codex` は hardlink の形にも合わせてある ([Codex CLI](#codex-cli)。1.29 以前で開発者モードが
+off なら入れずに止まる)。新しく入れた Windows の winget は古いことがあり (入れたての Windows 11 で
 v1.11.510 を見た)、Microsoft Store が使えない・止められた PC (会社の PC など) では Store の自動の更新でも上がらない。そこで runner の手順 `winget`
 (order 6。bootstrap の次で、winget を使うほかの手順より先) が、winget 自身を固定した版以上に揃える
 (dotfiles-private の ADR 121 (`docs/adr/121_win_winget_pin_*`))。
@@ -2048,6 +2049,88 @@ Install-WinGet -Force   # 固定した版と同じでも落として入れ直す
    (変わっていれば `Get-WinGetDependencyEntries` を直す)
 4. 試験 (`Install-WinGet.Tests.ps1`) を流し、Windows で `Install-WinGet -Check` と `Install-WinGet` (古い PC で) を打って確かめる
 5. 前提にする版を上げたなら、この節の頭と、前提を見ている道具 (`Install-Codex` の 1.30 の見分け) も合わせる
+
+## winget の portable の道具
+
+winget の portable (zip の中の portable か、portable の exe。管理者無しで `%LOCALAPPDATA%\Microsoft\WinGet\Packages` の下に入る) で入れる道具は、
+共通の枠 `winget/WingetPortable.ps1` で固定した版に揃える (dotfiles-private の ADR 122 (`docs/adr/122_win_winget_portable_frame_*`))。道具ごとの
+`Install-<道具>.ps1` は、道具の表 (hashtable) と、要るときだけの custom の関数を持つ薄い入口で、引数 (`-Version`・`-Check`・`-IfMissing`)・終了コード
+(0 揃っている・1 差がある・3 入っていない・2 確かめられない)・出力の形 (状態の表と締めの行) は道具によらず同じ。
+
+| 道具 | 入口 | 表のほかに持つもの |
+| --- | --- | --- |
+| fzf | `fzf/Install-Fzf.ps1` | MSI の fzf を見る (表の `Msi`) |
+| ghq | `ghq/Install-Ghq.ps1` | (なし) |
+| starship | `starship/Install-Starship.ps1` | MSI の starship を見る (表の `Msi`) |
+| ntn | `ntn/Install-Ntn.ps1` | (なし) |
+
+Claude Code・herdr・Codex CLI は、まだ枠に移していない (同じ形の写しを入口に持つ)。winget 自身 (`winget/Install-WinGet.ps1`) は msixbundle で、枠に入れない。
+
+流れ (`Invoke-WingetPortable`)。() の中は道具が足せる custom の口で、表の `Hooks` に関数の名前を書く:
+
+```text
+① 入口             Install-<道具>.ps1 が道具の表を渡す。枠が既定の値で埋める (知らない key は止める)
+② 打ってよいか     見張り: MSI の道具 (Msi)・道具の見張り (Holds)・昇格した会話 (winget 1.30 以降)
+③ 状態を読む       置き場所の exe と版・winget の版の一覧と pin・PATH で引かれるもの・動いている exe・winget の版と昇格 (ReadState・PathKind)
+④ することを決める install / change / relink / none (Reinstall)・直る差と直らない差 (Drift・Manual)・止める理由 (Blocker)
+⑤ winget を打つ    取得を確かめ (download)、pin を外し、外して入れ、pin を足す (BeforeWinget・AfterWinget)
+⑥ 表と終了コード   状態の表 (RowsBeforePath・RowsAfterPath・Notes)・締めの行 (Verdict)・終了コード
+```
+
+表の key と custom の口の中身は `WingetPortable.ps1` の頭に書いてある。揃える流れは [ntn](#ntn) の「揃えるときにすること」のとおり (取得を確かめてから
+外して入れ、pin を足し、読み直す)。
+
+### 昇格した PowerShell では入れない
+
+winget 1.30 は、昇格した会話 (UAC で昇格した PowerShell・管理者として実行した端末。token の `TokenElevationType` が Full) から user スコープの portable を
+入れる・外すのを `0x8A15007D` で断る (dotfiles-private の ADR 120 (`docs/adr/120_codex_cli_without_uac_*`))。どの portable の道具も、入れる・入れ替える・
+入れ直すときに、会話が昇格していて winget が 1.30 以降なら、winget を打たずに止まる:
+
+- `-Check` の表に「⚠ 昇格した PowerShell では winget が <道具> を入れない」と打ち直し方の ※ が出る。締めの行はその 1 行 (「→ ※ の手順で直す」) だけで、
+  終了コードは入っていなくても 1 (runner が `-IfMissing` で入れにいかない)
+- runner (`dotfiles apply`) と WSL の setup は入れずに知らせる。昇格していない PowerShell (デスクトップの普通の端末) か、そこから開いた WSL で流し直す
+- pin を足す・外すだけなら止めない。UAC の分かれていない管理者 (Administrator・UAC が off) は昇格した会話に当たらない (winget も断らない)。見分けは
+  winget と同じ (`Runtime::IsRunningWithNonDefaultFullToken`)
+- winget の版が読めなければ、止めずに打ってみる。`0x8A15007D` で落ちたら、昇格していない PowerShell で打ち直す行を添える
+
+### PATH の形
+
+winget は portable を入れると、`WinGet\Links` に symlink を置く (開発者モードが on のときなど) か、symlink を作れなければ置き場所 (exe のディレクトリ) を
+ユーザーの PATH に足す。`-Check` の「PATH の <コマンド>」は、どちらも winget の portable のものとして読み、どちらの形かを括弧で添える
+(`(WinGet\Links の symlink)`・`(置き場所)`)。ほかのものが先に引かれる・入っているのに見つからないときは ⚠ と直し方の ※ を出す (揃える手順では直らない)。
+PATH は `.exe` のほか `.cmd`・`.bat`・`.ps1` も、PowerShell と同じくディレクトリの順に見る。
+
+### 道具を足す
+
+1. `win/<道具>/Install-<道具>.ps1` を、ほかの入口 (`ghq/Install-Ghq.ps1` など) を写して作る。変えるのは頭の説明・param の `-Version` の既定値・
+   `$packageId` の行・道具の表 (`Get-<道具>Tool`)。枠を探す頭の数行と、末尾の入口の数行はそのまま写す
+2. `[string]$Version = '<版>'` と `$packageId = '<ID>'` の 2 行は、版の知らせ (runner の `pin-updates`・WSL の `check-winget-version.sh`) と依存の更新の
+   skill が読むので、この形のまま置く
+3. 試験 `Install-<道具>.Tests.ps1` は、表の値 (版の拾い方・exe の置き場所・見出しと締めの行の字) と custom の関数を確かめる。流れ・見張り・終了コードの
+   決まりは枠の試験が見る
+4. `manifest.toml` に入口を足し (枠は足してある)、`powershell/dotfiles.ps1` に `Install-<道具>` を、runner の `runner/src/steps/ps1.rs` に手順を足す
+   (`output_fixes` に `elevated_fix!`。runner の試験が、入口と枠の字を突き合わせる)。依存の更新の拡張 (`.claude/skills/pjp-dotfiles-deps/`) にも足す
+
+### WingetPortable.ps1 を書くときの注意
+
+- `dotfiles.ps1` と同じく **BOM 付きの UTF-8** で保存し、Windows PowerShell 5.1 と PowerShell 7 の両方で動く書き方にする
+- 入口が dot-source する ps1 で、PowerShell の module (`.psm1`) にしない (試験が dot-source した後に `Invoke-Winget` などを差し替えて流れを確かめる。
+  module の中の呼び出しは module の関数を引き、差し替えが効かない。`Import-Module` は開いたままの PowerShell に古い module を残しうる)
+- 表は `Complete-PortableTool` が既定の値で埋めてから使う (StrictMode では、hashtable に無い key を `.` で読むと例外になる)。custom の口が返す行も
+  hashtable で、添字で読む
+- 副作用の無い関数と、winget とプロセスを偽物に差し替えた流れ (見本の道具の表で、custom の口と見張りまで) は `winget/WingetPortable.Tests.ps1` で
+  確かめる (Linux の pwsh)。枠を使う入口を全部、配った写しの形 (隣の枠) と clone の形で起こし、枠が無ければ終了コード 2 で止まることも見る:
+
+  ```sh
+  nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/winget/WingetPortable.Tests.ps1
+  ```
+
+- 状態の表の見出し (`<Name> (winget の <PackageId>`)・締めの行 (`→ <Command> で入れる`・`→ <Command> で揃える`・`→ ※ の手順で直す`)・見張りの行
+  (`MSI の <Name> (machine スコープ) が入っている`・`昇格した PowerShell では winget が <Name> を入れない`) は、runner の `runner/src/steps/ps1.rs` と WSL の
+  wrapper (`nix/scripts/bootstrap-windows-ntn.sh` など) が読む。runner の試験 (`scripts_carry_the_phrases_the_runner_reads`) は、枠の字の `$($Tool.Name)`・
+  `$($Tool.Command)`・`$($Tool.PackageId)` を入口の表の値に替えてから突き合わせるので、この 3 つはこの形のまま書く (変えるときは向こうも直す)
+- `Invoke-Winget` の本文は `openssh/Install-OpenSSH.ps1` と同じ ([Install-OpenSSH.ps1 を書くときの注意](#install-opensshps1-を書くときの注意))
+- winget やプロセスに触る本物の部分は、実機で `-Check` と本番を打って確かめる
 
 ## winget の pin
 
@@ -2223,7 +2306,8 @@ dotfiles の clone と WSL の `~/dotfiles` が揃っていれば、WSL の setu
 
 ## PowerShell のテスト
 
-`win/*/*.Tests.ps1` (`Install-OpenSSH.Tests.ps1`・`Install-Herdr.Tests.ps1` など) は、`*.ps1` の副作用の無い関数を確かめる。
+`win/*/*.Tests.ps1` (`Install-OpenSSH.Tests.ps1`・`Install-Herdr.Tests.ps1`、winget の portable の道具の共通の枠の `WingetPortable.Tests.ps1` など) は、`*.ps1` の
+副作用の無い関数を確かめる。
 Linux の pwsh で流すので Windows には触らない。CI の `lint` ([`.github/workflows/nix.yml`](../.github/workflows/nix.yml)) が、
 flake が固定している nixpkgs の pwsh で全部を流す (`Start-PortForward.Tests.ps1` は PATH の ssh を引くので、nixpkgs の
 openssh も渡す。`dotfiles.Tests.ps1` は PATH に ghq と fzf があれば cdrepo を本物でも流すので、nixpkgs の ghq と fzf も渡す。
@@ -2564,8 +2648,8 @@ Windows の starship (プロンプト) を、Linux と同じ形に揃える (dot
 ### starship を入れる (winget)
 
 `starship/Install-Starship.ps1` は starship を winget で入れ、版を `-Version` の既定値の 1 か所で固定する。版は Linux の home-manager が入れる starship
-(`nix/flake.lock` の nixpkgs) と同じにする。形は [ghq・fzf](#ghqfzf) の fzf と同じ (zip の中の portable。管理者は要らない。常駐も UAC も無いので、
-版のずれも揃える)。
+(`nix/flake.lock` の nixpkgs) と同じにする。[winget の portable の道具](#winget-の-portable-の道具) の共通の枠で揃え、形は [ghq・fzf](#ghqfzf) の fzf と同じ
+(zip の中の portable。管理者は要らない。常駐も UAC も無いので、版のずれも揃える)。
 
 | winget の ID | 固定した版 (`-Version` の既定値) | 置き場所 (`%LOCALAPPDATA%\Microsoft\WinGet\Packages\` の下) |
 | --- | --- | --- |
@@ -2573,7 +2657,7 @@ Windows の starship (プロンプト) を、Linux と同じ形に揃える (dot
 
 | 打つもの | すること |
 | --- | --- |
-| `Install-Starship -Check` (PowerShell) | 差を出すだけ。揃っていれば終了コード 0、差があれば 1、入っていなければ 3 (MSI の starship が入っていれば 1) |
+| `Install-Starship -Check` (PowerShell) | 差を出すだけ。揃っていれば終了コード 0、差があれば 1、入っていなければ 3 (MSI の starship が入っている・昇格した PowerShell で winget を打てなければ 1) |
 | `Install-Starship` (PowerShell) | 揃える (入れる・入れ替える (上げる・下げる)・pin を足す) |
 | `dotfiles apply --steps starship` (PowerShell) | runner の手順で揃える (入っていなければ入れ、版か pin がずれていれば揃える。PATH のずれと MSI の starship は知らせるだけ) |
 | `nix/scripts/check-winget-version.sh starship` (WSL・CI) | 固定した版を winget の版の一覧と比べる。GitHub Actions の `winget-versions` が週 1 回流し、新しい版が winget に載って 30 日たつと落ちて知らせる ([後述](#starship-の新しい版が出たとき)) |
@@ -2667,15 +2751,17 @@ winget-pkgs に載った日 (GitHub にも release を出すが、winget に載�
 ### Install-Starship.ps1 を書くときの注意
 
 - `dotfiles.ps1` と同じく **BOM 付きの UTF-8** で保存する
-- 副作用の無い関数と、winget とプロセスを偽物に差し替えた流れは `starship/Install-Starship.Tests.ps1` で確かめる (Linux の pwsh):
+- 入口は道具の表 (`Get-StarshipTool`) だけを持ち、流れは共通の枠 ([WingetPortable.ps1 を書くときの注意](#wingetportableps1-を書くときの注意))
+- 表の値 (版の拾い方・exe の置き場所・MSI) と、表を渡した流れは `starship/Install-Starship.Tests.ps1` で確かめる (Linux の pwsh):
 
   ```sh
   nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/starship/Install-Starship.Tests.ps1
   ```
 
 - runner の `runner/src/steps/ps1.rs` は、終了コードと、状態の表の見出し (`starship (winget の Starship.Starship`) と、締めの行の文言
-  (`→ Install-Starship で入れる`・`→ Install-Starship で揃える`・`→ ※ の手順で直す`・`MSI の starship (machine スコープ) が入っている`) で分かれる。
-  変えるときは向こうも直す (WSL の wrapper は無いので、runner の試験が ps1 の字と突き合わせる)
+  (`→ Install-Starship で入れる`・`→ Install-Starship で揃える`・`→ ※ の手順で直す`・`MSI の starship (machine スコープ) が入っている`・
+  `昇格した PowerShell では winget が starship を入れない`) で分かれる。字は共通の枠が組む。変えるときは向こうも直す (WSL の wrapper は無いので、runner の
+  試験が入口と枠の字を突き合わせる)
 - winget やプロセスに触る本物の部分は、実機で `-Check` と本番を打って確かめる
 
 ## herdr
@@ -3233,9 +3319,10 @@ WSL の setup は Nix の `wsl.windowsFiles.openssh.enable = true`)。グルー�
   ([winget の pin](#winget-の-pin)。試験が確かめる)
 - `Invoke-Winget` は、コンソールの文字コードが UTF-8 でなければ、winget を打つ間だけ UTF-8 にして読む (winget は管へ UTF-8 で書く)。UAC で昇格し直した
   子 (`-LogPath`) の窓と手で打った窓は CP932 で、そのまま読むと進み具合の帯 (█▒) が「笆遺毎」に化けて除けず、昇格した側の行 (`[管理者]`) に残った。
-  runner と WSL の wrapper は UTF-8 にしてから流すので替えない。winget を打つほかの ps1 (`Install-Sshd.ps1`・`Install-Herdr.ps1` など 14 本) の
-  `Invoke-Winget` も同じ本文にそろえてあり、`Install-OpenSSH.Tests.ps1` が突き合わせ、持つ ps1 の数 (bootstrap と合わせて 15 本) も数える (直すときは
-  全部を直す。winget を打つ ps1 を足したら、この本文を写して試験の数を直す)。昇格した側で winget が見つからないときの `Format-WingetMissingNote` も、
+  runner と WSL の wrapper は UTF-8 にしてから流すので替えない。winget を打つほかの ps1 (`Install-Sshd.ps1`・`Install-Herdr.ps1` と、winget の portable の
+  道具の共通の枠 `win/winget/WingetPortable.ps1` など 11 本) の `Invoke-Winget` も同じ本文にそろえてあり、`Install-OpenSSH.Tests.ps1` が突き合わせ、持つ
+  ps1 の数 (bootstrap と合わせて 12 本) も数える (直すときは全部を直す。winget を打つ ps1 を足したら、この本文を写して試験の数を直す。winget の
+  portable の道具は写さずに枠を使う)。昇格した側で winget が見つからないときの `Format-WingetMissingNote` も、
   bootstrap・`Install-OpenSSH.ps1`・`Install-Sshd.ps1` で同じ本文にそろえてあり、同じ試験が突き合わせる
 - `-Check` の終了コードと締めの文 (`Get-OpenSshExitCode`・`Get-OpenSshCheckMessage`) は、96 が読む。変えるときは
   `nix/scripts/bootstrap-windows-openssh.sh` とそのテストも直す
@@ -4531,13 +4618,13 @@ dotfiles が入れる版は自動では上がらない (依存の更新も見な
 
 | 打つもの | すること |
 | --- | --- |
-| `Install-Ntn -Check` (PowerShell) | 差を出すだけ。揃っていれば終了コード 0、差があれば 1、入っていなければ 3 |
+| `Install-Ntn -Check` (PowerShell) | 差を出すだけ。揃っていれば終了コード 0、差があれば 1、入っていなければ 3 (昇格した PowerShell で winget を打てなければ 1) |
 | `Install-Ntn` (PowerShell) | 揃える (入れる・入れ替える (上げる・下げる)・pin を足す) |
 | `nix/scripts/bootstrap-windows-ntn.sh` (WSL) | `setup --update` でも毎回走る (order 97)。入っていなければ入れ、版か pin がずれていれば揃える。揃わなければ ⚠ で囲んで知らせる (setup は止めない) |
 | `nix/scripts/bootstrap-windows-ntn.sh --apply` (WSL) | WSL から揃える (確かめずに流す) |
 | `nix/scripts/check-winget-version.sh ntn` (WSL・CI) | 固定した版を winget の版の一覧と比べる。GitHub Actions の `winget-versions` が週 1 回流し、新しい版が winget に載って 30 日たつと落ちて知らせる ([後述](#ntn-の新しい版が出たとき)) |
 
-揃えるときにすること (herdr と同じ):
+揃えるときにすること ([winget の portable の道具](#winget-の-portable-の道具) の共通の枠。ghq・fzf・starship も同じ):
 
 1. 入っている版 (`ntn.exe --version`) と固定した版を比べる。違えば、先に `winget download` で固定した版の取得とハッシュを確かめ
    (落ちたら何も変えずに止まる)、pin を外し、`winget uninstall` してから `winget install --version` で入れる
@@ -4553,7 +4640,9 @@ dotfiles が入れる版は自動では上がらない (依存の更新も見な
 - winget が置き場所をユーザーの PATH に足すマシン (example-host) と、`%LOCALAPPDATA%\Microsoft\WinGet\Links` に symlink を置くマシン
   (開発者モードなど) がある。どちらも winget のものとして読む
 - 入れ替えの途中で `winget install` が落ちると、ntn が入っていない状態で止まることがある (取得は先に確かめてあるので稀)。そのときは
-  `Install-Ntn` を打ち直す (`setup --update` でも入る)
+  `Install-Ntn` を打ち直す (`dotfiles apply`・`setup --update` でも入る)
+- 昇格した会話 (管理者として実行した端末と、そこから開いた WSL) では、winget を打たずに止まる ([昇格した PowerShell では入れない](#昇格した-powershell-では入れない))。
+  setup は ⚠ で知らせるので、昇格していない端末から開いた WSL で流し直す
 
 ### ntn の新しい版が出たとき
 
@@ -4576,16 +4665,16 @@ dotfiles が入れる版は自動では上がらない (依存の更新も見な
 ### Install-Ntn.ps1 を書くときの注意
 
 - `dotfiles.ps1` と同じく **BOM 付きの UTF-8** で保存する
-- 副作用の無い関数 (版の読み方・plan・状態の表・締めの行・PATH の解決) と、winget とプロセスを偽物に差し替えた流れ (打つ winget の
-  順・動いていると止まる・取得が落ちると何も変えない) は `ntn/Install-Ntn.Tests.ps1` で確かめる。Linux の pwsh で流すので Windows には
-  触らない (このファイルは manifest に無いので配られない):
+- 入口は道具の表 (`Get-NtnTool`) だけを持ち、流れは共通の枠 ([WingetPortable.ps1 を書くときの注意](#wingetportableps1-を書くときの注意))
+- 表の値 (版の読み方・exe の置き場所) と、表を渡した流れ (打つ winget・動いていると止まる・install が落ちたときの行) は `ntn/Install-Ntn.Tests.ps1` で
+  確かめる。Linux の pwsh で流すので Windows には触らない (このファイルは manifest に無いので配られない):
 
   ```sh
   nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/ntn/Install-Ntn.Tests.ps1
   ```
 
-- 締めの行 (`→ Install-Ntn で入れる`・`→ Install-Ntn で揃える`・`→ ※ の手順で直す`) の文言は `bootstrap-windows-ntn.sh` が読む。
-  変えるときは向こうも直す
+- 締めの行 (`→ Install-Ntn で入れる`・`→ Install-Ntn で揃える`・`→ ※ の手順で直す`・`昇格した PowerShell では winget が ntn を入れない`) の文言は
+  `bootstrap-windows-ntn.sh` と runner が読む。字は共通の枠が組む。変えるときは向こうも直す
 - winget やプロセスに触る本物の部分は、実機で `-Check` と本番を打って確かめる
 
 ## Claude Code
@@ -4661,7 +4750,8 @@ setup が下げる。
 
 `ghq/Install-Ghq.ps1` と `fzf/Install-Fzf.ps1` は、PowerShell の [cdrepo](#cdrepo-ghq-の-repo-を選んで移る) が使う ghq (repo の clone を決まった木に
 並べる CLI) と fzf (行を絞り込んで選ぶ CLI) を winget で入れ、版を `-Version` の既定値の 1 か所で固定する (dotfiles-private の ADR 092
-(`docs/adr/092_win_cdrepo_ghq_fzf_*`))。形は [ntn](#ntn) と同じ (zip の中の portable。管理者は要らない。常駐も UAC も無いので、版のずれも揃える)。
+(`docs/adr/092_win_cdrepo_ghq_fzf_*`))。どちらも [winget の portable の道具](#winget-の-portable-の道具) の共通の枠で揃える (zip の中の portable。管理者は
+要らない。常駐も UAC も無いので、版のずれも揃える)。
 WSL・Linux の ghq と fzf は別に home-manager (`nix/home/modules/packages.nix`) が入れる。
 
 | 道具 | winget の ID | 固定した版 (`-Version` の既定値) | 置き場所 (`%LOCALAPPDATA%\Microsoft\WinGet\Packages\` の下) |
@@ -4679,7 +4769,7 @@ WSL・Linux の ghq と fzf は別に home-manager (`nix/home/modules/packages.n
 
 | 打つもの | すること |
 | --- | --- |
-| `Install-Ghq -Check`・`Install-Fzf -Check` (PowerShell) | 差を出すだけ。揃っていれば終了コード 0、差があれば 1、入っていなければ 3 (fzf は、MSI の fzf が入っていれば 1) |
+| `Install-Ghq -Check`・`Install-Fzf -Check` (PowerShell) | 差を出すだけ。揃っていれば終了コード 0、差があれば 1、入っていなければ 3 (fzf は、MSI の fzf が入っていれば 1。どちらも、昇格した PowerShell で winget を打てなければ 1) |
 | `Install-Ghq`・`Install-Fzf` (PowerShell) | 揃える (入れる・入れ替える (上げる・下げる)・pin を足す) |
 | `dotfiles apply --steps ghq,fzf` (PowerShell) | runner の手順で揃える (入っていなければ入れ、版か pin がずれていれば揃える。PATH のずれと MSI の fzf は知らせるだけ) |
 | `nix/scripts/check-winget-version.sh ghq`・`fzf` (WSL・CI) | 固定した版を winget の版の一覧と比べる。GitHub Actions の `winget-versions` が週 1 回流し、新しい版が winget に載って 30 日たつと落ちて知らせる ([後述](#ghqfzf-の新しい版が出たとき)) |
@@ -4724,7 +4814,8 @@ dotfiles の clone があるマシンだけ) にも出る。猶予・落ちる�
 ### Install-Ghq.ps1・Install-Fzf.ps1 を書くときの注意
 
 - `dotfiles.ps1` と同じく **BOM 付きの UTF-8** で保存する
-- 副作用の無い関数と、winget とプロセスを偽物に差し替えた流れは `ghq/Install-Ghq.Tests.ps1`・`fzf/Install-Fzf.Tests.ps1` で確かめる (Linux の pwsh):
+- 入口は道具の表 (`Get-GhqTool`・`Get-FzfTool`) だけを持ち、流れは共通の枠 ([WingetPortable.ps1 を書くときの注意](#wingetportableps1-を書くときの注意))
+- 表の値 (版の拾い方・exe の置き場所・fzf の MSI) と、表を渡した流れは `ghq/Install-Ghq.Tests.ps1`・`fzf/Install-Fzf.Tests.ps1` で確かめる (Linux の pwsh):
 
   ```sh
   nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/ghq/Install-Ghq.Tests.ps1
@@ -4732,8 +4823,9 @@ dotfiles の clone があるマシンだけ) にも出る。猶予・落ちる�
   ```
 
 - runner の `runner/src/steps/ps1.rs` は、終了コードと、状態の表の見出し (`ghq (winget の x-motemen.ghq`・`fzf (winget の junegunn.fzf`) と、
-  締めの行の文言 (`→ Install-Ghq で入れる`・`→ Install-Ghq で揃える`・`→ ※ の手順で直す`。fzf は `MSI の fzf (machine スコープ) が入っている` も)
-  で分かれる。変えるときは向こうも直す (WSL の wrapper は無いので、runner の試験が ps1 の字と突き合わせる)
+  締めの行の文言 (`→ Install-Ghq で入れる`・`→ Install-Ghq で揃える`・`→ ※ の手順で直す`・`昇格した PowerShell では winget が ghq を入れない`。fzf は
+  `MSI の fzf (machine スコープ) が入っている` も) で分かれる。字は共通の枠が組む。変えるときは向こうも直す (WSL の wrapper は無いので、runner の試験が
+  入口と枠の字を突き合わせる)
 - winget やプロセスに触る本物の部分は、実機で `-Check` と本番を打って確かめる
 
 ## Tailscale
