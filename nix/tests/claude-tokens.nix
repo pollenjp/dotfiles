@@ -17,6 +17,8 @@
 #     account・selector は使えない)。label は英小文字・数字で始まり、英小文字・数字・. - _ だけで 64 字まで (sk-ant- で始まらない)。
 #     item は欄まで書いた op:// の参照か null。どれも外れると評価で止まり、止めるときの文に書いた字 (token の値を書いてしまったときの値) を
 #     出さない (名前は数だけ、label と item は宣言の名前だけを出す)
+#   - 形を誤った宣言 (tokens に文字列・アカウントの値に文字列・知らないキー (token = …)・文字列でない label) も評価で止まり、止めるときの
+#     文に書いた字を出さない (option の型は anything で、型の誤りの文は値を出すので、型では止めない)
 #   - Claude Code を入れないホスト (claude.enable = false) には置かない (読む claude-account が無い)
 {
   lib,
@@ -59,17 +61,9 @@ let
   # 渡していることは、上の rejects で確かめる)
   claudeTokens = import ../lib/claude-tokens.nix { inherit lib; };
   failedMessages =
-    tokens:
-    map (a: a.message) (
-      builtins.filter (a: !a.assertion) (
-        claudeTokens.assertions (
-          lib.mapAttrs (n: t: {
-            label = t.label or n;
-            item = t.item or null;
-          }) tokens
-        )
-      )
-    );
+    tokens: map (a: a.message) (builtins.filter (a: !a.assertion) (claudeTokens.assertions tokens));
+  # 止める文のどれにも fakeValue が無く、止める文がある
+  quiet = msgs: msgs != [ ] && !(builtins.any (lib.hasInfix fakeValue) msgs);
   # 作り物の値 (token の形の字)。止めるときの文に出てはいけない
   fakeValue = "sk-ant-oat01-000000000000000000000000000000000000000000000000";
 
@@ -244,6 +238,24 @@ let
             label = "main.v2_x-1";
             inherit item;
           };
+        });
+    }
+    {
+      name = "形を誤った宣言 (tokens・アカウントの値に文字列・知らないキー token・文字列でない label) は評価で止まり、文に書いた字を出さない";
+      ok =
+        rejects fakeValue
+        && rejects { alt = fakeValue; }
+        && rejects { alt.token = fakeValue; }
+        && rejects { alt.label = 5; }
+        && quiet (failedMessages fakeValue)
+        && quiet (failedMessages {
+          alt = fakeValue;
+        })
+        && quiet (failedMessages {
+          alt.token = fakeValue;
+        })
+        && builtins.any (lib.hasInfix "dotfiles.claude.tokens.alt") (failedMessages {
+          alt.token = fakeValue;
         });
     }
     {

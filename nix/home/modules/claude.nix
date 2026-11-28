@@ -219,7 +219,7 @@ let
   # claude の token の置き場の宣言 (tokens) から、claude-tokens.json の中身と、宣言を確かめる assertions を作る
   claudeTokens = import ../../lib/claude-tokens.nix { inherit lib; };
   # 素の claude (default) を宣言したか。宣言したホストでは、素の claude を token で起こす wrapper を置く
-  bareToken = cfg.tokens ? ${claudeTokens.bareName};
+  bareToken = claudeTokens.hasBare cfg.tokens;
   # wrapper を置く dir (家からの相対。claude-account の script も同じ値で wrapper を見分ける)
   bareBinRel = ".local/share/claude-account/bin";
   # 対話のシェルで PATH の頭に置き直す行 (mise activate の後)

@@ -228,14 +228,19 @@ fi
 # claude の探し方は bootstrap-claude-plugins.sh と同じ。
 # mise は `mise activate` 方式なので、同じ setup.sh の実行内で入った直後は PATH に無い。
 # 素の claude の wrapper (dotfiles.claude.tokens.default のホストの ~/.local/share/claude-account/bin/claude。素の claude を token で
-# 起こす。home/modules/claude.nix) は飛ばす。plugin の出し入れに token は要らず、token がまだ無いと wrapper は claude を起こさずに止まる
+# 起こす。home/modules/claude.nix) は飛ばす。plugin の出し入れに token は要らず、token がまだ無いと wrapper は claude を起こさずに止まる。
+# wrapper は claude-account の script への link なので、PATH の綴りによらず、辿った先が …/bin/claude-account なら飛ばす (readlink -f の
+# 無い古い macOS では、置き場のパスとの一致だけを見る)
 claude=""
 bare_wrapper="${HOME}/.local/share/claude-account/bin/claude"
 while IFS= read -r c; do
-  if [[ -n ${c} && ${c} != "${bare_wrapper}" ]]; then
-    claude=${c}
-    break
+  [[ -n ${c} && ${c} != "${bare_wrapper}" ]] || continue
+  real=$(readlink -f -- "${c}" 2>/dev/null) || real=""
+  if [[ ${real} == */bin/claude-account ]]; then
+    continue
   fi
+  claude=${c}
+  break
 done < <(type -ap claude 2>/dev/null || true)
 if [[ -z ${claude} ]] && command -v mise &>/dev/null; then
   claude=$(mise which claude 2>/dev/null || true)

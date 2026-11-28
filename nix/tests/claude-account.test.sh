@@ -888,6 +888,46 @@ else
 fi
 run claude-account audit extra
 if [[ $(rc) == 2 ]]; then ok "audit は引数を取らない (2)"; else ng "audit の引数" "$(detail)"; fi
+audit_setup 'last year'
+CLAUDE_ACCOUNT_NOW='2026-11-28T21:00:00+09:00' run claude-account audit
+r1=$(row alt)
+audit_setup '2026-01-01'
+CLAUDE_ACCOUNT_NOW='2026-11-28T21:00:00+09:00' run claude-account audit
+if [[ ${r1} == '| alt | alt | - | ローカル | 600 | - | - | 回す |' && $(row alt) == '| alt | alt | - | ローカル | 600 | - | - | 回す |' ]] \
+  && grep -Fq -- '- alt: 回す — 入れた時刻の控えが読めない' "${work}/out"; then
+  ok "audit: 控えの時刻は ISO 8601 の秒まで (Z か ±hh:mm) だけを読み、ほかの形 (last year・時差の無い日付) は読めないとして回す"
+else
+  ng "audit (控えの時刻の形)" "$(detail)"
+fi
+audit_setup
+printf '{"accounts":{"alt":{"label":"alt"}}}\n' >"${decl}"
+CLAUDE_ACCOUNT_NOW='2026-11-28T21:00:00+09:00' run claude-account audit
+if [[ $(rc) == 2 ]] && grep -Fq '宣言' "${work}/err"; then
+  ok "audit: 宣言の item のキーが無ければ読めない形で 2 (Windows と同じ)"
+else
+  ng "audit (item のキーなし)" "$(detail)"
+fi
+audit_setup
+printf '{"accounts":{"personal":{"item":null,"label":"personal"}}}\n' >"${decl}"
+printf 'CLAUDE_CODE_OAUTH_TOKEN=dummy-pe-1\n' >"${home}/.config/claude-accounts/personal.env"
+chmod 600 "${home}/.config/claude-accounts/personal.env"
+CLAUDE_ACCOUNT_NOW='2026-11-28T21:00:00+09:00' run claude-account audit
+if grep -Fq -- '- personal: 直す — 既定のアカウント (subscription。dotfiles が作る) で、token を置かない' "${work}/out" \
+  && ! grep -Fq 'claude-account remove personal' "${work}/out"; then
+  ok "audit: 既定のアカウントを宣言したら直す (宣言から外すか別の名前で add。打っても通らない remove を出さない)"
+else
+  ng "audit (既定のアカウントの宣言)" "$(detail)"
+fi
+reset_home
+mkdir -p "${home}/.local/state/claude-accounts"
+printf 'not json\n' >"${times}"
+run claude-account add token2 --mode token
+run claude-account remove token2 --purge
+if [[ $(rc) == 0 ]] && grep -Fq '入れた時刻の控え' "${work}/err" && grep -Fq 'token2 を外せません' "${work}/err"; then
+  ok "remove --purge は控えが読めない形なら外せないと出し、0 で終わる (Windows と同じ)"
+else
+  ng "remove --purge (読めない控え)" "$(detail)"
+fi
 
 # --- 素の claude の wrapper (bareToken の package)
 if [[ -n ${pkg_bare} ]]; then

@@ -985,12 +985,17 @@ cmd_remove() {
     "${cu}/rm" -f -- "${file}" || return 1
     echo "消しました: $(shown "${file}")"
   fi
-  # 消した token の入れた時刻も控えから外す (残すと、同じ名前で足し直した token が古い時刻で並ぶ)
-  if [[ -n $(times_get "${name}") ]]; then
-    if times_ok 2>/dev/null && times_put "${name}" ""; then
-      echo "控えから外しました: ${name} の入れた時刻"
-    else
+  # 消した token の入れた時刻も控えから外す (残すと、同じ名前で足し直した token が古い時刻で並ぶ)。控えが読めない形なら外せないと出す
+  # (Windows の claude-account.exe と同じ。終了コードは 0)
+  if [[ -e ${times_file} ]]; then
+    if ! times_ok 2>/dev/null; then
       err "claude-account: 入れた時刻の控え ($(shown "${times_file}")) から ${name} を外せません。"
+    elif [[ -n $(times_get "${name}") ]]; then
+      if times_put "${name}" ""; then
+        echo "控えから外しました: ${name} の入れた時刻"
+      else
+        err "claude-account: 入れた時刻の控え ($(shown "${times_file}")) から ${name} を外せません。"
+      fi
     fi
   fi
   return 0
@@ -1004,7 +1009,7 @@ decl_shape='
   and all(.accounts | to_entries[];
     (.key | test("\\A[a-z0-9][a-z0-9_-]{0,31}\\z")) and (.key | startswith("sk-ant-") | not)
     and .key != "account" and .key != "selector"
-    and (.value | type) == "object"
+    and (.value | type) == "object" and (.value | has("label")) and (.value | has("item"))
     and ((.value.label | type) == "string" and (.value.label | test("\\A[a-z0-9][a-z0-9._-]{0,63}\\z"))
       and (.value.label | startswith("sk-ant-") | not))
     and (.value.item == null
@@ -1142,9 +1147,8 @@ cmd_audit() {
     else
       reg_mode=$(registry_mode "${name}" 2>/dev/null) || reg_mode=""
       if is_default "${name}"; then
-        reg_mode=subscription
-      fi
-      if [[ -z ${reg_mode} ]]; then
+        fix_reason="既定のアカウント (subscription。dotfiles が作る) で、token を置かない (宣言から外すか、別の名前で claude-account add <名前> --mode token を打って宣言し直す)"
+      elif [[ -z ${reg_mode} ]]; then
         missing_setup="登録が無い (claude-account add ${name} --mode token を打ってから claude-account set-token ${name})"
       elif [[ ${reg_mode} == subscription ]]; then
         fix_reason="subscription のアカウントとして登録している (token のアカウントなら claude-account remove ${name} と claude-account add ${name} --mode token)"
@@ -1180,7 +1184,9 @@ cmd_audit() {
     esac
     # 入れた時刻 (set-token の控え)
     setat=$(times_get "${name}")
-    if [[ -n ${setat} ]] && set_epoch=$("${cu}/date" -d "${setat}" +%s 2>/dev/null); then
+    # 控えの時刻は ISO 8601 の秒まで (set-token が書く形。Z か ±hh:mm) だけを読む。date -d は「last year」や時差の無い日付も読むので、先に形を見る
+    if [[ ${setat} =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(Z|[+-][0-9]{2}:[0-9]{2})$ ]] \
+      && set_epoch=$("${cu}/date" -d "${setat}" +%s 2>/dev/null); then
       days=$(((now - set_epoch) / 86400))
       setat=$(short_jst "${set_epoch}")
       if ((days > rotate_days)); then

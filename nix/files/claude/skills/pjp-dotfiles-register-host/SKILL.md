@@ -49,7 +49,9 @@ claude-skills の skill `pjp-machine-add-remove` を読み、その表 (ssh の�
   setup-token の token の `claude.tokens`。素の claude を token で起こすなら `default`)。同じ token を置くほかのホストと同じ呼び名・参照にする
 - 外す: ホストのファイルを消す PR で、その machine にあった token の宣言も消える。同じ token (同じ呼び名・参照) をほかのホストにも
   置いているなら、回す (作り直す) かをユーザーに聞く (外した machine に token が残っているかもしれない)
-- 作り直す: 新しい machine では set-token を打ち直す (token のファイルと入れた時刻の控えは machine の中にある)
+- 作り直す: 新しい machine では set-token を打ち直す (token のファイルと入れた時刻の控えは machine の中にある)。控えの時刻は貼り直した時に
+  なり、token を出した時ではない。出してから日が経った token なら、同じ呼び名のほかのホストの行・1Password の項目の日付で数え、期限が
+  近ければ貼り直さずに回す (dotfiles の `nix/README.md`「棚卸し (claude-account audit)」)
 - `pjp-machine-add-remove` が skill の一覧に無いマシンでは、この節の 3 行と、dotfiles の `nix/README.md`「新規マシンの手順」に従う
 
 ## はじめにユーザーへ伝える

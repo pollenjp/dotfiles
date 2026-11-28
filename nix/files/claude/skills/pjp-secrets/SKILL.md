@@ -30,8 +30,7 @@ program は `pjp-op-env` が起動のときに 1 回の op で値を解いて環
 ホストだけ)。値はユーザーが自分の端末で入れ (`claude-account set-token <名前>`)、Claude は `set-token` を打たず、そのファイルを開かず
 (Read・cat も)、値を読まない・書かない・出さない (確かめるのは `claude-account check <名前>`・`claude-account audit` で、有る無しと権限と
 入れてからの日数だけ。入れた時刻の控え `~/.local/state/claude-accounts/tokens.json` は値を持たない)。どのホストのどのアカウントにどの token を
-置いたかは、ホストの設定 (Linux は dotfiles の `dotfiles.claude.tokens`、Windows は dotfiles-private の `win/hosts/<ユーザー>@<PC>.toml` の
-`[claude.tokens.<名前>]`) で宣言する。わけと守り・漏れたときは dotfiles-private の ADR 082 (`docs/adr/082_claude_token_accounts_*`)、宣言と
+置いたかは、ホストの設定 (dotfiles の `dotfiles.claude.tokens`) で宣言する。わけと守り・漏れたときは dotfiles-private の ADR 082 (`docs/adr/082_claude_token_accounts_*`)、宣言と
 棚卸し・回し方は ADR 123 (`docs/adr/123_claude_token_watch_*`)。
 
 **例外: Notion の API キー。** `~/.config/pjp/env` (`$XDG_CONFIG_HOME` があれば `$XDG_CONFIG_HOME/pjp/env`。Windows は

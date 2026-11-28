@@ -5025,8 +5025,7 @@ cp -Rpn ~/.claude-work/projects/. ~/.claude/projects/ && rm -rf ~/.claude-work/p
 
 `claude setup-token` の token（1 年有効）を、どのホストのどのアカウント（と素の `claude`）に置いたかを、ホストの設定に宣言する。値は書かない。
 宣言は、素の `claude` を token で起こすスイッチ（`default`）と、月ごとの棚卸し（`claude-account audit`）の元になる。設計は dotfiles-private の
-ADR 123（`docs/adr/123_claude_token_watch_*`）。Windows のホストは dotfiles-private の `win/hosts/` の toml に同じ形で書く
-（`win/README.md` の「[claude の token の置き場の宣言 ([claude.tokens])](../win/README.md#claude-の-token-の置き場の宣言-claudetokens)」）。
+ADR 123（`docs/adr/123_claude_token_watch_*`）。
 
 ```nix
 # dotfiles-private の nix/hosts/<user>@<hostname>.nix の mkHome の引数
@@ -5116,6 +5115,10 @@ claude-account audit: example-host (2026-11-28 21:00 JST・入れてから 330 �
 - 同じ token（呼び名が同じ）をこのホストの 2 つのアカウントに置いていれば、その組も出す。ほかのホストとの突き合わせは、ホストごとの出力を
   並べて呼び名で見る（棚卸しの skill）
 - 330 日（11 か月）は、月ごとの棚卸しで期限（1 年）の前に回せる線（棚卸しの間が 1 か月あいても、期限の前に「回す」が出る）
+- 入れた時刻は「このホストに `set-token` で入れた時刻」で、token を出した時刻ではない。同じ token をほかのホストや作り直した machine に
+  貼り直すと、そのホストの数え始めは貼り直した時になる。出してから日が経った token を貼り直したら、同じ呼び名のほかのホストの行の
+  一番古い時刻か、1Password の項目の日付で数え、期限が近ければ貼り直さずに回す（ホストをまたいで並べる棚卸しの skill は、呼び名ごとに
+  一番古い時刻で見る）
 - 回す手順: `claude setup-token` で新しい token を出し、1Password の同じ欄の値を替え、同じ呼び名の全部のホストで
   `claude-account set-token <名前>` を打ち、棚卸しを流し直す。古い token を 1 本ずつ取り消す手順は公式の文書に無い（ADR 123 の未決事項）
 

@@ -5,9 +5,15 @@
 # 値) が出ないことを、ここの assertions の list で確かめる (home-manager は失敗した assertion があると config も options も読めなくする
 # ので、組み立てたホストからは文を読めない)。
 #
-#   stateText <tokens>   claude-tokens.json の中身 (改行で終わる)。宣言が無くても {"accounts":{}}
-#   assertions <tokens>  名前の形・label の形・item の形を確かめる assertions の list
+#   stateText <tokens>   claude-tokens.json の中身 (改行で終わる)。宣言が無くても {"accounts":{}}。label は書かなければアカウントの名前、
+#                        item は書かなければ null。形の違う宣言では、字を出さない文で止まる (assertions が先に止める)
+#   assertions <tokens>  表か・名前の形・値が表か・知らないキー・label の形・item の形を確かめる assertions の list
+#   hasBare <tokens>     素の claude (default) を宣言したか
 #   bareName             素の claude (~/.claude) の名前 (default)。この名前を宣言すると、素の claude がその token で起きる
+#
+# option の型は anything (home/options.nix) で、形はここの assertions だけで見る。型 (attrsOf submodule・str) の誤りの文は、定義の値を
+# そのまま出すため (宣言に token の値を書いてしまったとき (`claude.tokens.alt = "sk-ant-…"`・`{ token = "sk-ant-…"; }`) に、評価の
+# 誤りの文から端末や CI のログへ値が出る)。止める文には、名前は数だけ、label・item・知らないキーは宣言の名前だけを出す。
 #
 # 名前は claude-account のアカウントの名前 (英小文字・数字で始まり、英小文字・数字・- と _ だけで 32 字まで。sk-ant- で始まらない。
 # account・selector は使えない。nix/pkgs/claude-account の name_ok と同じ)。default は素の claude。
@@ -19,6 +25,11 @@
 
 let
   bareName = "default";
+  # 宣言の値 (表) に書けるキー
+  keys = [
+    "label"
+    "item"
+  ];
 
   nameOk =
     n:
@@ -47,33 +58,62 @@ let
       builtins.isString i
       && builtins.match "op://[^/[:cntrl:]]+/[^/[:cntrl:]]+/[^/[:cntrl:]]+(/[^/[:cntrl:]]+)?" i != null
     );
+
+  # 宣言の形が全部合っているか (stateText が値に触る前に見る。合わない形は assertions が字を出さずに止める)
+  entryOk =
+    n: t:
+    builtins.isAttrs t
+    && builtins.all (k: builtins.elem k keys) (builtins.attrNames t)
+    && labelOk (t.label or n)
+    && itemOk (t.item or null);
+  shapeOk =
+    tokens:
+    builtins.isAttrs tokens
+    && builtins.all (n: nameOk n && entryOk n tokens.${n}) (builtins.attrNames tokens);
 in
 {
   inherit bareName;
 
+  hasBare = tokens: builtins.isAttrs tokens && tokens ? ${bareName};
+
   #   {"accounts": {"alt": {"item": null, "label": "alt"}, "default": {"item": null, "label": "main"}}}
-  #
-  # submodule の値は _module も持つので、label と item を名指しで写す
   stateText =
     tokens:
-    builtins.toJSON {
-      accounts = lib.mapAttrs (_: t: {
-        inherit (t) label item;
-      }) tokens;
-    }
-    + "\n";
+    if shapeOk tokens then
+      builtins.toJSON {
+        accounts = lib.mapAttrs (n: t: {
+          label = t.label or n;
+          item = t.item or null;
+        }) tokens;
+      }
+      + "\n"
+    else
+      throw "claude.nix: dotfiles.claude.tokens の形が違います (書いた字は出しません。assertions の文を見てください)";
 
   assertions =
     tokens:
     let
-      names = builtins.attrNames tokens;
+      isSet = builtins.isAttrs tokens;
+      names = if isSet then builtins.attrNames tokens else [ ];
       badNames = builtins.filter (n: !(nameOk n)) names;
       goodNames = builtins.filter nameOk names;
-      badLabels = builtins.filter (n: !(labelOk tokens.${n}.label)) goodNames;
-      badItems = builtins.filter (n: !(itemOk (tokens.${n}.item or null))) goodNames;
+      notSets = builtins.filter (n: !(builtins.isAttrs tokens.${n})) goodNames;
+      sets = builtins.filter (n: builtins.isAttrs tokens.${n}) goodNames;
+      unknownKeys = builtins.filter (
+        n: builtins.any (k: !(builtins.elem k keys)) (builtins.attrNames tokens.${n})
+      ) sets;
+      badLabels = builtins.filter (n: !(labelOk (tokens.${n}.label or n))) sets;
+      badItems = builtins.filter (n: !(itemOk (tokens.${n}.item or null))) sets;
       opt = n: "dotfiles.claude.tokens.${n}";
     in
     [
+      {
+        assertion = isSet;
+        message = ''
+          claude.nix: dotfiles.claude.tokens は、アカウントの名前ごとの表 ({ <名前> = { label = …; item = …; }; }) で書いてください (書いた字は出しません)。
+          token の値そのものを書いたのなら、その行を消して、token を作り直してください (commit した値は履歴に残ります)。
+        '';
+      }
       # 名前に token の値を書いてしまったときに、端末や CI のログへ出ないよう、規則に合わない名前は数だけを出す
       {
         assertion = badNames == [ ];
@@ -84,6 +124,25 @@ in
         '';
       }
       # 文には書いた字を出さない (値を書いてしまったとき、端末や CI のログへ出ないように)。名前だけを出す
+      {
+        assertion = notSets == [ ];
+        message = ''
+          claude.nix: ${
+            lib.concatMapStringsSep "・" opt notSets
+          } は、表 ({ label = …; item = …; }。どちらも書かなければ { }) で書いてください (書いた字は出しません)。
+          token の値そのものを書いたのなら、その行を消して、token を作り直してください (commit した値は履歴に残ります)。
+        '';
+      }
+      {
+        assertion = unknownKeys == [ ];
+        message = ''
+          claude.nix: ${
+            lib.concatMapStringsSep "・" opt unknownKeys
+          } に、知らないキーがあります (書けるのは label・item。書いた字は出しません)。
+          token の値は宣言に書きません (token のファイルに claude-account set-token で入れる)。値そのものを書いたのなら、その行を消して、token を
+          作り直してください (commit した値は履歴に残ります)。
+        '';
+      }
       {
         assertion = badLabels == [ ];
         message = ''

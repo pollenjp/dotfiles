@@ -546,42 +546,17 @@ in
     };
 
     tokens = lib.mkOption {
-      type = lib.types.attrsOf (
-        lib.types.submodule (
-          { name, ... }:
-          {
-            options = {
-              label = lib.mkOption {
-                # 形は型 (strMatching) でなく lib/claude-tokens.nix の assertions (home/modules/claude.nix が渡す) で確かめる。型の誤りの
-                # 文は定義の値をそのまま出すので、token の値を書いてしまったときに、評価の誤りの文から端末や CI のログへ値が出る
-                type = lib.types.str;
-                default = name;
-                defaultText = lib.literalExpression "<アカウントの名前>";
-                example = "alt";
-                description = ''
-                  token の呼び名。同じ token (1 回の `claude setup-token` で出したもの) を置いたホスト・アカウントで同じにする
-                  (棚卸しは呼び名で同じ token の置き場を並べ、回すときはその全部で貼り直す)。書かなければアカウントの名前。
-                  英小文字・数字で始め、英小文字・数字・`.`・`-`・`_` だけで 64 字まで。
-                '';
-              };
-              item = lib.mkOption {
-                # lib/claude-tokens.nix の assertions で形を確かめる (label と同じわけ)
-                type = lib.types.nullOr lib.types.str;
-                default = null;
-                example = lib.literalExpression ''"op://<vault の ID>/<項目の ID>/<欄の ID>"'';
-                description = ''
-                  元の token を置いた 1Password の参照。欄まで書く: `op://<vault の ID>/<項目の ID>/<欄の ID>` (セクションがあれば
-                  `op://<vault>/<項目>/<セクション>/<欄>`)。そのまま `op read '<item>'` に渡せる、`pjp-op-ref` が出す ID の形の参照で、
-                  値ではない。分かるまで null。
-
-                  dotfiles は読まない。棚卸し (`claude-account audit`) が並べ、token を回す人がどの欄の値を貼るかを引くのに使う
-                  (`op read '<item>' | claude-account set-token <名前>`)。
-                '';
-              };
-            };
-          }
-        )
-      );
+      # 型は anything にし、形 (表か・名前・知らないキー・label・item) は lib/claude-tokens.nix の assertions (home/modules/claude.nix が
+      # 渡す) だけで見る。attrsOf submodule・str などの型の誤りの文は定義の値をそのまま出すので、宣言に token の値を書いてしまったとき
+      # (`claude.tokens.alt = "sk-ant-…"`・`{ token = "sk-ant-…"; }`) に、評価の誤りの文から端末や CI のログへ値が出る。値は表で、キーは
+      # 2 つ:
+      #   label  token の呼び名。同じ token (1 回の claude setup-token で出したもの) を置いたホスト・アカウントで同じにする (棚卸しは
+      #          呼び名で同じ token の置き場を並べ、回すときはその全部で貼り直す)。書かなければアカウントの名前。英小文字・数字で始め、
+      #          英小文字・数字・. - _ だけで 64 字まで
+      #   item   元の token を置いた 1Password の参照。欄まで書く (op://<vault の ID>/<項目の ID>/<欄の ID>。セクションがあれば
+      #          op://<vault>/<項目>/<セクション>/<欄>)。pjp-op-ref が出す ID の形の参照で、値ではない。分かるまで書かない (null)。
+      #          dotfiles は読まない。棚卸しが並べ、token を回す人がどの欄の値を貼るかを引く (op read '<item>' | claude-account set-token <名前>)
+      type = lib.types.anything;
       default = { };
       example = lib.literalExpression ''
         {
@@ -601,6 +576,10 @@ in
           対話のシェルの PATH の頭 (mise の後) に足す。宣言の無いホストの素の `claude` は今のまま (`/login` の資格情報)
         - ほかの名前: `claude-account add <名前> --mode token` で足したアカウント。宣言はアカウントを作らない (作るのは add)
 
+        値は表で、書けるのは `label` (token の呼び名。同じ token を置いたホスト・アカウントで同じにする。書かなければアカウントの名前。
+        英小文字・数字で始め、英小文字・数字・`.`・`-`・`_` だけで 64 字まで) と `item` (元の token を置いた 1Password の欄までの参照
+        `op://<vault の ID>/<項目の ID>/<欄の ID>`。値ではない。分かるまで書かない) だけ。
+
         token の値は各ホストの `~/.config/claude-accounts/<名前>.env` に、ユーザーが自分の端末で `claude-account set-token <名前>` で
         入れる (入れた時刻を `~/.local/state/claude-accounts/tokens.json` に控える)。Claude は値を読まない・書かない・出さない
         (dotfiles-private の docs/adr/082_claude_token_accounts_* と docs/adr/123_claude_token_watch_*)。
@@ -612,7 +591,8 @@ in
 
         `claude-account audit` がこれを読み、ホストの実際のアカウント・token のファイルの有る無しと権限・入れた時刻・経った日数を、値を
         見ずに並べて判定 (ok・回す・入れる・直す・宣言漏れ) を出す。入れてから 330 日を超えた・入れた時刻の控えが無い token は「回す」。
-        名前・label・item の形が違うと評価で止まる (止めるときの文に、書いた字は出さない)。
+        表でない・名前の形が違う・知らないキー・label・item の形が違うと評価で止まる (止めるときの文に、書いた字は出さない。型を anything に
+        して形を assertions だけで見るのは、型の誤りの文が値を出すため)。
 
         mkHome の引数 (`claude.tokens = { … };`) でも、modules (`dotfiles.claude.tokens`) でも書ける。書き方は nix/README.md の
         「claude の token の置き場を宣言する」。
