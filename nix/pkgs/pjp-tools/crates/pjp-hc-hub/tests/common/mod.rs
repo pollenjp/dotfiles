@@ -55,7 +55,10 @@ impl Sandbox {
         ] {
             c.env_remove(k);
         }
-        c.env("HOME", &self.home)
+        // private な足し分 (pjp-skills) は、手元に入れてあっても見えないようにする ([`Sandbox::put_extras`] で置いたときだけ見える)
+        c.env("PATH", path_without_extras())
+            .env("CARGO_HOME", self.root.join("cargo"))
+            .env("HOME", &self.home)
             .env("USERPROFILE", &self.home)
             .env("XDG_CONFIG_HOME", self.home.join(".config"))
             .env("GIT_CONFIG_GLOBAL", &self.gitconfig)
@@ -65,6 +68,22 @@ impl Sandbox {
             .env("GIT_AUTHOR_EMAIL", "test@example.com")
             .env("GIT_COMMITTER_NAME", "test")
             .env("GIT_COMMITTER_EMAIL", "test@example.com");
+    }
+
+    /// private な足し分の道具 (偽の pjp-skills) を、この砂場の CARGO_HOME の bin に置く。
+    pub fn put_extras(&self) {
+        let p = self
+            .root
+            .join("cargo")
+            .join("bin")
+            .join(format!("pjp-skills{}", std::env::consts::EXE_SUFFIX));
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, "#!/bin/sh\nexit 0\n").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
     }
 
     /// この偽のホームで描いた雛形の中身 ([`template_at`])。
@@ -163,6 +182,15 @@ pub fn template_at(home: &Path, source: &str) -> Vec<u8> {
         .content()
         .as_bytes()
         .to_vec()
+}
+
+/// 今の PATH から、pjp-skills のあるディレクトリを外したもの (git などはそのまま見える)。
+pub fn path_without_extras() -> std::ffi::OsString {
+    let name = format!("pjp-skills{}", std::env::consts::EXE_SUFFIX);
+    let dirs: Vec<PathBuf> = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
+        .filter(|d| !d.join(&name).exists())
+        .collect();
+    std::env::join_paths(dirs).unwrap()
 }
 
 /// ハブの中のパス (`/` 区切り) → 雛形の名前。

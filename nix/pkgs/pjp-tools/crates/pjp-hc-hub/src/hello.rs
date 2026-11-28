@@ -8,8 +8,8 @@
 //! この形) では:
 //!
 //! - この端末: hc の端末か・OSC 7501 で状態を報告しているか (spec §13 の #1) と、付いている label (`pjp.*`)
-//! - 見回り役: `pjp-hubd` (label `pjp.role=hubd`) が動いているか。動いていなければ立てる (`pjp-hubd` の bin がこの crate に
-//!   あるときだけ。spec の W2-3 で入る)
+//! - 見回り役: `pjp-hubd` (label `pjp.role=hubd`) が動いているか。private な足し分 (claude-skills の `pjp-skills`。
+//!   [`pjp_core::extras`]) があるときだけ見る。見回り役を立てるのは足し分の側 (公開の道具は立てない)
 //! - hc の machine: 子を立てるマシンにつながるか。手元の WSL の machine (`--via` のコマンドが wsl.exe。名前は見ない) には印を
 //!   添え、Windows のハブに WSL の machine が無ければ足し方を出す
 //!
@@ -24,6 +24,8 @@
 //! - 見回り役: 立てない (T3 のスレッドには Notion のコメントを届けない)
 //! - hc の machine: herdr-app の形と同じ (T3 のハブも、長い子の見張りと、Windows に無い `pjp ticket` の command を手元の
 //!   WSL で流すのに hc を使う)
+//!
+//! 足し分の案内 (Notion のコメント・`pjp ticket`・チケットの ID の名前) は、足し分があるときだけ出す。
 //!
 //! 行の頭は ok (問題ない)・NG (直すもの)・!! (気にかけるもの)・-- (ここでは見ない)。NG が 1 つでもあれば終了コード 1。
 
@@ -45,11 +47,9 @@ use crate::templates::{self, Context};
 
 /// hc に聞くのを待つ長さ (machine につながらないと待たされる)。
 const HC_TIMEOUT: Duration = Duration::from_secs(15);
-/// 見回り役の名前と label。
+/// 見回り役 (private な足し分の道具) の名前と label。
 pub const HUBD_NAME: &str = "pjp-hubd";
 pub const HUBD_LABEL: &str = "pjp.role=hubd";
-/// 見回り役の bin。この crate の Cargo.toml の `[[bin]]` にあるときだけ立てる。
-const HUBD_BIN: &str = "pjp-hubd";
 /// 旧 herdr のハブの worktree の branch の頭 (`herdr worktree create` が付ける `worktree/<名前>`)。
 const OLD_HUB_BRANCH: &str = "worktree/";
 /// T3 の CLI のパスの env (T3 が会話に渡す。Windows は `~/.t3/bin/t3.cmd`)。
@@ -146,6 +146,8 @@ pub trait Runner {
     fn env(&self, key: &str) -> Option<String>;
     /// このマシンが Windows か (Windows のハブだけが、手元の WSL を hc の machine に足す)。
     fn windows(&self) -> bool;
+    /// private な足し分 (claude-skills の `pjp-skills`) があるか。あれば見回り役を見て、足し分の案内も出す。
+    fn extras(&self) -> bool;
 }
 
 /// 本物の Runner。
@@ -166,6 +168,10 @@ impl Runner for SystemRunner {
 
     fn windows(&self) -> bool {
         cfg!(windows)
+    }
+
+    fn extras(&self) -> bool {
+        pjp_core::extras::shim().is_some()
     }
 }
 
@@ -194,7 +200,7 @@ pub fn run() -> u8 {
         lines.extend(template_lines(git, hub));
     }
     match &form {
-        Form::Hc => lines.extend(hc_lines(&SystemRunner, hub.as_ref(), hubd_bin_here())),
+        Form::Hc => lines.extend(hc_lines(&SystemRunner, hub.as_ref())),
         Form::T3 { thread } => {
             let home = paths::home_dir().unwrap_or_else(|_| PathBuf::from("/"));
             // リンクの期限と比べる今 (env PJP_NOW があればその時刻。試験用)
@@ -376,8 +382,8 @@ pub fn template_lines(git: &Git, hub: &Hub) -> Vec<Line> {
     lines
 }
 
-/// hc の行: この端末・label・見回り役・hc の machine。
-pub fn hc_lines(r: &dyn Runner, hub: Option<&Hub>, hubd_available: bool) -> Vec<Line> {
+/// hc の行: この端末・label・見回り役 (足し分があるときだけ)・hc の machine。
+pub fn hc_lines(r: &dyn Runner, hub: Option<&Hub>) -> Vec<Line> {
     let Some(hc) = r.which("hc") else {
         return vec![Line::new(
             Mark::Ng,
@@ -386,7 +392,9 @@ pub fn hc_lines(r: &dyn Runner, hub: Option<&Hub>, hubd_available: bool) -> Vec<
         )];
     };
     let mut lines = terminal_lines(r, &hc);
-    lines.push(hubd_line(r, &hc, hub, hubd_available));
+    if r.extras() {
+        lines.push(hubd_line(r, &hc, hub));
+    }
     lines.extend(machine_lines(r, &hc));
     lines
 }
@@ -445,12 +453,15 @@ fn terminal_lines(r: &dyn Runner, hc: &Path) -> Vec<Line> {
             ),
         )
     } else {
+        let why = if r.extras() {
+            "。見回り役は、状態を報告しない会話に Notion のコメントを届けない (spec §13 の #1)"
+        } else {
+            ""
+        };
         Line::new(
             Mark::Warn,
             LABEL,
-            format!(
-                "{term} は状態を報告していない (OSC 7501)。見回り役は、状態を報告しない会話に Notion のコメントを届けない (spec §13 の #1)"
-            ),
+            format!("{term} は状態を報告していない (OSC 7501){why}"),
         )
     };
     let mut labels: Vec<String> = v["labels"]
@@ -462,11 +473,12 @@ fn terminal_lines(r: &dyn Runner, hc: &Path) -> Vec<Line> {
         .collect();
     labels.sort();
     let label = if labels.is_empty() {
-        Line::new(
-            Mark::Skip,
-            "label",
-            "pjp.* はまだ無い (チケットを決めたら pjp mark name 'TKT-n <主題>' で付く)",
-        )
+        let how = if r.extras() {
+            "チケットを決めたら pjp mark name 'TKT-n <主題>' で付く"
+        } else {
+            "pjp mark name '<主題>' で付く"
+        };
+        Line::new(Mark::Skip, "label", format!("pjp.* はまだ無い ({how})"))
     } else {
         Line::new(Mark::Ok, "label", labels.join("・"))
     };
@@ -493,8 +505,8 @@ fn hubd_terminals(r: &dyn Runner, hc: &Path) -> std::result::Result<Vec<String>,
     Ok(local_live(&v))
 }
 
-/// 見回り役が動いているか。動いていなければ立てる (spec §8.1)。
-fn hubd_line(r: &dyn Runner, hc: &Path, hub: Option<&Hub>, hubd_available: bool) -> Line {
+/// 見回り役が動いているか (足し分があるときだけ見る。立てるのは足し分の側)。
+fn hubd_line(r: &dyn Runner, hc: &Path, hub: Option<&Hub>) -> Line {
     const LABEL: &str = "見回り役";
     match hubd_terminals(r, hc) {
         Err(e) => return Line::new(Mark::Warn, LABEL, e),
@@ -507,64 +519,20 @@ fn hubd_line(r: &dyn Runner, hc: &Path, hub: Option<&Hub>, hubd_available: bool)
         }
         Ok(_) => {}
     }
-    let hub = match hub {
-        None => return Line::new(Mark::Skip, LABEL, "ハブの外なので立てない"),
-        Some(h) if !h.hc => {
-            return Line::new(
-                Mark::Skip,
-                LABEL,
-                "旧 herdr のハブなので立てない (見回りは systemd の pjp-dev-tracker-inbox.service)",
-            );
-        }
-        Some(_) if !hubd_available => {
-            return Line::new(
-                Mark::Skip,
-                LABEL,
-                format!(
-                    "{HUBD_NAME} はまだ無い (spec §10 の W2-3 で入る)。それまで Notion のコメントはこの会話に届かない"
-                ),
-            );
-        }
-        Some(h) => h,
-    };
-    // ハブの main の checkout で立てる (Windows では、動いている process の cwd のディレクトリを消せない。会話の worktree で
-    // 立てると、その worktree を片付けられなくなる)
-    let root = hub.root.to_string_lossy();
-    let start = [
-        "run",
-        "--bg",
-        "--json",
-        "--no-parent",
-        "--name",
-        HUBD_NAME,
-        "--cwd",
-        root.as_ref(),
-        "--label",
-        HUBD_LABEL,
-        "--",
-        "pjp",
-        "--supervise",
-        "hubd",
-    ];
-    let started = r.run(&hc_cmd(hc, &start));
-    match hubd_terminals(r, hc) {
-        Ok(t) if !t.is_empty() => Line::new(
-            Mark::Ok,
+    match hub {
+        None => Line::new(Mark::Skip, LABEL, "ハブの外なので見ない"),
+        Some(h) if !h.hc => Line::new(
+            Mark::Skip,
             LABEL,
-            format!("{HUBD_NAME} を立てた ({})", t.join("・")),
+            "旧 herdr のハブなので見ない (見回りは systemd の pjp-dev-tracker-inbox.service)",
         ),
-        _ => {
-            let why = match started {
-                Ok(o) if !o.success() => first_line(&o.stderr).to_owned(),
-                Ok(_) => "立てた後の hc ls に出ない".to_owned(),
-                Err(e) => e.to_string(),
-            };
-            Line::new(
-                Mark::Ng,
-                LABEL,
-                format!("{HUBD_NAME} を立てられません: {why}"),
-            )
-        }
+        Some(_) => Line::new(
+            Mark::Skip,
+            LABEL,
+            format!(
+                "{HUBD_NAME} は動いていない (private な足し分が立てる。まだ無ければ、Notion のコメントはこの会話に届かない)"
+            ),
+        ),
     }
 }
 
@@ -604,13 +572,18 @@ fn machine_lines(r: &dyn Runner, hc: &Path) -> Vec<Line> {
         .iter()
         .any(|m| is_wsl(m) && m["temporary"].as_bool() != Some(true));
     if r.windows() && !has_wsl {
+        let ticket = if r.extras() {
+            "と、WSL で流す pjp ticket の command "
+        } else {
+            ""
+        };
         lines.push(Line::new(
             Mark::Warn,
             format!("{LABEL} (WSL)"),
             format!(
-                "手元の WSL の machine が無い (WSL でしか動かない子 (pjp child new --on wsl・--chrome) と、WSL で流す \
-                 pjp ticket の command に要る)。足すなら: {WSL_ADD} (ディストリビューションの名前は wsl.exe -l -v で見る。\
-                 名前は自由で、pjp child new --on wsl は名前によらず WSL の machine を選ぶ)"
+                "手元の WSL の machine が無い (WSL でしか動かない子 (pjp child new --on wsl・--chrome) {ticket}に要る)。\
+                 足すなら: {WSL_ADD} (ディストリビューションの名前は wsl.exe -l -v で見る。名前は自由で、pjp child new \
+                 --on wsl は名前によらず WSL の machine を選ぶ)"
             ),
         ));
     }
@@ -1076,25 +1049,6 @@ fn launch_arg_tokens(input: &str) -> Vec<String> {
     tokens
 }
 
-/// この crate の Cargo.toml の `[[bin]]` に見回り役 (`pjp-hubd`) があるか (spec の W2-3 で足す)。
-pub fn hubd_bin_here() -> bool {
-    // 作るときに埋め込む (Cargo.toml を直すと cargo が作り直すので、bin を足した版の exe だけが立てる)
-    manifest_has_bin(include_str!("../Cargo.toml"), HUBD_BIN)
-}
-
-/// Cargo.toml の `[[bin]]` に `name` があるか。
-pub fn manifest_has_bin(text: &str, name: &str) -> bool {
-    let Ok(table) = text.parse::<toml::Table>() else {
-        return false;
-    };
-    table
-        .get("bin")
-        .and_then(|b| b.as_array())
-        .into_iter()
-        .flatten()
-        .any(|b| b.get("name").and_then(|n| n.as_str()) == Some(name))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1108,11 +1062,11 @@ mod tests {
         hc: bool,
         /// Windows のハブか (既定は Linux)。
         windows: bool,
+        /// private な足し分 (pjp-skills) があるか (既定は無い)。
+        extras: bool,
         env: HashMap<String, String>,
         /// 引数 (空白でつないだもの) の頭 → 答え。
         answers: Vec<(String, Output)>,
-        /// 立てた後の hc ls の答え。
-        after_run: Option<Output>,
         seen: RefCell<Vec<String>>,
         /// 打った program (打った順)。
         programs: RefCell<Vec<String>>,
@@ -1159,17 +1113,10 @@ mod tests {
                 .map(|a| a.to_string_lossy().into_owned())
                 .collect();
             let line = args.join(" ");
-            let ran_before = self.ran("run ");
             self.seen.borrow_mut().push(line.clone());
             self.programs
                 .borrow_mut()
                 .push(cmd.program().to_string_lossy().into_owned());
-            if line.starts_with("ls ")
-                && ran_before
-                && let Some(after) = &self.after_run
-            {
-                return Ok(after.clone());
-            }
             Ok(self
                 .answers
                 .iter()
@@ -1183,6 +1130,10 @@ mod tests {
 
         fn windows(&self) -> bool {
             self.windows
+        }
+
+        fn extras(&self) -> bool {
+            self.extras
         }
     }
 
@@ -1224,7 +1175,7 @@ mod tests {
 
     #[test]
     fn without_hc_is_one_ng_line() {
-        let lines = hc_lines(&Fake::default(), Some(&hub(true)), true);
+        let lines = hc_lines(&Fake::default(), Some(&hub(true)));
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].mark, Mark::Ng);
         assert_eq!(lines[0].label, "hc");
@@ -1232,11 +1183,15 @@ mod tests {
 
     #[test]
     fn terminal_reports_state_and_labels() {
-        let f = base().with(
+        let f = Fake {
+            extras: true,
+            ..base()
+        }
+        .with(
             "ls ",
             ok(r#"{"terminals":[{"address":"t5","state":"live"}]}"#),
         );
-        let lines = hc_lines(&f, Some(&hub(true)), true);
+        let lines = hc_lines(&f, Some(&hub(true)));
         let term = by_label(&lines, "この端末");
         assert_eq!(term.mark, Mark::Ok);
         assert!(term.detail.contains("claude-code: working"), "{term}");
@@ -1259,36 +1214,61 @@ mod tests {
         .with("get t9", ok(r#"{"reported":false,"labels":{}}"#))
         .with("ls ", ok(r#"{"terminals":[]}"#))
         .with("machine ls", ok(r#"{"machines":[]}"#));
-        let lines = hc_lines(&f, Some(&hub(true)), false);
+        let lines = hc_lines(&f, Some(&hub(true)));
         let term = by_label(&lines, "この端末");
         assert_eq!(term.mark, Mark::Warn);
-        assert!(term.detail.contains("#1"), "{term}");
-        assert_eq!(by_label(&lines, "label").mark, Mark::Skip);
+        assert!(term.detail.contains("OSC 7501"), "{term}");
+        // 足し分が無ければ、Notion のコメントとチケットの ID を案内しない
+        assert!(!term.detail.contains("Notion"), "{term}");
+        let label = by_label(&lines, "label");
+        assert_eq!(label.mark, Mark::Skip);
+        assert!(label.detail.contains("pjp mark name '<主題>'"), "{label}");
+        assert!(!label.detail.contains("TKT-n"), "{label}");
         assert_eq!(by_label(&lines, "hc の machine").mark, Mark::Warn);
+        let with_extras = Fake { extras: true, ..f };
+        let lines = hc_lines(&with_extras, Some(&hub(true)));
+        assert!(by_label(&lines, "この端末").detail.contains("#1"));
+        assert!(by_label(&lines, "label").detail.contains("TKT-n"));
     }
 
     #[test]
     fn outside_an_hc_terminal_is_ng() {
         let f = Fake {
             hc: true,
+            extras: true,
             ..Fake::default()
         }
         .with("ls ", ok(r#"{"terminals":[]}"#))
         .with("machine ls", ok(r#"{"machines":[]}"#));
-        let lines = hc_lines(&f, None, true);
+        let lines = hc_lines(&f, None);
         assert_eq!(by_label(&lines, "この端末").mark, Mark::Ng);
         assert_eq!(by_label(&lines, "見回り役").mark, Mark::Skip);
     }
 
+    /// 見回り役の行は private な足し分があるときだけ。公開の道具は見回り役を立てない (動いているかだけを見る)
     #[test]
-    fn hubd_is_not_started_before_w2_3_or_for_the_old_hub() {
-        for (h, available, want) in [
-            (Some(hub(true)), false, "まだ無い"),
-            (Some(hub(false)), true, "旧 herdr"),
-            (None, true, "ハブの外"),
+    fn hubd_line_is_shown_only_with_extras_and_never_starts_it() {
+        let f = base().with(
+            "ls ",
+            ok(r#"{"terminals":[{"address":"t5","state":"live"}]}"#),
+        );
+        let lines = hc_lines(&f, Some(&hub(true)));
+        assert!(lines.iter().all(|l| l.label != "見回り役"), "{lines:?}");
+        assert!(
+            !f.ran(&format!("ls --json --label {HUBD_LABEL}")),
+            "見回り役を探した"
+        );
+        for (h, want) in [
+            (Some(hub(true)), "動いていない"),
+            (Some(hub(false)), "旧 herdr"),
+            (None, "ハブの外"),
         ] {
-            let f = base().with("ls ", ok(r#"{"terminals":[]}"#));
-            let lines = hc_lines(&f, h.as_ref(), available);
+            let f = Fake {
+                extras: true,
+                ..base()
+            }
+            .with("ls ", ok(r#"{"terminals":[]}"#));
+            let lines = hc_lines(&f, h.as_ref());
             let hubd = by_label(&lines, "見回り役");
             assert_eq!(hubd.mark, Mark::Skip, "{hubd}");
             assert!(hubd.detail.contains(want), "{hubd}");
@@ -1297,61 +1277,31 @@ mod tests {
     }
 
     #[test]
-    fn hubd_is_started_in_the_hub_root() {
-        let mut f = base()
-            .with("ls ", ok(r#"{"terminals":[]}"#))
-            .with("run ", ok(r#"{"address":"t7"}"#));
-        f.after_run = Some(ok(r#"{"terminals":[{"address":"t7","state":"live"}]}"#));
-        let lines = hc_lines(&f, Some(&hub(true)), true);
-        let hubd = by_label(&lines, "見回り役");
-        assert_eq!(hubd.mark, Mark::Ok, "{hubd}");
-        assert!(hubd.detail.contains("立てた (t7)"), "{hubd}");
-        let seen = f.seen.borrow();
-        let run = seen.iter().find(|s| s.starts_with("run ")).unwrap();
-        assert_eq!(
-            run,
-            "run --bg --json --no-parent --name pjp-hubd --cwd hub-root --label pjp.role=hubd -- pjp --supervise hubd"
-        );
-    }
-
-    #[test]
     fn hubd_of_another_machine_does_not_count() {
-        // hc ls は別のマシンの端末 (wsl1/t5) も出す。WSL のハブの見回り役があっても、このマシンには立てる
-        let mut f = base()
-            .with(
-                "ls ",
-                ok(r#"{"terminals":[{"address":"wsl1/t5","state":"live"}]}"#),
-            )
-            .with("run ", ok(r#"{"address":"t7"}"#));
-        f.after_run = Some(ok(
-            r#"{"terminals":[{"address":"wsl1/t5","state":"live"},{"address":"t7","state":"live"}]}"#,
-        ));
-        let lines = hc_lines(&f, Some(&hub(true)), true);
+        // hc ls は別のマシンの端末 (wsl1/t5) も出す。このマシンの見回り役ではない
+        let f = Fake {
+            extras: true,
+            ..base()
+        }
+        .with(
+            "ls ",
+            ok(r#"{"terminals":[{"address":"wsl1/t5","state":"live"}]}"#),
+        );
+        let lines = hc_lines(&f, Some(&hub(true)));
         let hubd = by_label(&lines, "見回り役");
-        assert_eq!(hubd.mark, Mark::Ok, "{hubd}");
-        assert_eq!(hubd.detail, "pjp-hubd を立てた (t7)");
-        assert!(f.ran("run "));
-    }
-
-    #[test]
-    fn hubd_start_failure_is_ng() {
-        let f = base()
-            .with("ls ", ok(r#"{"terminals":[]}"#))
-            .with("run ", failed("{\"error\":{\"kind\":\"usage\"}}"));
-        let lines = hc_lines(&f, Some(&hub(true)), true);
-        let hubd = by_label(&lines, "見回り役");
-        assert_eq!(hubd.mark, Mark::Ng, "{hubd}");
-        assert!(hubd.detail.contains("usage"), "{hubd}");
+        assert_eq!(hubd.mark, Mark::Skip, "{hubd}");
+        assert!(hubd.detail.contains("動いていない"), "{hubd}");
     }
 
     #[test]
     fn hc_failures_are_warnings() {
         let f = Fake {
             hc: true,
+            extras: true,
             env: HashMap::from([("HC_TERMINAL_ID".to_owned(), "t9".to_owned())]),
             ..Fake::default()
         };
-        let lines = hc_lines(&f, Some(&hub(true)), true);
+        let lines = hc_lines(&f, Some(&hub(true)));
         for label in ["この端末", "見回り役", "hc の machine"] {
             assert_eq!(by_label(&lines, label).mark, Mark::Warn, "{label}");
         }
@@ -1363,7 +1313,7 @@ mod tests {
             "machine ls",
             ok(r#"{"machines":[{"name":"host-a","state":"needs_login","why":"ssh"}]}"#),
         );
-        let lines = hc_lines(&f, Some(&hub(true)), false);
+        let lines = hc_lines(&f, Some(&hub(true)));
         let m = by_label(&lines, "hc の machine host-a");
         assert_eq!(m.mark, Mark::Warn);
         assert!(m.detail.contains("needs_login。ssh"), "{m}");
@@ -1393,11 +1343,29 @@ mod tests {
         }
         .with("ls ", ok(r#"{"terminals":[]}"#))
         .with("machine ls", ok(&list));
-        hc_lines(&f, Some(&hub(true)), false)
+        hc_lines(&f, Some(&hub(true)))
     }
 
     fn wsl_line(lines: &[Line]) -> Option<&Line> {
         lines.iter().find(|l| l.label == "hc の machine (WSL)")
+    }
+
+    /// WSL の machine の足し方の行が pjp ticket (足し分の道具) に触れるのは、足し分があるときだけ
+    #[test]
+    fn wsl_line_names_pjp_ticket_only_with_extras() {
+        for extras in [false, true] {
+            let f = Fake {
+                windows: true,
+                extras,
+                ..in_terminal()
+            }
+            .with("ls ", ok(r#"{"terminals":[]}"#))
+            .with("machine ls", ok(r#"{"machines":[]}"#));
+            let lines = hc_lines(&f, Some(&hub(true)));
+            let wsl = wsl_line(&lines).expect("WSL の行が無い");
+            assert_eq!(wsl.detail.contains("pjp ticket"), extras, "{wsl}");
+            assert!(wsl.detail.contains("--chrome) "), "{wsl}");
+        }
     }
 
     #[test]
@@ -2080,16 +2048,6 @@ mod tests {
         let f = launch_arg_flags(r#"--settings 'C:\x\"y' --append-system-prompt-file """#);
         assert_eq!(f.get("settings"), Some(&some(r#"C:\x\"y"#)));
         assert_eq!(f.get("append-system-prompt-file"), Some(&some("")));
-    }
-
-    #[test]
-    fn manifest_bins() {
-        let text = "[package]\nname = \"x\"\n[[bin]]\nname = \"pjp-hub\"\npath = \"src/main.rs\"\n";
-        assert!(manifest_has_bin(text, "pjp-hub"));
-        assert!(!manifest_has_bin(text, "pjp-hubd"));
-        assert!(!manifest_has_bin("not toml = =", "pjp-hub"));
-        // この crate には、まだ見回り役の bin が無い (W2-3 で足すと true になる)
-        assert!(!hubd_bin_here());
     }
 
     #[test]

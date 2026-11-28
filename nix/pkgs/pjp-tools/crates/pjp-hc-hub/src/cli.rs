@@ -195,12 +195,20 @@ fn parse_bake(args: &[OsString]) -> Result<Option<bake::Options>, String> {
         ids,
         out: out.into(),
         home: home.map(Into::into),
+        // 足し分があるかは bake_command で決める (引数の読みは env によらない)
+        wsl: false,
     }))
 }
 
 fn bake_command(args: &[OsString]) -> ExitCode {
     match parse_bake(args) {
-        Ok(Some(opts)) => exit::finish("pjp hub bake", bake::run(&opts)),
+        Ok(Some(opts)) => {
+            let opts = bake::Options {
+                wsl: pjp_core::extras::shim().is_some(),
+                ..opts
+            };
+            exit::finish("pjp hub bake", bake::run(&opts))
+        }
         Ok(None) => {
             print!("{USAGE}");
             ExitCode::SUCCESS
@@ -272,6 +280,7 @@ mod tests {
                 ids: vec!["r1".to_owned(), "r2".to_owned()],
                 out: "o".into(),
                 home: None,
+                wsl: false,
             })
         );
         assert_eq!(
@@ -281,6 +290,7 @@ mod tests {
                 ids: vec!["r1".to_owned()],
                 out: "o".into(),
                 home: Some("h".into()),
+                wsl: false,
             })
         );
         assert_eq!(parse_bake(&argv(&["--help"])).unwrap(), None);

@@ -277,17 +277,47 @@ fn stop_continues_once_with_context() {
     let ctx = v["hookSpecificOutput"]["additionalContext"]
         .as_str()
         .unwrap();
-    for want in [
-        "どちらにするか",
-        "pjp mark answered",
-        "pjp mark asking",
-        "pjp ticket wait",
-    ] {
+    for want in ["どちらにするか", "pjp mark answered", "pjp mark asking"] {
         assert!(ctx.contains(want), "{want}: {ctx}");
     }
+    // private な足し分 (pjp-skills) が無ければ、チケットの待ちの済ませ方 (pjp ticket wait) は添えない
+    assert!(!ctx.contains("pjp ticket"), "{ctx}");
     // block (hook のエラーとして出る) は使わない (spec §4.3・§14)
     assert!(v.get("decision").is_none(), "{v}");
     assert_eq!(err, "");
+}
+
+/// 足し分があるときだけ、prompt と stop の文にチケットの待ちの済ませ方 (pjp ticket wait … --done) を添える
+#[test]
+fn ticket_wait_is_added_only_with_extras() {
+    for (labels, input, args) in [
+        (
+            json!({"pjp.role": "hub", "pjp.asking": "どちらにするか"}),
+            prompt_input("A で"),
+            "prompt",
+        ),
+        (
+            json!({"pjp.role": "hub", "pjp.asked": "どちらにするか"}),
+            stop_input(false),
+            "stop",
+        ),
+    ] {
+        for extras in [false, true] {
+            let f = fake(with_labels(labels.clone()), Some(&input));
+            let f = if extras { f.with_extras() } else { f };
+            let (code, out, err) = hook(&f, &[args]);
+            assert_eq!(code, OK, "{err}");
+            let v = output_json(&out);
+            let ctx = v["hookSpecificOutput"]["additionalContext"]
+                .as_str()
+                .unwrap();
+            assert_eq!(
+                ctx.contains("pjp ticket wait TKT-n --done"),
+                extras,
+                "{args} extras={extras}: {ctx}"
+            );
+        }
+    }
 }
 
 #[test]

@@ -5,7 +5,8 @@
 //!
 //! 写しは `--out` のディレクトリに、panel の図と同じ名前で書く。panel に載せた SVG は書き換えず、写しは panel に載せない
 //! (panel の image は SVG の中の動きを描かない)。標準出力には、節ごとに書いた写しのパス・焼いた marks の数・チケットの図の
-//! キャプション (載せた日時の入った 1 行) を出す。ミニ絵 (markdown の節と Q&A の答えの絵の行 `![説明](<パス>)`) は marks を
+//! キャプション (載せた日時の入った 1 行) を出す。private な足し分 (claude-skills の `pjp-skills`) があるときだけ、写しの
+//! Windows のパスを WSL から見たパス (`wsl:` の行。WSL のハブの `ticket.sh figure` に渡す) も添える。ミニ絵 (markdown の節と Q&A の答えの絵の行 `![説明](<パス>)`) は marks を
 //! 持たないので、図のパスを渡すと焼かずに写し、付けた項目の見出しと説明からキャプションを作る。
 //!
 //! marks の形と既定値は mod (dotfiles の `win/herdr-app/mods/pjp-hub-panel/main.js` の `mark()`) に合わせる:
@@ -68,6 +69,8 @@ pub struct Options {
     pub out: PathBuf,
     /// herdr-app の home。省くと [`herdr_app_home`]。
     pub home: Option<PathBuf>,
+    /// 写しの WSL から見たパス (`wsl:` の行) を添えるか (private な足し分があるときだけ。cli が [`pjp_core::extras`] で決める)。
+    pub wsl: bool,
 }
 
 /// herdr-app の home: `HERDR_APP_HOME` → `<XDG_CONFIG_HOME>/herdr-app` → `~/.config/herdr-app` (`references/panel.md` の
@@ -147,6 +150,7 @@ pub fn run(opts: &Options) -> Result<u8> {
         home: &home,
         out_dir: &out_dir,
         now: &now,
+        wsl: opts.wsl,
     };
     for id in &opts.ids {
         match bake_target(id, sections, &to, &mut names) {
@@ -165,6 +169,8 @@ struct Target<'a> {
     home: &'a Path,
     out_dir: &'a Path,
     now: &'a JstDateTime,
+    /// `wsl:` の行を添えるか ([`Options::wsl`])。
+    wsl: bool,
 }
 
 fn read_text(path: &Path) -> Result<String> {
@@ -259,7 +265,9 @@ fn bake_target(
             "  caption: {}",
             mini_caption(heading.as_deref(), &alt, to.now)
         );
-        push_wsl(&mut report, &out);
+        if to.wsl {
+            push_wsl(&mut report, &out);
+        }
         return Ok(report);
     }
     let section = sections
@@ -299,7 +307,9 @@ fn bake_image(
         baked.summary()
     );
     let _ = writeln!(report, "  caption: {}", caption(section, src, to.now));
-    push_wsl(&mut report, &out);
+    if to.wsl {
+        push_wsl(&mut report, &out);
+    }
     for n in &baked.notes {
         let _ = writeln!(report, "  note: {n}");
     }

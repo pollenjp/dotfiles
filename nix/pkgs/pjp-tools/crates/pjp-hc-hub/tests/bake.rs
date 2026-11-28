@@ -130,10 +130,25 @@ fn templates_are_baked_like_the_goldens() {
     ] {
         assert!(so.contains(&want), "{want}\n---\n{so}");
     }
-    // Windows のドライブのパスにだけ、WSL から見たパスを添える
-    assert_eq!(so.contains("  wsl: /mnt/"), cfg!(windows), "{so}");
+    // private な足し分 (pjp-skills) が無ければ、WSL から見たパス (WSL のハブの ticket.sh figure に渡すもの) を添えない
+    assert!(!so.contains("  wsl: "), "{so}");
     assert!(!so.contains("!!"), "{so}");
     assert_eq!(stderr(&out), "");
+}
+
+#[test]
+fn wsl_paths_are_added_only_with_extras() {
+    let t = T::new("wsl-extras");
+    t.sb.put_extras();
+    let out = t.bake(&["act", "TKT-n/mini-flow.svg"], &t.out, &[]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let so = stdout(&out);
+    // Windows のドライブのパスにだけ、WSL から見たパスを添える (節とミニ絵の両方)
+    assert_eq!(
+        so.matches("  wsl: /mnt/").count(),
+        if cfg!(windows) { 2 } else { 0 },
+        "{so}"
+    );
 }
 
 #[test]

@@ -177,7 +177,11 @@ fn prompt(r: &dyn Runner, input: &Value, out: &mut dyn Write, note: &mut dyn FnM
         note(&format!("{e}。答え待ちの印は今のまま"));
         return;
     }
-    emit(out, "UserPromptSubmit", &prompt_context(summary));
+    emit(
+        out,
+        "UserPromptSubmit",
+        &prompt_context(summary, r.extras()),
+    );
 }
 
 /// ターンの終わり: pjp.asked が残っていれば、1 回目は文脈を返して続けさせ、2 回目は外して終える。
@@ -195,25 +199,38 @@ fn stop(r: &dyn Runner, input: &Value, out: &mut dyn Write, note: &mut dyn FnMut
         }
         return;
     }
-    emit(out, "Stop", &stop_context(summary));
+    emit(out, "Stop", &stop_context(summary, r.extras()));
 }
 
-fn prompt_context(summary: &str) -> String {
+/// private な足し分 (Dev Tracker) があるときに添える、チケットの待ちの済ませ方 (頭の「。」は前の文との区切り)。
+const TICKET_WAIT: &str = "。チケットに 👤 回答 を出していれば pjp ticket wait TKT-n --done も";
+
+fn prompt_context(summary: &str, extras: bool) -> String {
+    let ticket = if extras { TICKET_WAIT } else { "" };
     format!(
         "pjp mark hook prompt: ユーザーの発言が届いたので、答え待ちの印 (❓。label {LABEL_ASKING}) を外し、問いの要旨を label \
          {LABEL_ASKED} に移した。問い: {summary}。この問いが済んだら pjp mark answered を、まだ答えを待つ問い (答えていない問い・\
-         新しい問い) を出してターンを終えるなら pjp mark asking '<その要旨>' を打つ (どちらも {LABEL_ASKED} を外す。チケットに \
-         👤 回答 を出していれば pjp ticket wait TKT-n --done も)。どちらも打たずにターンを終えると、Stop の hook \
-         (pjp mark hook stop) が 1 回だけターンを続けさせて確かめさせる。"
+         新しい問い) を出してターンを終えるなら pjp mark asking '<その要旨>' を打つ (どちらも {LABEL_ASKED} を外す{ticket})。\
+         どちらも打たずにターンを終えると、Stop の hook (pjp mark hook stop) が 1 回だけターンを続けさせて確かめさせる。"
     )
 }
 
-fn stop_context(summary: &str) -> String {
+fn stop_context(summary: &str, extras: bool) -> String {
+    let ticket = if extras {
+        TICKET_WAIT.trim_start_matches('。')
+    } else {
+        ""
+    };
+    let ticket = if ticket.is_empty() {
+        String::new()
+    } else {
+        format!(" ({ticket})")
+    };
     format!(
         "pjp mark hook stop: ユーザーの発言が届いたときに答え待ちの印 (❓) を外し、問いの要旨を label {LABEL_ASKED} に残して\
          いる。問い: {summary}。ターンを終える前に、問いが済んだなら pjp mark answered を、まだ答えを待つ問い (答えていない問い・\
-         新しい問い) があるなら pjp mark asking '<その要旨>' を打つ (チケットに 👤 回答 を出していれば pjp ticket wait TKT-n \
-         --done も)。どちらも打たずに終えれば、この hook は {LABEL_ASKED} を外し、もう続けさせない。"
+         新しい問い) があるなら pjp mark asking '<その要旨>' を打つ{ticket}。どちらも打たずに終えれば、この hook は \
+         {LABEL_ASKED} を外し、もう続けさせない。"
     )
 }
 

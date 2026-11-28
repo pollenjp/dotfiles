@@ -138,6 +138,8 @@ pub struct Fake {
     stdin: Option<Vec<u8>>,
     /// `random_u128` が次に返す値 (1 から 1 つずつ進む。id を決まった値にする)。
     ids: Cell<u128>,
+    /// private な足し分 (pjp-skills) があるか (既定は無い。[`Fake::with_extras`])。
+    extras: bool,
     dir: TempDir,
 }
 
@@ -160,8 +162,15 @@ impl Fake {
             slept: RefCell::default(),
             stdin: None,
             ids: Cell::new(1),
+            extras: false,
             dir,
         }
+    }
+
+    /// private な足し分 (pjp-skills) があることにする。
+    pub fn with_extras(mut self) -> Self {
+        self.extras = true;
+        self
     }
 
     /// その program を PATH に無いことにする。
@@ -280,6 +289,10 @@ impl Runner for Fake {
         let n = self.ids.get();
         self.ids.set(n + 1);
         n
+    }
+
+    fn extras(&self) -> bool {
+        self.extras
     }
 }
 

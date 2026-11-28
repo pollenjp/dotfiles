@@ -45,6 +45,8 @@ pub trait Runner {
     fn random_u128(&self) -> u128 {
         random_u128()
     }
+    /// private な足し分 (claude-skills の `pjp-skills`。[`pjp_core::extras`]) があるか。あれば足し分の案内 (pjp ticket など) も出す。
+    fn extras(&self) -> bool;
 }
 
 /// 128 bit の乱数 (std の `RandomState` の鍵は OS の乱数で決まり、作るたびに進む。今の時刻も混ぜる)。暗号には使わない
@@ -114,6 +116,10 @@ impl Runner for SystemRunner {
             .read_to_end(&mut bytes)
             .map_err(|e| Error::io("stdin を読めません", &e))?;
         Ok(Some(bytes))
+    }
+
+    fn extras(&self) -> bool {
+        pjp_core::extras::shim().is_some()
     }
 }
 

@@ -62,8 +62,9 @@ pjp mark — 会話の端末の label の印と、会話の space の名前 (旧
                                                             ターンを続けさせ、answered か asking を打たせる (2 回目は外す)
 
 端末を省くとこの端末 ($HC_TERMINAL_ID)。--checkout はこのマシンの端末のうち、cwd がそのパスの下のもの全部。
-名前は 'TKT-n <主題>' (ハブ) の形。印 (❓・🌱・🌳・🔄・👀・🗑️・🎬) で始めない。子の端末・repo の checkout・repo の外の space の
-名前は替えない (子の名前は親が付け、checkout の space はほかの会話も使う)。済んだ印は worktree の会話にだけ付ける。
+名前は '<主題>' (ハブ。チケットがあれば 'TKT-n <主題>' と ID を頭に) の形。印 (❓・🌱・🌳・🔄・👀・🗑️・🎬) で始めない。
+子の端末・repo の checkout・repo の外の space の名前は替えない (子の名前は親が付け、checkout の space はほかの会話も使う)。
+済んだ印は worktree の会話にだけ付ける。
 space の名前は、herdr-app があれば herdr-app do space.rename で替える。herdr-app の無いマシン (Linux のハブ) では、このマシンの
 hc の doc herdr-app (herdr-app が space を置く) の、この端末の herdr.space の space の name だけを書き替え (hc connect の doc.get・
 doc.set。版が合わなければ読み直して打ち直す)、herdr-app がそれを読んで描き直す。doc か space が無い・hc が答えないときは note を
@@ -145,7 +146,7 @@ fn run(r: &dyn Runner, args: &[String], out: &mut dyn Write, err: &mut dyn Write
         "name" => {
             let [name] = p.positionals.as_slice() else {
                 return Err(Error::config(
-                    "名前を 1 つ渡す (pjp mark name 'TKT-n <主題>')",
+                    "名前を 1 つ渡す (pjp mark name '<主題>'。チケットがあれば 'TKT-n <主題>')",
                 ));
             };
             name_cmd(r, &hc, name, out, err)
