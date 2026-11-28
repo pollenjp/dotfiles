@@ -24,6 +24,7 @@ pub mod report;
 pub mod runner;
 pub mod steps;
 pub mod token;
+pub mod token_audit;
 
 #[cfg(test)]
 mod testutil;

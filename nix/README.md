@@ -5025,7 +5025,8 @@ cp -Rpn ~/.claude-work/projects/. ~/.claude/projects/ && rm -rf ~/.claude-work/p
 
 `claude setup-token` の token（1 年有効）を、どのホストのどのアカウント（と素の `claude`）に置いたかを、ホストの設定に宣言する。値は書かない。
 宣言は、素の `claude` を token で起こすスイッチ（`default`）と、月ごとの棚卸し（`claude-account audit`）の元になる。設計は dotfiles-private の
-ADR 123（`docs/adr/123_claude_token_watch_*`）。
+ADR 123（`docs/adr/123_claude_token_watch_*`）。Windows のホストは dotfiles-private の `win/hosts/` の toml に同じ形で書く
+（`win/README.md` の「[claude の token の置き場の宣言 ([claude.tokens])](../win/README.md#claude-の-token-の置き場の宣言-claudetokens)」）。
 
 ```nix
 # dotfiles-private の nix/hosts/<user>@<hostname>.nix の mkHome の引数

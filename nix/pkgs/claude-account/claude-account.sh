@@ -130,7 +130,7 @@ token_help() {
     "    bash -c 'umask 077 && mkdir -p ~/.config/claude-accounts && read -rsp \"token: \" t && echo && printf \"CLAUDE_CODE_OAUTH_TOKEN=%s\\n\" \"\$t\" > ~/.config/claude-accounts/${n}.env && unset t && chmod 600 ~/.config/claude-accounts/${n}.env && echo 置いた'" \
     "    (dotfiles を新しくしたら claude-account add ${n} --mode token を打つ。置いたファイルはそのまま使う)" \
     "  置けたかは、そのマシンで claude-account check ${n} (0 なら使える。値は出さない)" \
-    "  置いたホストは、そのホストの宣言 (dotfiles.claude.tokens.${n}。同じ token なら同じ呼び名) にも書く (claude-account audit が並べる)" \
+    "  置いたホストは、そのホストの宣言 (Linux は dotfiles.claude.tokens.${n}、Windows は [claude.tokens.${n}]。同じ token なら同じ呼び名) にも書く (claude-account audit が並べる)" \
     "" \
     "token の値:" \
     "  1Password のアプリで token の項目を開いて値をコピーし、set-token の入力に貼る。まだ無ければ、自分の端末で" \
