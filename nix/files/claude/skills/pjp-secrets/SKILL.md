@@ -5,7 +5,8 @@ description: >-
   .env・設定ファイル・CI・cron・systemd に認証情報を書くとき、ユーザーにパスワードや token を設定・入力して
   もらいたくなったとき、ユーザーが会話に値を貼ったとき、.env の中身を確かめたくなったとき、平文のシークレットを
   repo・ファイル・ログで見つけたとき、op (1Password CLI) の run・read・inject・item create・item get・item list・item delete を打とうとしたとき、
-  1Password の参照 (op://…) をもらった・.env の参照を ID の形に直したいとき、エージェントが作った 1Password の項目を一覧したいときに使う
+  1Password の参照 (op://…) をもらった・.env の参照を ID の形に直したいとき、エージェントが作った 1Password の項目を一覧したいとき、
+  1Password に項目を作るとき (項目の種類 (category) の API 認証情報・パスワードなどを選ぶとき・種類を誤って作り直すときも) に使う
 ---
 
 # pjp-secrets
@@ -51,17 +52,28 @@ ADR 112 (`docs/adr/112_notion_api_token_local_*`。Windows は ADR 114)。
 ## 新しくシークレットが要るとき
 
 1. program が読む環境変数の名前を決める (program は環境変数を読むだけで、op を呼ばない)
-2. ユーザーに 1Password のアプリで項目を作り、値をアプリに直に入れてもらう。外のサービスが発行する値 (API キーなど) はこれ。
+2. ユーザーに 1Password のアプリで項目を作り、値をアプリに直に入れてもらう。外のサービスが発行する値 (API キーなど) はこれ
+   (Claude が値の空の器を API 認証情報で作り、ユーザーがアプリで値だけを入れる形でもよい。下の雛形)。
+   アプリで作ってもらうときも、種類 (「API 認証情報」「パスワード」など) を中身に合わせて伝える (下の「項目の種類の選び方」)。
    cron などで無人で動かす見込みがあれば、最初から専用の vault に作ってもらう (下の「人が承認できない処理」)。
    用が済んだら消す項目は、題の頭に `🚧 ` を付ける (下の「一時的な項目」)。
-   Claude が生んでよい値 (ローカルの DB のパスワードなど) は、どの vault にどの題で作るかを伝えてから、1Password の中で生む。
-   エージェントが op で作る項目なので、題の頭に `🤖 ` (一時的なら `🤖🚧 `) を付け、タグ `ai-agent` を付ける (下の「エージェントが作る項目」):
-   `printf '%s' '{"title":"🤖 <名前>","category":"PASSWORD"}' | op --reason "<理由>" item create --vault "<vault>" --tags ai-agent - --generate-password=letters,digits,32 >/dev/null`
+   Claude が op で項目を作るときは、どの vault にどの題で作るかを伝えてから作る。エージェントが op で作る項目なので、題の頭に
+   `🤖 ` (一時的なら `🤖🚧 `) を付け、タグ `ai-agent` を付ける (下の「エージェントが作る項目」)。**項目の種類 (category) は
+   中身で選ぶ** (下の「項目の種類の選び方」)。種類は作った後に変えられない:
+   - 外のサービスが発行した API キー・token (Notion の API キー・`claude setup-token` の token・Tailscale の auth key・GitHub の PAT
+     など): API 認証情報 (`API_CREDENTIAL`。欄は `credential`)。値は空の器で作り、ユーザーがアプリで値を入れる。メモ (`notesPlain`) に、
+     何の値か・どこへ入れるか・回し方を書く:
+     `printf '%s' '{"title":"🤖 <名前>","category":"API_CREDENTIAL","fields":[{"id":"credential","type":"CONCEALED","label":"credential","value":""},{"id":"notesPlain","type":"STRING","purpose":"NOTES","label":"notesPlain","value":"<何の値か・どこへ入れるか・回し方>"}]}' | op --reason "<理由>" item create --vault "<vault>" --tags ai-agent - >/dev/null`
+   - Claude が生んでよいパスワード (ローカルの DB のパスワードなど): パスワード (`PASSWORD`。欄は `password`)。1Password の中で生む:
+     `printf '%s' '{"title":"🤖 <名前>","category":"PASSWORD"}' | op --reason "<理由>" item create --vault "<vault>" --tags ai-agent - --generate-password=letters,digits,32 >/dev/null`
+
    (op は stdin が端末でないとそこから項目のテンプレートを読むので、Claude の Bash では最小の JSON を流して `-` を付ける。
    `</dev/null` だと「invalid JSON in piped input」で、承認の後に落ちる。出力は捨てる。op が wrapper の op-reason でない
    マシン (素の op) では `--reason` を外す)
 3. 参照だけをもらう。アプリの欄のメニュー「Copy Secret Reference」で取れる (`op://Private/kabu-station/password` のような
-   名前の形。名前に使えない文字のある部分だけが ID になる)
+   名前の形。名前に使えない文字のある部分だけが ID になる)。参照の最後の欄は種類で変わる (API 認証情報は `credential`、
+   パスワードは `password`)。Claude が作った項目の参照を自分で書いて pjp-op-ref に渡すときも、欄を作った種類に合わせる
+   (`op://<vault>/🤖 <名前>/credential`)
 4. 参照を ID の形に直す: `pjp-op-ref --reason "<何のために読むか>" "<参照>" ["<参照>"…]`。ID の参照を渡した順に 1 行ずつ出す
    (値は出さない。op の出力から ID だけを抜き出す)。ID にするわけ:
    - 名前は 1Password のアプリで変えられ、変えると名前の参照は切れる (`.env` を直すまで program が起きない)。項目の ID が変わるのは、
@@ -121,6 +133,24 @@ ADR 112 (`docs/adr/112_notion_api_token_local_*`。Windows は ADR 114)。
   pjp-op-ref に通して ID の形にする (pjp-op-ref が無いマシンでは、ユーザーに Copy Secret Reference で参照をもらう)
 - 一時的のつもりがずっと使うことになったら、🚧 だけを外して `🤖 <名前>` にする (タグ `ai-agent` は残す)
 - 一覧: `op --reason "<理由>" item list --tags ai-agent` (下の「値を見ずに確かめる」)。アプリなら左の「タグ」から ai-agent
+
+## 項目の種類の選び方 (category)
+
+1Password の項目には種類 (category) があり、種類で欄の形 (参照の最後の欄の名前)・アプリの一覧のアイコン・検索の絞り込みが決まる。
+**種類は作った後に変えられない** (アプリでも CLI でも)。作る前に中身で選ぶ。
+
+| 中身 | 種類 (`category`) | 値の欄 | 作り方 |
+| --- | --- | --- | --- |
+| 外のサービスが発行した API キー・token (Notion の API キー・`claude setup-token` の token・Tailscale の auth key・GitHub の PAT など) | API 認証情報 (`API_CREDENTIAL`) | `credential` | 値は空の器で作り、ユーザーがアプリで値を入れる。メモ (`notesPlain`) に何の値か・どこへ入れるか・回し方 |
+| Claude が生んでよいパスワード (ローカルの DB のパスワードなど) | パスワード (`PASSWORD`) | `password` | `--generate-password` で 1Password の中で生む |
+| ほか (ログイン・SSH 鍵・データベース・セキュアノートなど) | `op item template list` で名前を見て、中身に合うもの | 種類による (`op item template get <種類>` で欄を見る。テンプレートは値を持たない) | 上の 2 つに当たらなければ、作る前に種類と欄をユーザーに伝える |
+
+- 「新しくシークレットが要るとき」の 2 の雛形は 2 つある。外のサービスの token を PASSWORD の雛形で作らない (一覧とアイコンで
+  何の値か分からなくなり、欄も `password` になる)
+- 参照の最後の欄は種類で変わる。`.env` に書く参照・pjp-op-ref に渡す参照の欄を、作った種類に合わせる
+- 種類を誤ったら: 正しい種類で作り直し (値はユーザーがアプリで入れ直す)、`.env` などの参照を新しい項目の ID の参照に替える。
+  古い項目は、ユーザーに聞いてから、アーカイブ (`op --reason "<理由>" item delete <項目の ID> --vault <vault> --archive`。アプリの
+  アーカイブから戻せる) か消す (素の op のマシンでは `--reason` を外す)
 
 ## 既にある `.env` の名前の参照を ID に直す
 
@@ -229,6 +259,7 @@ ADR 112 (`docs/adr/112_notion_api_token_local_*`。Windows は ADR 114)。
 | 「Copy Secret Reference の参照をそのまま書けば動く」 | 今は動くが、vault・項目・セクション・欄の名前を変えると切れる。pjp-op-ref で ID の形にしてから書く |
 | 「タグ `ai-agent` があれば、題の 🤖 は要らない」 | アプリの一覧で目に入るのは題で、タグは絞ったときにしか見えない。題の 🤖 は一覧で見分ける印、タグは一覧に絞る道で、役目が違う |
 | 「ユーザーに作ってもらった項目や、edit で直した項目にも 🤖 を付ければ揃う」 | 🤖 とタグ `ai-agent` は、エージェントが `op item create` で作った印。人が作った項目に付けると、一覧で誰が作ったかが分からなくなる |
+| 「雛形が PASSWORD なので、token も PASSWORD で作ればよい」 | 種類は後から変えられず、一覧とアイコンで何の値か分からなくなる。外のサービスが発行した token は API 認証情報 (`API_CREDENTIAL`) で作る。誤れば作り直しと参照の付け替えが要る |
 | 「`op item get --format json \| jq` で ID を見れば足りる」 | 出力は隠す欄の値も含みうる。jq の書き方を誤ると値が端末に出る (jq の型の誤りの文にも値が入る)。pjp-op-ref は ID と件数だけを抜き出し、テストで守られている |
 
 ## 赤信号 (止まって、この skill の手順に戻る)
@@ -244,4 +275,5 @@ ADR 112 (`docs/adr/112_notion_api_token_local_*`。Windows は ADR 114)。
 - `.env` に触れる `git diff`・`git show`・`git log -p`、`.env.local` などほかの env のファイルを Read で開く
 - 値を crontab・unit・script・引数に書こうとした
 - ユーザーの答えを待たずに 1Password の項目を消そうとした (`op item delete`)
+- 外のサービスの token (API キー・auth key・PAT など) の器を `"category":"PASSWORD"` で作ろうとした (API 認証情報で作る)
 - `op item create` の題の頭の `🤖 ` か `--tags ai-agent` を落とした・ユーザーが作った項目や既にある項目に `op item edit` で 🤖 やタグを足そうとした
