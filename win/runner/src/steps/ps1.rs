@@ -18,7 +18,10 @@
 //! 写し (`sshd_allow`。ホストの値の `[sshd] allowUsers`・`allowFrom`) を置く。
 //!
 //! Windows にしか無い手順 (winget・t3-code・claude-desktop・ghq・fzf・starship・codex。`windows_only`) は WSL の wrapper を持たないので、判断は同じ型の Policy で
-//! 決め、ps1 の締めの行の文言と出力の印は試験が ps1 の字と突き合わせる。
+//! 決め、ps1 の締めの行の文言と出力の印は試験が ps1 の字と突き合わせる。winget の portable の道具 (ntn・ghq・fzf・starship) の ps1 は、締めの行と見張りの行を
+//! 共通の枠 (`win/winget/WingetPortable.ps1`) が組むので、試験は枠の字に道具の表の値を入れてから突き合わせる。枠は、昇格した会話 (winget 1.30 以降) では
+//! winget を打たずに止まり、入っていなくても 1 を返す (締めの行は「→ ※ の手順で直す」だけ)。その印 ([`elevated_fix!`]) で直し方を出す
+//! (dotfiles-private の docs/adr/122_win_winget_portable_frame_*)。
 //!
 //! ps1 の締めの行の文言 (「→ Install-Ntn で揃える」など) を変えるときは、ここも直す (WSL の wrapper と同じ約束)。
 
@@ -178,6 +181,23 @@ pub const ONE_PASSWORD_INSTALLED: &str = "1Password の鍵は、1Password の SS
 
 /// 1Password を使わないホストで、ps1 に渡す引数と、手で打つ直し方のコマンドに添える字
 const NO_ONE_PASSWORD: &str = " -NoOnePassword";
+
+/// winget の portable の道具 (共通の枠 `win/winget/WingetPortable.ps1`) が、昇格した会話で winget を打たずに止めたときの出力の印と直し方
+/// (`output_fixes` の 1 組)。winget 1.30 は、昇格した会話から user スコープの portable を入れる・外すのを `0x8A15007D` で断る。`$name` は道具の表の
+/// Name (印の字)、`$id` は手順の id
+macro_rules! elevated_fix {
+    ($name:literal, $id:literal) => {
+        (
+            concat!("昇格した PowerShell では winget が ", $name, " を入れない"),
+            concat!(
+                "winget 1.30 は、昇格した会話 (UAC で昇格した PowerShell・管理者として実行した端末) から user スコープの portable を入れる・外すのを断る。",
+                "昇格していない PowerShell (デスクトップの普通の端末) で dotfiles apply --steps ",
+                $id,
+                " を流し直す (win/README.md の「winget の portable の道具」)"
+            ),
+        )
+    };
+}
 
 pub const SPECS: &[Ps1Spec] = &[
     // winget 自身 (アプリ インストーラー。Windows にしか無い手順。WSL の setup には無い)。dotfiles の Windows の道具は winget 1.30 以降を前提に
@@ -581,7 +601,7 @@ pub const SPECS: &[Ps1Spec] = &[
         sshd_keys: false,
         one_password: false,
         missing_blocked: None,
-        output_fixes: &[],
+        output_fixes: &[elevated_fix!("ntn", "ntn")],
         install_notice: None,
         sync_notice: None,
         check_hang: None,
@@ -865,7 +885,7 @@ pub const SPECS: &[Ps1Spec] = &[
         sshd_keys: false,
         one_password: false,
         missing_blocked: None,
-        output_fixes: &[],
+        output_fixes: &[elevated_fix!("ghq", "ghq")],
         install_notice: None,
         sync_notice: None,
         check_hang: None,
@@ -904,10 +924,13 @@ pub const SPECS: &[Ps1Spec] = &[
         sshd_keys: false,
         one_password: false,
         missing_blocked: None,
-        output_fixes: &[(
-            "MSI の fzf (machine スコープ) が入っている",
-            "MSI の fzf (winget の既定の installer) が入っているので、portable を入れない。PowerShell で winget uninstall --id junegunn.fzf --exact --scope machine を打って外し (UAC の確認が出る)、dotfiles apply --steps fzf を流し直す (win/README.md の「ghq・fzf」)",
-        )],
+        output_fixes: &[
+            (
+                "MSI の fzf (machine スコープ) が入っている",
+                "MSI の fzf (winget の既定の installer) が入っているので、portable を入れない。PowerShell で winget uninstall --id junegunn.fzf --exact --scope machine を打って外し (UAC の確認が出る)、dotfiles apply --steps fzf を流し直す (win/README.md の「ghq・fzf」)",
+            ),
+            elevated_fix!("fzf", "fzf"),
+        ],
         install_notice: None,
         sync_notice: None,
         check_hang: None,
@@ -950,10 +973,13 @@ pub const SPECS: &[Ps1Spec] = &[
         sshd_keys: false,
         one_password: false,
         missing_blocked: None,
-        output_fixes: &[(
-            "MSI の starship (machine スコープ) が入っている",
-            "MSI の starship (winget の既定の installer) が入っているので、portable を入れない。PowerShell で winget uninstall --id Starship.Starship --exact --scope machine を打って外し (UAC の確認が出る)、続けて dotfiles apply --steps starship を流す (win/README.md の「starship」)",
-        )],
+        output_fixes: &[
+            (
+                "MSI の starship (machine スコープ) が入っている",
+                "MSI の starship (winget の既定の installer) が入っているので、portable を入れない。PowerShell で winget uninstall --id Starship.Starship --exact --scope machine を打って外し (UAC の確認が出る)、続けて dotfiles apply --steps starship を流す (win/README.md の「starship」)",
+            ),
+            elevated_fix!("starship", "starship"),
+        ],
         install_notice: None,
         sync_notice: None,
         check_hang: None,
@@ -2252,6 +2278,57 @@ mod tests {
         }
     }
 
+    /// winget の portable の道具 (共通の枠): 昇格した会話 (winget 1.30 以降) では、ps1 は winget を打たずに 1 を返し (入っていなくても)、締めの行は
+    /// 昇格の 1 行 (「→ ※ の手順で直す」) だけになる。runner は入れにいかず、印を見出しにして、昇格していない PowerShell で流し直す手を出す
+    #[test]
+    fn portable_tools_report_an_elevated_session_without_installing() {
+        for (id, name, command) in [
+            ("ntn", "ntn", "Install-Ntn"),
+            ("ghq", "ghq", "Install-Ghq"),
+            ("fzf", "fzf", "Install-Fzf"),
+            ("starship", "starship", "Install-Starship"),
+        ] {
+            let s = spec(id);
+            let elevated = (
+                1,
+                vec![
+                    header_line(s),
+                    "  入っている版    : 入っていない".into(),
+                    format!(
+                        "⚠ 昇格した PowerShell では winget が {name} を入れない (winget 1.30.310 は、昇格した会話から user スコープの portable を入れる・外すのを断る)。{command} は winget を打たない"
+                    ),
+                    format!(
+                        "※ 昇格していない PowerShell (デスクトップの普通の端末) で {command} を打ち直す (win/README.md の「winget の portable の道具」)"
+                    ),
+                    format!(
+                        "⚠️ 昇格した PowerShell では winget が {name} を入れない (winget 1.30 から) → ※ の手順で直す ⚠️"
+                    ),
+                ],
+            );
+            for mode in [Mode::Check, APPLY] {
+                let sys1 = sys(elevated.clone(), (0, vec![]));
+                let (o, _, calls) = run(id, &sys1, mode);
+                assert_eq!(o.len(), 1, "{id}: {o:?}");
+                assert_eq!(o[0].kind, Kind::Manual, "{id}");
+                assert_eq!(
+                    o[0].text,
+                    format!(
+                        "昇格した PowerShell では winget が {name} を入れない ({command} -Check の ※ の行。runner は直さない)"
+                    )
+                );
+                assert_eq!(ends(&calls), vec!["-Check"], "{id}");
+                assert_eq!(o[0].notes.len(), 1, "{id}");
+                assert!(
+                    o[0].notes[0].contains(&format!(
+                        "昇格していない PowerShell (デスクトップの普通の端末) で dotfiles apply --steps {id} を流し直す"
+                    )),
+                    "{id}: {:?}",
+                    o[0].notes
+                );
+            }
+        }
+    }
+
     /// codex: 道具の switch (windowsCodex) で on/off の Windows にしか無い手順。fzf と同じく 3 は -IfMissing で入れ、「→ Install-Codex で揃える」
     /// (版・pin のずれと、codex と打てる形が無い形・同梱の rg の置き場所が PATH に無い形) なら引数なしで揃え、PATH のずれだけなら知らせる。
     /// ps1 は winget を昇格せずに打つので、UAC は知らせない。winget を打てない (昇格した会話で winget が 1.30 以降・開発者モードが off で winget が
@@ -2508,10 +2585,47 @@ mod tests {
         );
     }
 
-    /// Windows にしか無い手順の ps1 は、runner が読む締めの行の文言と出力の印を、コメントでない行に持つ (WSL の wrapper との突き合わせの
-    /// 代わり。文言を変えたら両方を直す)
+    /// 入口の ps1 の表の `<key> = '<値>'` の値 (winget の portable の道具の表の Name・Command)。無ければ止める
+    fn table_value(text: &str, key: &str) -> String {
+        text.lines()
+            .find_map(|l| {
+                let rest = l.trim().strip_prefix(key)?;
+                let value = rest.trim_start().strip_prefix('=')?.trim();
+                Some(value.strip_prefix('\'')?.strip_suffix('\'')?.to_string())
+            })
+            .unwrap_or_else(|| panic!("表に {key} = '<値>' の行が無い"))
+    }
+
+    /// runner が読む字を探す ps1 の字 (コメントを除く)。winget の portable の道具の入口 (共通の枠 win/winget/WingetPortable.ps1 を
+    /// `. $frame` で読む) は、締めの行・見張りの行・状態の表の見出しを枠が組むので、枠の字の `$($Tool.Name)`・`$($Tool.Command)`・
+    /// `$($Tool.PackageId)` を入口の表の値 (と `$packageId` の行) に替えて足す
+    fn script_text(repo: &Path, script: &str) -> (String, bool) {
+        let text = ps1_code(&std::fs::read_to_string(repo.join(script)).unwrap());
+        if !text.lines().any(|l| l.trim() == ". $frame") {
+            return (text, false);
+        }
+        let frame =
+            ps1_code(&std::fs::read_to_string(repo.join("win/winget/WingetPortable.ps1")).unwrap());
+        let filled = frame
+            .replace("$($Tool.Name)", &table_value(&text, "Name"))
+            .replace("$($Tool.Command)", &table_value(&text, "Command"))
+            .replace("$($Tool.PackageId)", &table_value(&text, "$packageId"));
+        (format!("{text}{filled}"), true)
+    }
+
     #[test]
-    fn windows_only_scripts_carry_the_phrases_the_runner_reads() {
+    fn table_value_reads_quoted_values() {
+        let text = "$packageId = 'junegunn.fzf'\n    @{\n        Name           = 'fzf'\n        CommandName    = 'fzf'\n        Command        = 'Install-Fzf'\n";
+        assert_eq!(table_value(text, "Name"), "fzf");
+        assert_eq!(table_value(text, "Command"), "Install-Fzf");
+        assert_eq!(table_value(text, "$packageId"), "junegunn.fzf");
+    }
+
+    /// Windows にしか無い手順の ps1 (WSL の wrapper との突き合わせの代わり) と、winget の portable の道具の ps1 (締めの行と見張りの行を共通の枠が
+    /// 組む) は、runner が読む締めの行の文言と出力の印を、コメントでない行に持つ (文言を変えたら両方を直す)。portable の道具は、状態の表の見出し
+    /// (手順の出力と見分ける頭) と、昇格した会話で止めたときの印 (`elevated_fix!`) も見る
+    #[test]
+    fn scripts_carry_the_phrases_the_runner_reads() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
         let only: Vec<&Ps1Spec> = SPECS.iter().filter(|s| s.windows_only).collect();
         assert_eq!(
@@ -2526,8 +2640,34 @@ mod tests {
                 "codex"
             ]
         );
-        for s in only {
-            let text = ps1_code(&std::fs::read_to_string(repo.join(s.script)).unwrap());
+        let framed: Vec<&str> = SPECS
+            .iter()
+            .filter(|s| script_text(&repo, s.script).1)
+            .map(|s| s.id)
+            .collect();
+        assert_eq!(framed, vec!["ntn", "ghq", "fzf", "starship"]);
+        for s in SPECS
+            .iter()
+            .filter(|s| s.windows_only || framed.contains(&s.id))
+        {
+            let (text, framed) = script_text(&repo, s.script);
+            if framed {
+                let header = match s.header {
+                    Header::Contains(h) | Header::LineStartsWith(h) => h,
+                };
+                assert!(
+                    text.contains(header),
+                    "{} に見出し「{header}」が無い",
+                    s.script
+                );
+                assert!(
+                    s.output_fixes
+                        .iter()
+                        .any(|(m, _)| m.starts_with("昇格した PowerShell では winget が ")),
+                    "{} の output_fixes に昇格の印が無い",
+                    s.id
+                );
+            }
             if s.policy == Policy::Sync {
                 for phrase in [
                     format!("→ {} で入れる", s.command),

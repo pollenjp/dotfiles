@@ -21,6 +21,13 @@ dst = "%USERPROFILE%/.config/powershell/dotfiles.ps1"
 hint = "開いている PowerShell は . $PROFILE で読み直す ($PROFILE への読み込みの 1 行は、WSL の setup の bootstrap-windows-powershell-profile.sh か、受け持ちを切り替えたホストでは runner の powershell-profile が足す)"
 runnerHint = "開いている PowerShell は . $PROFILE で読み直す ($PROFILE への読み込みの 1 行は、同じ dotfiles apply の手順 powershell-profile が足す)"
 
+# winget の portable の道具 (下の Install-Fzf.ps1・Install-Ghq.ps1・Install-Starship.ps1・Install-Ntn.ps1) の共通の枠。配った入口は隣のこの ps1 を
+# dot-source する (clone の入口は win/winget/ のもの。README.md の「winget の portable の道具」)。入口と同じ所へ配る
+[[files]]
+src = "winget/WingetPortable.ps1"
+dst = "%USERPROFILE%/.config/powershell/WingetPortable.ps1"
+hint = "winget の portable の道具の Install-* が読む共通の枠 (打つものではない)。開いている PowerShell の読み直しは要らない (Install-* を打つたびに読む)"
+
 # starship のプロンプトの設定。Linux の home-manager (nix/home/modules/files.nix) も同じファイルを ~/.config/starship.toml に置くので、
 # nix/ に置いて base = "nix" で配る。starship は環境変数 STARSHIP_CONFIG が無ければ %USERPROFILE%\.config\starship.toml を読む。
 # starship 本体は下の Install-Starship.ps1 (runner の手順 starship) が、$PROFILE の init の 1 行は runner の手順 starship-init が入れる

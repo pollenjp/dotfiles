@@ -483,8 +483,9 @@ Test-Case 'winget を打つほかの ps1 の Invoke-Winget は、この ps1 と�
             if (($null -ne $body) -and ($body -cne $want)) { Get-ScriptLabel $_ }
         }) -join ' '
 }
-# Invoke-Winget を持つ ps1 の数 (増えた・減ったら、ここと win/README.md の「Install-OpenSSH.ps1 を書くときの注意」を直す)
-Test-Case 'Invoke-Winget を持つ ps1 は 15 本 (bootstrap と、同じ本文の 14 本)' 15 {
+# Invoke-Winget を持つ ps1 の数 (増えた・減ったら、ここと win/README.md の「Install-OpenSSH.ps1 を書くときの注意」を直す)。winget の portable の
+# 道具 (fzf・ghq・starship・ntn) は、共通の枠 (winget/WingetPortable.ps1) の 1 本を使う
+Test-Case 'Invoke-Winget を持つ ps1 は 12 本 (bootstrap と、同じ本文の 11 本)' 12 {
     @($winScripts | Where-Object { $null -ne (Get-FunctionBody -Path $_.FullName -Name 'Invoke-Winget') }).Count
 }
 

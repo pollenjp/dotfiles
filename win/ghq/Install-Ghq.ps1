@@ -5,17 +5,16 @@ Windows の ghq (repo の clone を決まった木に並べる CLI。winget の 
 .DESCRIPTION
 dotfiles の win/ghq/Install-Ghq.ps1 を %USERPROFILE%\.config\powershell\ へ配り、
 PowerShell では dotfiles.ps1 の Install-Ghq から呼ぶ (win/README.md の「ghq・fzf」)。
-dotfiles.ps1 の cdrepo (ghq の repo を fzf で選んで移る) が使う。
+dotfiles.ps1 の cdrepo (ghq の repo を fzf で選んで移る) が使う。入れて揃えるのは Windows の runner の手順 ghq (win/runner/src/steps/ps1.rs。
+dotfiles apply)。
+
+中身は winget の portable の道具の共通の枠 (win/winget/WingetPortable.ps1。win/README.md の「winget の portable の道具」) で、ここは ghq の表だけを
+持つ。常駐も UAC も無いので、版のずれも揃える。
 
 ghq は zip の中の portable のパッケージで、管理者無しで %LOCALAPPDATA%\Microsoft\WinGet\Packages の
 下に入る (ghq.exe は zip の中のディレクトリ ghq_windows_amd64 の下。arm64 は ghq_windows_arm64)。
 入れるときは --installer-type portable で portable を名指しする (今の manifest は portable だけだが、
 fzf のように MSI が足されると winget の既定がそちらに替わるので、先に名指ししておく)。
-ghq.exe が動いている間は置き換えられないので、入れ替えが要るときに置き場所の ghq.exe が動いていれば、
-何も変えずに止める (止めはしない)。
-
-形は Install-Ntn.ps1 と同じ (常駐も UAC も無いので、版のずれも揃える)。違うのは、入れる・揃えるのが WSL の
-setup ではなく Windows の runner の手順 ghq (win/runner/src/steps/ps1.rs。dotfiles apply) であること。
 
 BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無い UTF-8 を CP932 として読む)。
 
@@ -23,7 +22,8 @@ BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無
 固定する版。winget show --id x-motemen.ghq --versions に出る値。版を変えるときはここの既定値を変える。
 
 .PARAMETER Check
-今の状態と固定した版との差を出すだけで、何も変えない。揃っていれば終了コード 0、差があれば 1、入っていなければ 3。
+今の状態と固定した版との差を出すだけで、何も変えない。揃っていれば終了コード 0、差があれば 1、入っていなければ 3
+(昇格した PowerShell で winget を打てないときは、入っていなくても 1)。
 
 .PARAMETER IfMissing
 入っていなければ固定した版を入れて pin を足す。入っていれば -Check と同じで、入れ替えはしない。
@@ -35,448 +35,40 @@ param(
     [switch]$IfMissing
 )
 
-# ---------------------------------------------------------------------------
-# 副作用の無い関数 (Install-Ghq.Tests.ps1 で確かめる)
-# ---------------------------------------------------------------------------
-
-# ghq.exe --version の出力 ("ghq version <版> (rev:<commit>)") から版を拾う。無ければ $null
-function Get-GhqVersionFromOutput {
-    param([string[]]$Lines)
-    foreach ($line in $Lines) {
-        if ("$line" -match '^\s*ghq\s+version\s+v?(\d+(\.\d+)+)(\s|$)') { return $Matches[1] }
-    }
-    $null
+# 共通の枠。配った写し (%USERPROFILE%\.config\powershell) なら隣に、clone なら win\winget\ にある
+$frame = @((Join-Path $PSScriptRoot 'WingetPortable.ps1'), (Join-Path (Join-Path (Split-Path -Parent $PSScriptRoot) 'winget') 'WingetPortable.ps1')) |
+    Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
+if (-not $frame) {
+    $missing = "winget の portable の道具の共通の枠 (WingetPortable.ps1) が $PSScriptRoot に無い。dotfiles apply (受け持ちが WSL のホストは WSL の setup --update) で配り直す"
+    if ($MyInvocation.InvocationName -eq '.') { throw $missing }
+    Write-Host $missing -ForegroundColor Red
+    exit 2
 }
+. $frame
 
-# winget show --versions の出力から、版の行だけを上から順 (= 新しい順) に拾う (Install-Ntn.ps1 と同じ)。
-# 呼ぶ側は @() で包む (1 つも無いと $null にほどける)
-function Get-WingetVersionList {
-    param([string[]]$Lines)
-    foreach ($line in $Lines) {
-        if ("$line" -match '^\s*(\d+(\.\d+)+(-[0-9A-Za-z][0-9A-Za-z.-]*)?)\s*$') { $Matches[1] }
-    }
-}
+# winget のパッケージ ID (版の知らせ (runner の pin-updates・WSL の check-winget-version.sh) がこの行を読む)
+$packageId = 'x-motemen.ghq'
 
-# 入っているか・入っている版・固定した版から、することを決める。
-# ghq.exe があるのに版が読めないときも入れ替える (外してから入れ直せば直る)
-function Get-GhqPlan {
-    param([bool]$Exists, [string]$Installed, [string]$Target)
-    if (-not $Exists) { return 'install' }
-    if ($Installed -cne $Target) { return 'change' }
-    'none'
-}
-
-# 入れ替えの向き。winget show --versions の並び (新しい順) の位置で比べる
-function Get-GhqDirection {
-    param([string[]]$Versions, [string]$Installed, [string]$Target)
-    $list = @($Versions)
-    $i = [array]::IndexOf($list, $Installed)
-    $t = [array]::IndexOf($list, $Target)
-    if ($i -lt 0 -or $t -lt 0) { return 'unknown' }
-    if ($t -lt $i) { return 'up' }
-    if ($t -gt $i) { return 'down' }
-    'same'
-}
-
-# winget pin list の出力に、その Id を列に持つ行があるか (Install-Ntn.ps1 と同じ)。
-# 見出しや「pin が無い」の文言は表示言語で変わるので、Id の一致だけを見る
-function Test-WingetPinned {
-    param([string[]]$Lines, [string]$PackageId)
-    foreach ($line in $Lines) {
-        if (($line -split '\s+') -ccontains $PackageId) { return $true }
-    }
-    $false
-}
-
-# plan ごとに打つ winget の引数 (配列の配列。Install-Ntn.ps1 と同じ)。入れ替えは版の上げ下げによらず、
-# 外してから入れる (portable の置き場所は版によらず同じ。ghq の設定 (git config の ghq.*) と clone は置き場所の外にある)。
-# install には --installer-type portable を付け、portable を名指しする
-function Get-WingetCommands {
-    param([string]$Plan, [string]$PackageId, [string]$Version)
-    $common = @('--id', $PackageId, '--exact', '--source', 'winget', '--silent',
-        '--accept-source-agreements', '--disable-interactivity')
-    $put = $common + @('--version', $Version, '--installer-type', 'portable', '--accept-package-agreements')
-    switch ($Plan) {
-        'install' { , (@('install') + $put) }
-        'change' {
-            , (@('uninstall') + $common)
-            , (@('install') + $put)
-        }
+# ghq の表 (key は WingetPortable.ps1 の頭の「道具の表」)
+function Get-GhqTool {
+    @{
+        Name           = 'ghq'
+        Command        = 'Install-Ghq'
+        PackageId      = $packageId
+        CommandName    = 'ghq'
+        Readme         = 'ghq・fzf'
+        # ghq.exe --version の出力 ("ghq version <版> (rev:<commit>)")
+        VersionPattern = '^\s*ghq\s+version\s+v?(?<v>\d+(\.\d+)+)(\s|$)'
+        # manifest の x64 の RelativeFilePath。無ければ置き場所の下を探す (arm64 の ghq_windows_arm64 や、zip の中の形が変わっても読めるように)
+        ExePath        = 'ghq_windows_amd64\ghq.exe'
+        ExeSearch      = $true
+        BusyFix        = '動いている ghq (ghq get など) を終わらせる'
     }
 }
 
-# 入れ替えの前に、固定した版の取得とハッシュだけを確かめる winget download の引数 (Install-Ntn.ps1 と同じ。入れるものと
-# 同じ portable を名指しする)
-function Get-WingetDownloadArguments {
-    param([string]$PackageId, [string]$Version, [string]$Directory)
-    @('download', '--id', $PackageId, '--exact', '--source', 'winget', '--version', $Version,
-        '--installer-type', 'portable', '--download-directory', $Directory, '--skip-dependencies',
-        '--accept-package-agreements', '--accept-source-agreements', '--disable-interactivity')
-}
-
-# PATH (; 区切り) を前から見て、$Names のどれかが最初に見つかったパスを返す。無ければ $null (Install-Ntn.ps1 と同じ)。
-# PowerShell は PATH のディレクトリの順に、.exe だけでなく .cmd・.bat・.ps1 も引くので、ディレクトリごとに名前を並べて見る。
-# $Exists はファイルがあるかを答える scriptblock (テストでは偽物を渡す)。
-# 区切りは \ で組む (Linux の pwsh で流すテストでも同じ文字列になるよう、Join-Path は使わない)
-function Resolve-GhqOnPath {
-    param([string]$PathValue, [string[]]$Names, [scriptblock]$Exists)
-    foreach ($entry in ($PathValue -split ';')) {
-        $dir = [Environment]::ExpandEnvironmentVariables($entry.Trim().Trim('"')).TrimEnd('\')
-        if (-not $dir) { continue }
-        foreach ($name in $Names) {
-            $candidate = "$dir\$name"
-            if (& $Exists $candidate) { return $candidate }
-        }
-    }
-    $null
-}
-
-# PATH で引かれる ghq.exe がどこのものか。'winget' (x-motemen.ghq の ghq.exe のあるディレクトリか、winget が
-# symlink を置く WinGet\Links) / 'other' / 'none'
-function Get-GhqPathKind {
-    param([string]$Resolved, [string]$ExeDir, [string]$LinksDir)
-    if (-not $Resolved) { return 'none' }
-    $cut = $Resolved.LastIndexOf('\')
-    if ($cut -lt 0) { return 'other' }
-    $dir = $Resolved.Substring(0, $cut)
-    foreach ($d in @($ExeDir, $LinksDir)) {
-        # -eq は大文字小文字を区別しない (Windows のパスと同じ)
-        if ($d -and ($dir -eq $d.TrimEnd('\'))) { return 'winget' }
-    }
-    'other'
-}
-
-# 揃える手順 (Install-Ghq) で直る差 (版・pin) があるか
-function Test-GhqDrift {
-    param($State)
-    ($State.Plan -ne 'none') -or (-not $State.Pinned)
-}
-
-# PATH のずれ (ほかの ghq.exe が先に引かれる・入っているのに PATH に無い) があるか。揃える手順では直らないので、
-# ※ の行で直し方を添える。入っていないときに PATH に無いのは当たり前なので数えない
-function Test-GhqPathDrift {
-    param($State)
-    ($State.PathKind -eq 'other') -or (($State.PathKind -eq 'none') -and ($State.Plan -ne 'install'))
-}
-
-# 終了コード。入っていなければ 3、版・pin・PATH が揃っていれば 0、ほかは 1
-function Get-GhqExitCode {
-    param($State)
-    if ($State.Plan -eq 'install') { return 3 }
-    if ((Test-GhqDrift -State $State) -or (Test-GhqPathDrift -State $State)) { return 1 }
-    0
-}
-
-# 揃える前に止める理由。無ければ $null
-#   not-listed: 入れる・入れ替えるのに、固定した版が winget に無い (版の一覧が読めたときだけ判断する)
-#   busy:       入れ替えるのに、置き場所の ghq.exe が動いている (置き換えられない)
-function Get-GhqApplyBlocker {
-    param([string]$Plan, [string[]]$Versions, [string]$Target, [int]$BusyCount)
-    $known = @($Versions | Where-Object { $_ })
-    if (($Plan -ne 'none') -and ($known.Count -gt 0) -and ($known -cnotcontains $Target)) { return 'not-listed' }
-    if (($Plan -eq 'change') -and ($BusyCount -gt 0)) { return 'busy' }
-    $null
-}
-
-# 状態の表の行 (Text と、直すことがあるかの Warn)。直すことがある行だけ先頭に ⚠ を付け、
-# ほかは 2 字下げる。ずれではないこと (新しい版がある・動いている ghq がある) は ※ で添える
-function Format-GhqState {
-    param($State, [string]$Target, [string]$PackageId, [string]$PackageDir)
-    $direction = if ($State.Direction -eq 'up') { ' (上げる)' } elseif ($State.Direction -eq 'down') { ' (下げる)' } else { '' }
-    $planText = switch ($State.Plan) {
-        'install' { '入れる' }
-        'change' { "入れ替える$direction" }
-        default { 'そのまま' }
-    }
-    $installedText = if ($State.Plan -eq 'install') { '入っていない' } elseif ($State.Installed) { $State.Installed } else { '不明 (ghq.exe --version が読めない)' }
-    $latestText = if ($State.Latest) { $State.Latest } else { '不明 (winget show が失敗)' }
-    $pinText = if ($State.Pinned) { 'あり' } else { '無し → 足す' }
-    $pathText = switch ($State.PathKind) {
-        'winget' { 'winget のもの' }
-        'other' { "$($State.PathResolved) (winget のものではない)" }
-        default { '見つからない' }
-    }
-    $rows = @(
-        @{ Text = "ghq (winget の $PackageId、$PackageDir)"; Warn = $false; Indent = $false }
-        @{ Text = "入っている版    : $installedText"; Warn = $false; Indent = $true }
-        @{ Text = "固定した版      : $Target → $planText"; Warn = ($State.Plan -ne 'none'); Indent = $true }
-        @{ Text = "winget の最新版 : $latestText"; Warn = $false; Indent = $true }
-        @{ Text = "winget pin      : $pinText"; Warn = (-not $State.Pinned); Indent = $true }
-        @{ Text = "PATH の ghq     : $pathText"; Warn = (Test-GhqPathDrift -State $State); Indent = $true }
-    )
-    foreach ($row in $rows) {
-        $prefix = if (-not $row.Indent) { '' } elseif ($row.Warn) { '⚠ ' } else { '  ' }
-        [pscustomobject]@{ Text = "$prefix$($row.Text)"; Warn = [bool]$row.Warn }
-    }
-    $versions = @($State.Versions | Where-Object { $_ })
-    if (($versions.Count -gt 0) -and ($versions -cnotcontains $Target)) {
-        if ($State.Plan -eq 'none') {
-            [pscustomobject]@{ Text = '※ 固定した版が winget から消えている。新しいマシンには入れられないので、-Version を winget にある版へ変える'; Warn = $false }
-        } else {
-            [pscustomobject]@{ Text = '⚠ 固定した版が winget show --versions に無い (書き間違いか、winget から消えた) ので入れられない'; Warn = $true }
-        }
-    } elseif (($versions.Count -gt 0) -and ($versions[0] -cne $Target)) {
-        [pscustomobject]@{ Text = "※ winget に固定した版より新しい $($versions[0]) がある。上げるなら Install-Ghq.ps1 の -Version の既定値を変える"; Warn = $false }
-    }
-    # PATH のずれは揃える手順 (Install-Ghq) では直らないので、直し方を添える
-    if ($State.PathKind -eq 'other') {
-        $cut = $State.PathResolved.LastIndexOf('\')
-        $dir = if ($cut -ge 0) { $State.PathResolved.Substring(0, $cut) } else { $State.PathResolved }
-        [pscustomobject]@{ Text = "※ PATH のずれは Install-Ghq では直らない。$dir の ghq.exe を消すか、$dir をユーザーの PATH から外す (win/README.md の「ghq・fzf」)"; Warn = $false }
-    } elseif (($State.PathKind -eq 'none') -and ($State.Plan -ne 'install')) {
-        [pscustomobject]@{ Text = "※ ghq の置き場所がユーザーの PATH に無い。PATH に足すか、winget uninstall --id $PackageId の後に Install-Ghq で入れ直す"; Warn = $false }
-    }
-    if (($State.Plan -eq 'change') -and ($State.BusyCount -gt 0)) {
-        [pscustomobject]@{ Text = "※ ghq.exe が $($State.BusyCount) 個動いている。入れ替えるには、動いている ghq (ghq get など) を終わらせる"; Warn = $false }
-    }
-}
-
-# 締めの行 (-Check の最後と、揃えた後の最後)。揃っていれば何も返さない。直すことごとに ⚠️ で始まる行を返す。
-# Windows の runner (win/runner/src/steps/ps1.rs) は「→ Install-Ghq で入れる」「→ Install-Ghq で揃える」「→ ※ の手順で直す」の
-# 文言で、入れるか・揃えるか・知らせるだけかを決める (文言を変えるときは向こうも直す)
-function Format-GhqVerdict {
-    param($State)
-    if ((Get-GhqExitCode -State $State) -eq 3) {
-        '⚠️ ghq が入っていない → Install-Ghq で入れる ⚠️'
-        return
-    }
-    if (Test-GhqDrift -State $State) { '⚠️ 固定した版と揃っていない → Install-Ghq で揃える ⚠️' }
-    if (Test-GhqPathDrift -State $State) { '⚠️ PATH の ghq が winget のものではない → ※ の手順で直す ⚠️' }
-}
-
-# ---------------------------------------------------------------------------
-# Windows に触る関数 (実機で -Check と本番を打って確かめる)
-# ---------------------------------------------------------------------------
-
-# winget を打ち、出力の行 (進み具合の表示は除く) と終了コードを返す。winget は管へ UTF-8 で書くので、コンソールの文字コードが UTF-8 でなければ
-# 打つ間だけ UTF-8 にする (日本語の Windows の既定は CP932。手で打った窓・UAC で昇格し直した子の窓。そのまま読むと進み具合の帯と日本語の
-# メッセージが化ける。runner と WSL の wrapper は UTF-8 にしてから流すので替えない)。本文は Install-OpenSSH.ps1 の Invoke-Winget と同じ
-# (Install-OpenSSH.Tests.ps1 が突き合わせる)
-function Invoke-Winget {
-    param([string[]]$Arguments)
-    # 5.1 では Stop のままだと、外部コマンドの stderr の 1 行目で止まる
-    $ErrorActionPreference = 'Continue'
-    $saved = $null
-    try {
-        if ([Console]::OutputEncoding.CodePage -ne 65001) {
-            $current = [Console]::OutputEncoding
-            [Console]::OutputEncoding = New-Object System.Text.UTF8Encoding $false
-            $saved = $current
-        }
-    } catch {
-        $saved = $null
-    }
-    try {
-        $lines = & winget @Arguments 2>&1 | ForEach-Object { "$_" } |
-            Where-Object { $_ -notmatch '^\s*[-\\|/]?\s*$' -and $_ -notmatch '[\u2588\u2592]' }
-        $code = $LASTEXITCODE
-    } finally {
-        if ($null -ne $saved) {
-            try { [Console]::OutputEncoding = $saved } catch { }
-        }
-    }
-    [pscustomobject]@{ ExitCode = $code; Lines = @($lines) }
-}
-
-# 置き場所の ghq.exe を探す。manifest の x64 の RelativeFilePath (ghq_windows_amd64\ghq.exe) を先に見て、
-# 無ければ置き場所の下を深さ 3 まで探す (arm64 の ghq_windows_arm64 や、zip の中の形が変わっても読めるように)。無ければ $null
-function Find-GhqExe {
-    param([string]$PackageDir)
-    $default = Join-Path $PackageDir 'ghq_windows_amd64\ghq.exe'
-    if (Test-Path -LiteralPath $default -PathType Leaf) { return $default }
-    if (-not (Test-Path -LiteralPath $PackageDir -PathType Container)) { return $null }
-    $found = @(Get-ChildItem -LiteralPath $PackageDir -Filter 'ghq.exe' -File -Recurse -Depth 3 -ErrorAction SilentlyContinue | Select-Object -First 1)
-    if ($found.Count -gt 0) { return $found[0].FullName }
-    $null
-}
-
-# ghq.exe に版を聞く。読めなければ $null
-function Get-GhqInstalledVersion {
-    param([string]$Exe)
-    $ErrorActionPreference = 'Continue'
-    try {
-        $out = @(& $Exe --version 2>&1 | ForEach-Object { "$_" })
-    } catch {
-        # 起動できない (壊れた・0 バイト・方針で止められた) ときも、版が読めないとして入れ替えの対象にする
-        return $null
-    }
-    Get-GhqVersionFromOutput -Lines $out
-}
-
-# これから開く PowerShell が使う PATH (マシン → ユーザーの順)。今のプロセスの PATH は古いことがある
-function Get-GhqPathValue {
-    @([Environment]::GetEnvironmentVariable('Path', 'Machine'), [Environment]::GetEnvironmentVariable('Path', 'User')) -join ';'
-}
-
-# 置き場所の下の exe から起動して動いているプロセス
-function Get-GhqBusyProcess {
-    param([string]$PackageDir)
-    $prefix = $PackageDir.TrimEnd('\') + '\'
-    @(Get-Process -ErrorAction SilentlyContinue | Where-Object {
-            $path = $null
-            try { $path = $_.Path } catch { $path = $null }
-            $path -and $path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)
-        })
-}
-
-# 今の状態を読む (何も変えない。管理者は要らない)
-function Get-GhqState {
-    param([string]$PackageId, [string]$PackageDir, [string]$LinksDir, [string]$Target)
-    $exe = Find-GhqExe -PackageDir $PackageDir
-    $exists = [bool]$exe
-    $installed = $null
-    if ($exists) { $installed = Get-GhqInstalledVersion -Exe $exe }
-    # 入っていなければ、winget が足すはずのディレクトリ (manifest の x64 の RelativeFilePath の親) で PATH を見る
-    $exeDir = if ($exe) { Split-Path -Parent $exe } else { Join-Path $PackageDir 'ghq_windows_amd64' }
-    $pins = Invoke-Winget -Arguments @('pin', 'list', '--id', $PackageId, '--exact', '--accept-source-agreements', '--disable-interactivity')
-    $show = Invoke-Winget -Arguments @('show', '--id', $PackageId, '--exact', '--versions', '--source', 'winget', '--accept-source-agreements', '--disable-interactivity')
-    # @() で包む。関数が返す空の配列は呼び出し側で $null にほどける (Install-OpenSSH.ps1 で踏んだ)
-    $versions = @(Get-WingetVersionList -Lines $show.Lines)
-    $latest = $null
-    if ($versions.Count -gt 0) { $latest = $versions[0] }
-    $resolved = Resolve-GhqOnPath -PathValue (Get-GhqPathValue) -Names @('ghq.exe', 'ghq.cmd', 'ghq.bat', 'ghq.ps1') -Exists { param($p) Test-Path -LiteralPath $p -PathType Leaf }
-    [pscustomobject]@{
-        Exists       = $exists
-        Installed    = $installed
-        Plan         = Get-GhqPlan -Exists $exists -Installed $installed -Target $Target
-        Direction    = Get-GhqDirection -Versions $versions -Installed $installed -Target $Target
-        Pinned       = Test-WingetPinned -Lines $pins.Lines -PackageId $PackageId
-        Versions     = $versions
-        Latest       = $latest
-        PathResolved = $resolved
-        PathKind     = Get-GhqPathKind -Resolved $resolved -ExeDir $exeDir -LinksDir $LinksDir
-        BusyCount    = @(Get-GhqBusyProcess -PackageDir $PackageDir).Count
-    }
-}
-
-# 状態の表を出す。直すことがある行 (⚠) は黄色にする
-function Write-GhqState {
-    param($State, [string]$Target, [string]$PackageId, [string]$PackageDir)
-    foreach ($row in (Format-GhqState -State $State -Target $Target -PackageId $PackageId -PackageDir $PackageDir)) {
-        if ($row.Warn) { Write-Host $row.Text -ForegroundColor Yellow } else { Write-Host $row.Text }
-    }
-}
-
-# 締めの行 (直すこと) を黄色で出す。揃っていれば何も出さない
-function Write-GhqVerdict {
-    param($State)
-    foreach ($line in (Format-GhqVerdict -State $State)) {
-        Write-Host $line -ForegroundColor Yellow
-    }
-}
-
-function Invoke-InstallGhq {
-    param([string]$Version, [switch]$Check, [switch]$IfMissing)
-    $packageId = 'x-motemen.ghq'
-    # portable の置き場所は <Id>_<ソースの識別子>。winget のソースから入れると、どのマシンでも同じ名前になる
-    $packageDir = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages\x-motemen.ghq_Microsoft.Winget.Source_8wekyb3d8bbwe'
-    $linksDir = Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Links'
-
-    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-        Write-Host 'winget が見つからない。Microsoft Store の「アプリ インストーラー」を入れる'
-        return 2
-    }
-
-    $state = Get-GhqState -PackageId $packageId -PackageDir $packageDir -LinksDir $linksDir -Target $Version
-    Write-GhqState -State $state -Target $Version -PackageId $packageId -PackageDir $packageDir
-    $code = Get-GhqExitCode -State $state
-
-    # -Check は何も変えない。-IfMissing は入っていないときだけ入れ、入っていれば -Check と同じ
-    if ($Check -or ($IfMissing -and ($state.Plan -ne 'install'))) {
-        if ($code -eq 0) { Write-Host '揃っている' }
-        Write-GhqVerdict -State $state
-        return $code
-    }
-    if ($code -eq 0) {
-        Write-Host '揃っている。何もしない'
-        return 0
-    }
-    # 揃える手順で直す差 (版・pin) が無く、残っているのは PATH のずれだけ
-    if (-not (Test-GhqDrift -State $state)) {
-        Write-Host '版と pin は揃っている。PATH のずれは Install-Ghq では直らない (上の ※ の行の手順で直す)'
-        Write-GhqVerdict -State $state
-        return 1
-    }
-
-    $blocker = Get-GhqApplyBlocker -Plan $state.Plan -Versions $state.Versions -Target $Version -BusyCount $state.BusyCount
-    if ($blocker -eq 'not-listed') {
-        Write-Host "固定した版 $Version が winget に無いので入れられない。-Version を winget show --id $packageId --versions にある版へ変える"
-        return 1
-    }
-    if ($blocker -eq 'busy') {
-        Write-Host 'ghq.exe が動いていて置き換えられない。動いている ghq を終わらせてから打ち直す:'
-        foreach ($p in @(Get-GhqBusyProcess -PackageDir $packageDir)) {
-            $commandLine = (Get-CimInstance Win32_Process -Filter "ProcessId=$($p.Id)").CommandLine
-            Write-Host "  $($p.Id)  $commandLine"
-        }
-        return 1
-    }
-
-    # 入れ替えは外してから入れるので、取得が落ちると ghq が消えたまま終わる。
-    # 外す前に、固定した版を取得してハッシュまで確かめる (落ちたら何も変えずに止める)
-    if ($state.Plan -eq 'change') {
-        $downloadDir = Join-Path ([IO.Path]::GetTempPath()) "install-ghq-$PID"
-        $arguments = @(Get-WingetDownloadArguments -PackageId $packageId -Version $Version -Directory $downloadDir)
-        Write-Host "winget $($arguments -join ' ')"
-        $download = Invoke-Winget -Arguments $arguments
-        Remove-Item -LiteralPath $downloadDir -Recurse -Force -ErrorAction SilentlyContinue
-        if ($download.ExitCode -ne 0) {
-            $download.Lines | Select-Object -Last 5 | ForEach-Object { Write-Host "  $_" }
-            Write-Host ('固定した版を取得できなかった (終了コード 0x{0:X8})。何も変えていない。ネットワークを確かめて打ち直す' -f $download.ExitCode)
-            return 1
-        }
-    }
-
-    # 入れ替えるときは、古い版の pin を残さないよう先に外す (入れた後に足し直す)
-    if (($state.Plan -eq 'change') -and $state.Pinned) {
-        $unpin = Invoke-Winget -Arguments @('pin', 'remove', '--id', $packageId, '--exact', '--accept-source-agreements', '--disable-interactivity')
-        if ($unpin.ExitCode -ne 0) { Write-Host ('winget pin remove が失敗した (終了コード 0x{0:X8})' -f $unpin.ExitCode) }
-    }
-    foreach ($arguments in @(Get-WingetCommands -Plan $state.Plan -PackageId $packageId -Version $Version)) {
-        Write-Host "winget $($arguments -join ' ')"
-        $result = Invoke-Winget -Arguments $arguments
-        $result.Lines | Select-Object -Last 5 | ForEach-Object { Write-Host "  $_" }
-        if ($result.ExitCode -ne 0) {
-            Write-Host ('winget が失敗した (終了コード 0x{0:X8})' -f $result.ExitCode)
-            if ($arguments[0] -eq 'install') {
-                Write-Host 'install が落ちたので、ghq が入っていないことがある。ネットワークを確かめて Install-Ghq を打ち直す (dotfiles apply でも入る)'
-            }
-            break
-        }
-    }
-    # 入っていれば pin を足す (入れ替えた後は、上で外したので足し直しになる)
-    $pins = Invoke-Winget -Arguments @('pin', 'list', '--id', $packageId, '--exact', '--accept-source-agreements', '--disable-interactivity')
-    if ((Find-GhqExe -PackageDir $packageDir) -and -not (Test-WingetPinned -Lines $pins.Lines -PackageId $packageId)) {
-        $pin = Invoke-Winget -Arguments @('pin', 'add', '--id', $packageId, '--exact', '--accept-source-agreements', '--disable-interactivity')
-        if ($pin.ExitCode -eq 0) { Write-Host 'winget pin を足した (winget upgrade --all から外れる)' }
-        else { Write-Host ('winget pin add が失敗した (終了コード 0x{0:X8})' -f $pin.ExitCode) }
-    }
-
-    # 揃ったかを読み直して確かめる
-    Write-Host ''
-    $after = Get-GhqState -PackageId $packageId -PackageDir $packageDir -LinksDir $linksDir -Target $Version
-    Write-GhqState -State $after -Target $Version -PackageId $packageId -PackageDir $packageDir
-    if ((Get-GhqExitCode -State $after) -eq 0) {
-        Write-Host '揃った'
-        return 0
-    }
-    # 版と pin は揃い、残っているのは PATH のずれだけ
-    if (-not (Test-GhqDrift -State $after)) { Write-Host '版と pin は揃った' }
-    Write-GhqVerdict -State $after
-    return 1
-}
-
-# dot-source されたとき (テスト) は関数だけを読み、本体は走らせない。
-# 思わぬ例外は受け止めて終了コード 2 で終える。受け止めないと exit まで届かず、
-# -Command から呼んだとき外側の exit $LASTEXITCODE が中の winget の 0 を返して成功に見える
+# dot-source されたとき (試験) は関数だけを読み、本体は走らせない
 if ($MyInvocation.InvocationName -ne '.') {
     $ErrorActionPreference = 'Stop'
     Set-StrictMode -Version Latest
-    try {
-        exit (Invoke-InstallGhq -Version $Version -Check:$Check -IfMissing:$IfMissing)
-    } catch {
-        Write-Host "エラーで止まった: $($_.Exception.Message)" -ForegroundColor Red
-        Write-Host $_.ScriptStackTrace
-        exit 2
-    }
+    exit (Start-WingetPortable -Tool (Get-GhqTool) -Version $Version -Check:$Check -IfMissing:$IfMissing)
 }
