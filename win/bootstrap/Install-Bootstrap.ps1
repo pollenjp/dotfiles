@@ -100,10 +100,10 @@ rustup の行は出ない)。終了コードは 0 = 直すことが無い・3 = 
 #>
 [CmdletBinding()]
 param(
-    [string]$GitVersion = '2.56.0.4',
-    [string]$GhVersion = '2.103.3',
+    [string]$GitVersion = '2.56.1',
+    [string]$GhVersion = '2.105.0',
     [string]$PwshVersion = '7.6.10.0',
-    [string]$VsBuildToolsVersion = '17.14.44',
+    [string]$VsBuildToolsVersion = '17.14.45',
     [string]$RustupVersion = '1.29.3',
     [switch]$Rust,
     [switch]$Private,
