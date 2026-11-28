@@ -50,7 +50,7 @@
   <text x="22" y="252" font-size="12" fill="#9aa2ae">・ユーザーが見て確かめる所 (画面に出る名前など)</text>
   <text x="22" y="274" font-size="12" fill="#9aa2ae">・済んだら次に起きること (私が R2 を打つ など)</text>
   <g id="pjp-marks">
-    <!-- pjp hub bake: panel.json の節の marks を CSS の動きに焼いた写し (チケットに上げる。panel には載せない) -->
+    <!-- pjp hub bake: panel.json の節の marks を CSS の動きに焼いた写し (panel の外に出す写し。panel には載せない) -->
     <style>
       @keyframes pjp-mk-0 { 0% { stroke-dashoffset: 60.542px } 100% { stroke-dashoffset: 19.771px } }
       .pjp-mk-0 { animation: pjp-mk-0 1.274s linear infinite }

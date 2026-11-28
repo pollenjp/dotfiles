@@ -256,9 +256,9 @@ PowerShell に書き換えて回り込まない (hook はコマンドを見な�
 - hook の command は shell の書き方を使わないので、Claude Code が hook を Git Bash で動かしても (Git for Windows のある
   Windows。確かめた)、PowerShell で動かしても (Git Bash の無い Windows) 同じ字面で動く。止める理由は ASCII だけの JSON で
   返す (code page で化けない)
-- 入口の `pjp` は、`pjp` と同じディレクトリに `pjp-hub` が無い・起こせないときに終了コード 127 で終わる (2 にしない。2 だと hook に
-  「止める」と読まれ、ハブの会話の Write / Edit が scratchpad へのものも含めて全部止まる)。`pjp` が PATH に無いときと同じく、hook の
-  エラーとして出るだけで書き込みは止まらない (guard も効いていない)。dotfiles の道具を置き直す (Windows は `dotfiles apply` の手順
+- 入口の `pjp` は、`pjp` と同じディレクトリに `pjp-hub` が無いときは終了コード 127、在るのに起こせないときは 1 で終わる (2 にしない。
+  2 だと hook に「止める」と読まれ、ハブの会話の Write / Edit が scratchpad へのものも含めて全部止まる)。`pjp` が PATH に無いときと同じく、
+  hook のエラーとして出るだけで書き込みは止まらない (guard も効いていない)。dotfiles の道具を置き直す (Windows は `dotfiles apply` の手順
   pjp-tools、Linux は home-manager の switch)
 - 答え待ちの印の 2 つの hook (`pjp mark hook prompt; exit 0`・`pjp mark hook stop; exit 0`。1.) は、guard と違って何も
   止めない。どう落ちても (`pjp` が無い・道具の設定の誤り・hc が落ちた) `; exit 0` と道具の側でいつも 0 で終え、発言は

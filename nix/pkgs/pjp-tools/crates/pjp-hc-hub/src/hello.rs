@@ -295,7 +295,7 @@ pub fn hub_lines(git: Option<&Git>, cwd: &Path, form: &Form) -> (Vec<Line>, Opti
             Mark::Warn,
             LABEL,
             format!(
-                "{} (ハブの main の checkout。{start}。main の checkout ではチケットの Branch が入らず、ほかの会話とも重なる)",
+                "{} (ハブの main の checkout。{start}。main の checkout ではほかの会話と重なる。足し分があれば、チケットの Branch も入らない)",
                 short(&top)
             ),
         )
@@ -310,7 +310,7 @@ pub fn hub_lines(git: Option<&Git>, cwd: &Path, form: &Form) -> (Vec<Line>, Opti
             Mark::Warn,
             LABEL,
             format!(
-                "branch {b} は旧 herdr のハブの worktree の形 ({OLD_HUB_BRANCH}<名前>)。同じ branch のチケットを WSL の見回りも読みうる (次の worktree から、ほかの形の名前にする)"
+                "branch {b} は旧 herdr のハブの worktree の形 ({OLD_HUB_BRANCH}<名前>)。足し分があれば、同じ branch のチケットを WSL の見回りも読みうる (次の worktree から、ほかの形の名前にする)"
             ),
         ));
     }

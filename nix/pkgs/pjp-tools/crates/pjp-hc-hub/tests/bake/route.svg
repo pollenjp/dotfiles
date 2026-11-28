@@ -40,7 +40,7 @@
   <text x="234" y="309" font-size="12" fill="#d7dae0">誰が: runner</text>
   <text x="234" y="327" font-size="11" fill="#9aa2ae">まだ</text>
   <g id="pjp-marks">
-    <!-- pjp hub bake: panel.json の節の marks を CSS の動きに焼いた写し (チケットに上げる。panel には載せない) -->
+    <!-- pjp hub bake: panel.json の節の marks を CSS の動きに焼いた写し (panel の外に出す写し。panel には載せない) -->
     <style>
       @keyframes pjp-mk-0 { 0% { stroke-dashoffset: 61.542px } 100% { stroke-dashoffset: 20.771px } }
       .pjp-mk-0 { animation: pjp-mk-0 1.274s linear infinite }

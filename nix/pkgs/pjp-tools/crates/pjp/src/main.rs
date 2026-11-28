@@ -42,7 +42,7 @@ pjp — ハブと子の道具の入口 (dotfiles の nix/pkgs/pjp-tools)
 
 公開の道具 (hub・child・mark・pack) は、この exe と同じディレクトリの pjp-<道具> を起こす。ほかは claude-skills の shim
 pjp-skills (PATH → CARGO_HOME の bin → ~/.cargo/bin の順に探す) に渡す (private な claude-skills を読めないホストには入らない)。
-どちらも無ければ終了コード 127 で終わる。
+起こす先 (pjp-<道具> か pjp-skills) が無ければ終了コード 127 で終わる。
 ";
 
 fn main() {

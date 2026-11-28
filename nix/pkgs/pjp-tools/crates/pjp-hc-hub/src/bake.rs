@@ -297,7 +297,7 @@ fn bake_target(
     if !image(&section) {
         let kind = section.get("type").and_then(Value::as_str).unwrap_or("");
         return Err(format!(
-            "image の節ではありません (type {kind:?})。ミニ絵は、絵の行の図のパス (<会話のチケット>/mini-<名前>.svg) を渡す"
+            "image の節ではありません (type {kind:?})。ミニ絵は、絵の行の図のパス (<会話の名前>/mini-<名前>.svg) を渡す"
         ));
     }
     bake_image(arg, section, to, names)
@@ -677,7 +677,7 @@ impl Parts {
         let _ = writeln!(s, "  <g id=\"{GROUP_ID}\"{attr}>");
         let _ = writeln!(
             s,
-            "    <!-- pjp hub bake: panel.json の節の marks を CSS の動きに焼いた写し (チケットに上げる。panel には載せない) -->"
+            "    <!-- pjp hub bake: panel.json の節の marks を CSS の動きに焼いた写し (panel の外に出す写し。panel には載せない) -->"
         );
         if !self.style.is_empty() {
             s.push_str("    <style>\n");
