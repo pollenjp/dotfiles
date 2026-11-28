@@ -270,16 +270,15 @@
 //     字は定数 NEW_MARK (豆腐になる版に当たったら ● などに替える)。
 //   - 開け閉めのボタン: 子のトグルを持つトグル (畳めるチケットの行 (steps か children を持つ ticket の行) か Q&A の項目を下に持つ節、畳めるチケットの
 //     行を下に持つ木の行) の頭の行と、上の帯 (題と更新の時刻の行の下の 1 行に右寄せ) に、開け閉めのボタンをいつも出す (押す 1 手で効く)。字は
-//     英語で、トグルと上の帯で同じ 4 つ: 「Expand all」「Collapse all」「Expand 1 level」「Collapse 1 level」。ヒントにボタンの字と、何を開け閉めするか
-//     を出す。子のトグルの無いトグル (markdown・図などの節・Q&A の項目・畳めるチケットの行を下に持たない行) には出さない。
+//     英語で、トグルと上の帯で同じ形に、ペインの幅によらず動詞ごとに束ねて「Expand [all] [1 level]」「Collapse [all] [1 level]」と出す (動詞は字
+//     だけで、押せるのは all・1 level の 4 つ)。ヒントにボタンの全部の字 (「Expand all」「Collapse all」「Expand 1 level」「Collapse 1 level」) と、
+//     何を開け閉めするかを出す。子のトグルの無いトグル (markdown・図などの節・Q&A の項目・畳めるチケットの行を下に持たない行) には出さない。
 //     - all: そのトグルと、その下 (深さを問わず) の全部のトグルを開く・閉じる。上の帯は、全部の節と、その中の行・項目
 //     - 1 level: Expand は、そのトグルと、直下の子のトグル (間に開け閉めの無い行 (PR・item) を挟むときは、その下の一番近いトグル) を開き、
 //       Collapse は直下の子のトグルを閉じる (そのトグルは今のまま)。孫より下は今のまま。上の帯は、全部の節を開く・閉じる (中の行と項目は今のまま)
 //     - 置き場所: 節は題の後ろ (× の左)、木の行は ID・札・題・who・畳んだ行の PR の数の後ろに、右寄せで並べる。入らなければ次の行へ右寄せで回る
 //       (題は縮んで折り返し、× は右上に留まる。畳んだ済んだ行 (1 行に収める行) は、題の箱に最低の幅 (fs(80)) を残して、入らなければボタンを次の
-//       行へ回す)。ペインが狭い (幅が fs(FOLD.wide) より狭い。測る前も) と、トグルの行のボタンは動詞ごとに束ね、「Expand [all] [1 level]」
-//       「Collapse [all] [1 level]」(動詞は字だけで、押せるのは all・1 level。ヒントは束ねないときと同じ全部の字) と出す。それでも入らなければ
-//       動詞の組ごとに次の行へ回る。上の帯は 1 行を取るので、いつも 4 つを全部の字で並べる。
+//       行へ回す)。組が 1 行に入らなければ、動詞の組ごとに次の行へ回る。
 //     - 大きさ: トグルの行のボタンは panel の文字の % に従い、小さく出す節・行でも小さくしない (押せる大きさ。FOLD)。上の帯のボタンは「− % +」の
 //       組と同じく % に従わない。
 //     - 押しても、ボタンのあるトグルそのものは開け閉めしない (節の題を押したことにしない)。開け閉めしたものはユーザーの手の開け閉めとして覚え、
@@ -722,10 +721,9 @@ const VIEW_CAP = 500;
 const NEW_MARK = "🔔";
 // 印の字の大きさ (fs に渡す値)。小さく出す節・行でも小さくしない (読めるように)
 const NEW_SIZE = 12;
-// 開け閉めのボタン (頭のコメントの「開け閉めの覚え」の「開け閉めのボタン」)。wide: トグルの頭の行に 4 つを全部の字で並べるペインの幅 (fs に渡す値。
-// これより狭いペインは、動詞ごとに束ねて「Expand [all] [1 level]」「Collapse [all] [1 level]」と出す)。h・px・text・r: ボタンの高さ・左右の余白・
-// 字・角 (トグルの行は fs、上の帯は atBase に渡す値。小さく出す節・行でも小さくしない)
-const FOLD = { wide: 600, h: 17, px: 5, text: 10, r: 4 };
+// 開け閉めのボタン (頭のコメントの「開け閉めの覚え」の「開け閉めのボタン」)。h・px・text・r: ボタンの高さ・左右の余白・字・角 (トグルの行は fs、
+// 上の帯は atBase に渡す値。小さく出す節・行でも小さくしない)
+const FOLD = { h: 17, px: 5, text: 10, r: 4 };
 // トグルの鍵: 種類 (s: 節・r: 木の行・q: Q&A の項目)・節の名前・行か項目の名前 (節は空の字) の組
 const toggleKey = (kind, sec, sub = "") => `${kind}\u0000${sec}\u0000${sub}`;
 // id の無いものの名前に足す数: 同じ字が、その並びの前に何回出たか (並びごとに作る)
@@ -1940,15 +1938,9 @@ export default class HubPanel extends View {
     return (this.treeOf(this.data).nodes.get(key)?.kids.length ?? 0) > 0;
   }
 
-  // 開け閉めのボタンを束ねて出すか (頭のコメントの「開け閉めの覚え」の「開け閉めのボタン」)。トグルの行は、ペインの幅が FOLD.wide (panel の文字の %
-  // に従う) より狭ければ、動詞ごとに束ねる。幅をまだ測っていなければ束ねる。上の帯 (base) は 1 行を取るので、いつも 4 つを全部の字で並べる
-  foldCompact(base) {
-    return !base && (this.width == null || this.width < this.fs(FOLD.wide));
-  }
-
   // 開け閉めのボタンの組 (頭のコメントの「開け閉めの覚え」の「開け閉めのボタン」)。acts は foldActions・panelActions の 4 つ ({ verb, scope, tip,
-  // keys, open })。4 つを「Expand all」「Collapse all」「Expand 1 level」「Collapse 1 level」と並べ、束ねるときは「Expand [all] [1 level]」
-  // 「Collapse [all] [1 level]」(動詞は字だけで、押せるのは all・1 level) にする。入らなければ組ごと (束ねるときは動詞ごと) 次の行へ回る。押すと
+  // keys, open })。ペインの幅によらず、動詞ごとに束ねて「Expand [all] [1 level]」「Collapse [all] [1 level]」(動詞は字だけで、押せるのは
+  // all・1 level。ヒントは a.tip の全部の字) と出す。入らなければ動詞の組ごと次の行へ回る。押すと
   // keys のトグルをユーザーの手で開け閉めする (トグルそのものの開け閉めはしない。題の欄の on_click へは渡さない)。pin は貼り付けた写しのときの
   // { y, at } (setFold)。base は上の帯 (panel の文字の % に従わない)。トグルの行のボタンは、小さく出す節・行でも小さくしない (押せる大きさ)
   foldButtons(eid, acts, c, pin = null, base = false) {
@@ -1977,11 +1969,8 @@ export default class HubPanel extends View {
           this.setFold(a.keys, a.open, cx, pin);
         })
         .child(text);
-    // 組の幅はボタンの並びの幅だが、1 行より広ければ縮んで、中で折り返す
-    const row = h_flex().min_w(0).flex_wrap().justify_end().gap_x(B(4)).gap_y(B(3)).items_center();
-    if (!this.foldCompact(base)) return row.children(acts.map((a, i) => btn(a, i, `${a.verb} ${a.scope}`)));
-    // 束ねる: 動詞ごとに、動詞の字と、その動詞のボタン (all・1 level) を 1 つの組にする
-    return row.gap_x(B(8)).children(
+    // 組の幅は動詞の組の並びの幅だが、1 行より広ければ縮んで、中で折り返す。動詞ごとに、動詞の字と、その動詞のボタン (all・1 level) を 1 つの組にする
+    return h_flex().min_w(0).flex_wrap().justify_end().gap_x(B(8)).gap_y(B(3)).items_center().children(
       ["Expand", "Collapse"].map((v) =>
         h_flex()
           .flex_none()
