@@ -1,8 +1,8 @@
 // pjp-spaces: herdr-app 0.1.16 の同梱の spaces mod (mods/spaces/main.js) を写し、会話の端末がいる space の行を 2 行にして、
 // 2 行目に会話の端末の address と会話の印 (❓・🌱・🌳[N]・🔄・👀・🗑️・↑ TKT-n) を、3 行目から解説動画を 1 本 1 行 (🎬⏳:<名前>・
-// 🎬✅:<名前>) で足したもの。写した元の版: herdr-app 0.1.16。元は claude-skills の
-// skills/pjp-hc-hub/herdr-app/upstream/spaces/ に元のまま残してある。足した・替えた所には「pjp-spaces:」の注を付けた。
-// herdr-app を上げて元が変わったら、元との差を取り込む (skills/pjp-hc-hub/references/spaces.md)。元は自分の mods/spaces/ の
+// 🎬✅:<名前>) で足したもの。写した元の版: herdr-app 0.1.16。元は dotfiles の
+// win/herdr-app/upstream/spaces/ に元のまま残してある。足した・替えた所には「pjp-spaces:」の注を付けた。
+// herdr-app を上げて元が変わったら、元との差を取り込む (skill pjp-hc-hub の references/spaces.md)。元は自分の mods/spaces/ の
 // 資産も自分で開く overlay も使わないので、mod.clone がするような書き換えは要らない。
 //
 // Workspace spaces: stable colored avatars, worktrees under their checkout,
