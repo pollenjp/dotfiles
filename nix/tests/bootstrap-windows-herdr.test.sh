@@ -144,7 +144,7 @@ elevated_out="herdr (winget の Herdr.Herdr、${pkg})
 ⚠️ 昇格した PowerShell では winget が herdr を入れない (winget 1.30 から) → ※ の手順で直す ⚠️"
 
 # Install-Herdr.ps1 -IfMissing が入れ終えたが、PATH で herdr update の herdr が先に引かれるときの出力 (終了コード 1)
-installed_path_out="winget install --id Herdr.Herdr --exact --source winget --silent --accept-source-agreements --disable-interactivity --version ${v} --installer-type portable --accept-package-agreements
+installed_path_out="winget install --id Herdr.Herdr --exact --source winget --silent --accept-source-agreements --disable-interactivity --version ${v} --accept-package-agreements
   Successfully installed
 winget pin を足した (winget upgrade --all から外れる)
 

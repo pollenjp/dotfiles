@@ -2064,7 +2064,7 @@ winget の portable (zip の中の portable か、portable の exe。管理者�
 | starship | `starship/Install-Starship.ps1` | MSI の starship を見る (表の `Msi`) |
 | ntn | `ntn/Install-Ntn.ps1` | (なし) |
 | Claude Code | `claude-code/Install-ClaudeCode.ps1` | 自動更新の変数 (`CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE`) を見て ※ で知らせる (`ReadState`・`Notes`) |
-| herdr | `herdr/Install-Herdr.ps1` | 前の `Herdr.Herdr.Preview` (残っていれば知らせ、入れ替えを止め、外す手順を出す。`ReadState`・`PathKind`・`Manual`・`Blocker`・`RowsAfterPath`・`Notes`・`Verdict`) |
+| herdr | `herdr/Install-Herdr.ps1` | 前の `Herdr.Herdr.Preview` (残っていれば知らせ、入れ替えを止め、外す手順を出す。`ReadState`・`PathKind`・`Manual`・`Blocker`・`RowsAfterPath`・`Notes`・`Verdict`)。依存の VCRedist を winget に入れさせるので、`--installer-type` を名指ししない (表の `InstallerType = $null`) |
 | Codex CLI | `codex/Install-Codex.ps1` | `codex` と打てる形 (symlink・hardlink)・同梱の rg の PATH・化けた `codex-path` の行・1.29 以前の winget (`ReadState`・`Reinstall`・`Holds`・`Drift`・`BeforeWinget`・`AfterWinget`・`RowsBeforePath`・`RowsAfterPath`・`Verdict`) |
 
 winget 自身 (`winget/Install-WinGet.ps1`) は msixbundle で、枠に入れない。
@@ -2854,8 +2854,9 @@ Windows の herdr は winget の `Herdr.Herdr` (安定版。portable の zip。�
    `winget uninstall` してから `winget install --version` で入れる。portable の置き場所は版によらず
    同じで、`%APPDATA%\herdr` の設定やセッションは消えない
 2. 入れ替えの前に pin を外し、入れた後に `winget pin add` で `winget upgrade --all` から外す
-3. 読み直して、版・pin・PATH で引かれる herdr を確かめる。PATH で引かれる herdr は、置き場所のもの (開発者モードが off で、winget が置き場所を
-   ユーザーの PATH に足した形) と `%LOCALAPPDATA%\Microsoft\WinGet\Links\herdr.exe` (開発者モードが on で、winget が置いた symlink) のどちらも
+3. 読み直して、版・pin・PATH で引かれる herdr を確かめる。PATH で引かれる herdr は、置き場所のもの (winget が置き場所をユーザーの PATH に足した形。
+   `Herdr.Herdr` の manifest は `ArchiveBinariesDependOnPath: true` で、winget は開発者モードでも `WinGet\Links` に symlink を作らずにこの形にする) と、
+   `%LOCALAPPDATA%\Microsoft\WinGet\Links\herdr.exe` (前に symlink ができた PC・手で置いたもの。指す先が `Herdr.Herdr` の置き場所のとき) のどちらも
    winget のものとして読む
 
 - 入れ替えるときに herdr が動いていると (server・`herdr --remote`・conpty の OpenConsole.exe)、
@@ -2875,7 +2876,8 @@ Windows の herdr は winget の `Herdr.Herdr` (安定版。portable の zip。�
 - 版を変える・新しい版を見送るときは、次の「herdr の新しい版が出たとき」の手順で。新しい安定版が出たかは、
   `winget-versions` の notice か、`-Check` の ※ の行で分かる
 - 新しいマシンでは `setup --update` が入れる。依存の VCRedist が無いマシンでは、winget が入れるときに
-  Windows に UAC が出る
+  Windows に UAC が出る。`Install-Herdr` は `--installer-type` を名指ししない (manifest の依存 `Microsoft.VCRedist.2015+.x64` のインストーラーは burn
+  しか無く、winget は `--installer-type` を依存の解決にも効かせるので、名指しすると VCRedist の無い PC で `0x8A150104` で落ちる)
 - setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.herdr.enable = true` のマシン (herdr-app と herdr-core も同じ値)。既定は設定
   グループで決まり、グループ all の win/ を配るマシンで true (minimum では使うホストが書く。[`nix/README.md` の「設定グループ」](../nix/README.md#設定グループ))。
   false のマシンでは `bootstrap-windows-herdr.sh`・`bootstrap-windows-herdr-app.sh` を飛ばし (setup の結果に `↷`)、新しい版の知らせ
@@ -2892,7 +2894,7 @@ portable の置き場所は ID ごとに分かれる (`%LOCALAPPDATA%\Microsoft\
 - どちらのパッケージも置き場所をユーザーの PATH に足すので、両方ある間は PATH で先の方の herdr が引かれる。
   後から入れた `Herdr.Herdr` は後ろに足されるので、Preview の herdr が引かれる (`-Check` の「PATH の herdr」が ⚠ になり、
   「Preview を外せば直る」と ※ の行に出る。2026-11-09 にこの PC で確かめた)
-- 開発者モードが on のときに Preview を入れた PC では、`WinGet\Links\herdr.exe` が Preview を指す symlink のことがある。`-Check` は symlink の
+- `WinGet\Links\herdr.exe` が Preview を指す symlink のままの PC (前に symlink ができた・手で置いた) では、`-Check` は symlink の
   指す先を読み、「PATH の herdr」に `<Links のパス> → <Preview の herdr.exe> (Herdr.Herdr.Preview のもの)` と出して、同じく「Preview を外せば直る」と
   添える (winget の portable のもの (`WinGet\Links` の symlink) とは読まない)
 - `Herdr.Herdr` を並べて入れると、winget は Preview を `Herdr.Herdr` として数える (`winget list` の Preview の行の Id が

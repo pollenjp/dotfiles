@@ -7,8 +7,13 @@ dotfiles の win/herdr/Install-Herdr.ps1 を %USERPROFILE%\.config\powershell\ �
 PowerShell では dotfiles.ps1 の Install-Herdr から呼ぶ (win/README.md の「herdr を入れる」)。
 
 中身は winget の portable の道具の共通の枠 (win/winget/WingetPortable.ps1。win/README.md の「winget の portable の道具」) で、ここは herdr の表と、
-前の Herdr.Herdr.Preview を見る custom の関数を持つ。PATH で引かれる herdr は、置き場所 (開発者モードが off) と WinGet\Links の symlink
-(開発者モードが on) のどちらも winget のものとして読む。WinGet\Links の symlink が Herdr.Herdr.Preview を指せば、Preview のものと読む。
+前の Herdr.Herdr.Preview を見る custom の関数を持つ。Herdr.Herdr の manifest は ArchiveBinariesDependOnPath: true で、winget は開発者モードでも
+WinGet\Links に symlink を作らず、置き場所をユーザーの PATH に足す。PATH で引かれる herdr は、置き場所と、前に symlink ができた PC (手で置いた
+ものも) の WinGet\Links の symlink のどちらも winget のものとして読み、symlink が Herdr.Herdr.Preview を指せば Preview のものと読む。
+
+manifest は依存に Microsoft.VCRedist.2015+.x64 を持つ。winget の --installer-type は依存の解決にも効き、VCRedist のインストーラーは burn しか
+無いので、名指しすると VCRedist の無い PC で 0x8A150104 で落ちる。そこで herdr は --installer-type を名指しせず、winget に VCRedist も入れさせる
+(VCRedist は machine スコープなので、そのとき UAC の確認が出る)。
 
 herdr は portable (zip) のパッケージで、管理者無しで %LOCALAPPDATA%\Microsoft\WinGet\Packages の
 下に入る。herdr server が動いている間は herdr.exe を置き換えられないので、入れ替えが要るときに
@@ -73,6 +78,9 @@ function Get-HerdrTool {
         VersionPattern = '^\s*herdr\s+(?<v>\S+)\s*$'
         # herdr.exe は置き場所の直下 (manifest の RelativeFilePath)
         ExePath        = 'herdr.exe'
+        # --installer-type を名指ししない (頭の説明。依存の VCRedist を winget に入れさせる。manifest に portable の zip しか無いので、名指し
+        # しなくても入れ方は同じ)
+        InstallerType  = $null
         # 置き場所から起動して動いているプロセス (herdr server・herdr --remote・conpty の OpenConsole.exe)
         BusyName       = 'herdr の exe (herdr.exe・OpenConsole.exe)'
         BusyFix        = 'herdr の外の PowerShell で hsvstop を打ち、herdr --remote の窓も閉じる'
