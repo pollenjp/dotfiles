@@ -2091,7 +2091,9 @@ winget 1.30 は、昇格した会話 (UAC で昇格した PowerShell・管理者
 - runner (`dotfiles apply`) と WSL の setup は入れずに知らせる。昇格していない PowerShell (デスクトップの普通の端末) か、そこから開いた WSL で流し直す
 - pin を足す・外すだけなら止めない。UAC の分かれていない管理者 (Administrator・UAC が off) は昇格した会話に当たらない (winget も断らない)。見分けは
   winget と同じ (`Runtime::IsRunningWithNonDefaultFullToken`)
-- winget の版が読めなければ、止めずに打ってみる。`0x8A15007D` で落ちたら、昇格していない PowerShell で打ち直す行を添える
+- winget の版が読めなければ、止めずに打ってみる。token を読めない (`Add-Type` が方針で止められたなど) ときも昇格していないとして打つ (管理者の
+  ロールで代えると、UAC が off の管理者を昇格したと見誤って入れられなくなる)。`0x8A15007D` で落ちたら (pin を足す・外すのを断られたときも)、昇格して
+  いない PowerShell で打ち直す行を添える
 
 ### PATH の形
 
@@ -2099,6 +2101,11 @@ winget は portable を入れると、`WinGet\Links` に symlink を置く (開�
 ユーザーの PATH に足す。`-Check` の「PATH の <コマンド>」は、どちらも winget の portable のものとして読み、どちらの形かを括弧で添える
 (`(WinGet\Links の symlink)`・`(置き場所)`)。ほかのものが先に引かれる・入っているのに見つからないときは ⚠ と直し方の ※ を出す (揃える手順では直らない)。
 PATH は `.exe` のほか `.cmd`・`.bat`・`.ps1` も、PowerShell と同じくディレクトリの順に見る。
+
+`WinGet\Links` のものは、symlink の指す先も読む。指す先がその道具の置き場所の外 (同じ名前のコマンドを持つほかのパッケージ。herdr の
+`Herdr.Herdr.Preview` など) なら winget の portable のその道具とは読まず、「PATH の <コマンド>」に `<Links のパス> → <指す先>` と出して ⚠ にする。
+直し方の ※ は、指す先を入れたパッケージを `winget uninstall` で外すか symlink を消す (`WinGet\Links` をユーザーの PATH から外すと、winget の portable の
+どれもが引けなくなるので勧めない)。指す先が読めなければ、今までどおり `(WinGet\Links の symlink)` と読む。
 
 ### 道具を足す
 
@@ -2117,9 +2124,11 @@ PATH は `.exe` のほか `.cmd`・`.bat`・`.ps1` も、PowerShell と同じく
 - 入口が dot-source する ps1 で、PowerShell の module (`.psm1`) にしない (試験が dot-source した後に `Invoke-Winget` などを差し替えて流れを確かめる。
   module の中の呼び出しは module の関数を引き、差し替えが効かない。`Import-Module` は開いたままの PowerShell に古い module を残しうる)
 - 表は `Complete-PortableTool` が既定の値で埋めてから使う (StrictMode では、hashtable に無い key を `.` で読むと例外になる)。custom の口が返す行も
-  hashtable で、添字で読む
+  hashtable で、添字で読む。口が返した `$null` は除く (`return $null` も 1 つの値になり、`@()` で包むと数に入る)
+- パスは `\` で切る (`Get-PortableParent`)。`Split-Path` は Linux の pwsh で `/` に組み直すので、試験と字がずれる
 - 副作用の無い関数と、winget とプロセスを偽物に差し替えた流れ (見本の道具の表で、custom の口と見張りまで) は `winget/WingetPortable.Tests.ps1` で
-  確かめる (Linux の pwsh)。枠を使う入口を全部、配った写しの形 (隣の枠) と clone の形で起こし、枠が無ければ終了コード 2 で止まることも見る:
+  確かめる (Linux の pwsh)。本物の `Get-PortableState` も、葉 (ファイルの有無・winget・PATH・symlink・昇格) だけを偽物にして流し、読んだ値の入り先と
+  custom の口が受け取るものを見る。枠を使う入口を全部、配った写しの形 (隣の枠) と clone の形で起こし、枠が無ければ終了コード 2 で止まることも見る:
 
   ```sh
   nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/winget/WingetPortable.Tests.ps1

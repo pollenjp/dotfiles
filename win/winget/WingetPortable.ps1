@@ -55,9 +55,11 @@ BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無
   PackageDir       置き場所。既定 %LOCALAPPDATA%\Microsoft\WinGet\Packages\<PackageId>_Microsoft.Winget.Source_8wekyb3d8bbwe
   LinksDir         winget が symlink を置く所。既定 %LOCALAPPDATA%\Microsoft\WinGet\Links
 
-custom の口 (Hooks。どれも -Tool と -State を受け取る。PathKind だけ -Tool と -Resolved):
+custom の口 (Hooks。どれも -Tool と -State を受け取る。PathKind だけ -Tool と -Resolved と -LinkTarget。ReadState と Reinstall が受け取る State の
+Plan と Direction はまだ $null (その後に決める)。返す行に $null が混ざっても除く):
   ReadState       ③ 状態に足す値 (hashtable) を返す
-  PathKind        ③ PATH で引かれるものの custom の種類 (無ければ $null。links・package・other・none のほかに分けたいとき)
+  PathKind        ③ PATH で引かれるものの custom の種類 (無ければ $null。links・package・other・none のほかに分けたいとき)。-Resolved は PATH で
+                  引かれるもの、-LinkTarget はそれが WinGet\Links の symlink のときの指す先 (ほかは $null)
   Reinstall       ④ 版が揃っていても入れ直す (relink) なら $true
   Holds           ② 道具の見張り (New-PortableHold で作ったもの。無ければ $null)
   Drift           ④ 揃える手順で直る差がほかにあれば $true
@@ -122,13 +124,30 @@ function Complete-PortableTool {
     $t
 }
 
-# custom の口 (表の Hooks) の関数を呼ぶ。口が無ければ何も返さない。$Parameters を渡さなければ -Tool と -State を渡す
+# custom の口 (表の Hooks) の関数を呼ぶ。口が無ければ何も返さない。$Parameters を渡さなければ -Tool と -State を渡す。口が返した $null は除く
+# (return $null も 1 つの値になり、@() で包むと数に入る。行を返す口の「無い」を $null で書いても、行や止める理由にしない)
 function Invoke-PortableHook {
     param($Tool, [string]$Name, $State, [hashtable]$Parameters)
     $command = $Tool.Hooks[$Name]
     if (-not $command) { return }
     if ($null -eq $Parameters) { $Parameters = @{ Tool = $Tool; State = $State } }
-    & $command @Parameters
+    & $command @Parameters | Where-Object { $null -ne $_ }
+}
+
+# \ で区切ったパスの親 (\ が無ければ $null)。Split-Path は Linux の pwsh では / で組み直すので、試験でも同じ字になるよう文字列で切る
+function Get-PortableParent {
+    param([string]$Path)
+    $trimmed = $Path.TrimEnd('\')
+    $cut = $trimmed.LastIndexOf('\')
+    if ($cut -lt 0) { return $null }
+    $trimmed.Substring(0, $cut)
+}
+
+# $Path が $Root の下か (大文字小文字を区別しない。Windows のパスと同じ)
+function Test-PortableUnder {
+    param([string]$Path, [string]$Root)
+    if ((-not $Path) -or (-not $Root)) { return $false }
+    $Path.StartsWith($Root.TrimEnd('\') + '\', [StringComparison]::OrdinalIgnoreCase)
 }
 
 # $Root の下の、\ で区切った相対パス (manifest の RelativeFilePath)。Join-Path を重ねて組む (\ を書かないので、Linux の pwsh で流す試験でも
@@ -248,11 +267,12 @@ function Get-WingetDownloadArguments {
 }
 
 # winget の失敗の終了コードに添える行。無ければ $null。0x8A15007D (APPINSTALLER_CLI_ERROR_ADMIN_CONTEXT_ACTION_PROHIBITED) は、昇格した会話から
-# user スコープの portable を入れる・外すのを winget が断ったとき (会話の昇格を見誤ったとき。見張り (Get-PortableHold) が先に止める)
+# user スコープの portable を扱うのを winget が断ったとき (会話の昇格を見誤ったとき・pin を足す・外すのも断ったとき。入れる・入れ替えるのは
+# 見張り (Get-PortableHold) が先に止める)
 function Get-WingetFailureHint {
     param($Tool, [int]$ExitCode)
     if ($ExitCode -eq -1978335107) {
-        return "昇格した会話から user スコープの portable を入れる・外すのを winget が断った (0x8A15007D)。昇格していない PowerShell で $($Tool.Command) を打ち直す"
+        return "昇格した会話から user スコープの portable を扱うのを winget が断った (0x8A15007D)。昇格していない PowerShell で $($Tool.Command) を打ち直す"
     }
     $null
 }
@@ -276,15 +296,18 @@ function Resolve-PortableOnPath {
 
 # PATH で引かれるものがどこのものか。links (winget が symlink を置く WinGet\Links。開発者モードが on のときなど) / package (置き場所の exe の
 # ディレクトリ。winget が symlink を作れずに、置き場所を PATH に足した形) / $Custom (道具の custom の種類。Hooks.PathKind) / other / none。
-# -eq は大文字小文字を区別しない (Windows のパスと同じ)
+# WinGet\Links のものでも、symlink の指す先 ($LinkTarget) がこの道具の置き場所 ($PackageDir) の外なら links にしない (ほかのパッケージの同じ名前の
+# symlink。herdr の Herdr.Herdr.Preview など)。指す先が読めなければ links のまま。-eq は大文字小文字を区別しない (Windows のパスと同じ)
 function Get-PortablePathKind {
-    param([string]$Resolved, [string]$ExeDir, [string]$LinksDir, [string]$Custom)
+    param([string]$Resolved, [string]$ExeDir, [string]$LinksDir, [string]$Custom, [string]$LinkTarget, [string]$PackageDir)
     if (-not $Resolved) { return 'none' }
-    $cut = $Resolved.LastIndexOf('\')
-    if ($cut -lt 0) { return 'other' }
-    $dir = $Resolved.Substring(0, $cut)
-    if ($LinksDir -and ($dir -eq $LinksDir.TrimEnd('\'))) { return 'links' }
-    if ($ExeDir -and ($dir -eq $ExeDir.TrimEnd('\'))) { return 'package' }
+    $dir = Get-PortableParent -Path $Resolved
+    if ($null -eq $dir) { return 'other' }
+    if ($LinksDir -and ($dir -eq $LinksDir.TrimEnd('\'))) {
+        if ((-not $LinkTarget) -or (-not $PackageDir) -or (Test-PortableUnder -Path $LinkTarget -Root $PackageDir)) { return 'links' }
+    } elseif ($ExeDir -and ($dir -eq $ExeDir.TrimEnd('\'))) {
+        return 'package'
+    }
     if ($Custom) { return $Custom }
     'other'
 }
@@ -314,7 +337,8 @@ function Test-PortableManual {
 # Message は揃える流れで止めるときの 1 行。KeepPathFix が $false なら、PATH のずれの ※ の行を出さない (見張りの直し方で PATH も直るとき)
 function New-PortableHold {
     param([string]$Name, [object[]]$Rows, [string]$Verdict, [string]$Message, [bool]$KeepPathFix = $true)
-    [pscustomobject]@{ Name = $Name; Rows = @($Rows); Verdict = $Verdict; Message = $Message; KeepPathFix = $KeepPathFix }
+    # 条件つきの行 (if が何も返さない・$null を返す) を並べても、$null は行にしない
+    [pscustomobject]@{ Name = $Name; Rows = @($Rows | Where-Object { $null -ne $_ }); Verdict = $Verdict; Message = $Message; KeepPathFix = $KeepPathFix }
 }
 
 # MSI の道具 (machine スコープ。winget の既定の installer) が入っている。portable と二重になり、winget の install・pin がどちらを指すか決まらない
@@ -399,11 +423,13 @@ function Format-PortableState {
     $installedText = if ($State.Plan -eq 'install') { '入っていない' } elseif ($State.Installed) { $State.Installed } else { "不明 ($($Tool.VersionLabel) が読めない)" }
     $latestText = if ($State.Latest) { $State.Latest } else { '不明 (winget show が失敗)' }
     $pinText = if ($State.Pinned) { 'あり' } else { '無し → 足す' }
+    # WinGet\Links の symlink がほかを指すとき (links でないとき) は、指す先も出す
+    $shown = if ($State.PathLinkTarget -and ($State.PathKind -ne 'links')) { "$($State.PathResolved) → $($State.PathLinkTarget)" } else { "$($State.PathResolved)" }
     $pathText = switch ($State.PathKind) {
-        'other' { "$($State.PathResolved) (winget の portable のものではない)" }
+        'other' { "$shown (winget の portable のものではない)" }
         'none' { '見つからない' }
         default {
-            if ($Tool.PathTexts[$State.PathKind]) { $Tool.PathTexts[$State.PathKind] -f $State.PathResolved } else { "$($State.PathResolved)" }
+            if ($Tool.PathTexts[$State.PathKind]) { $Tool.PathTexts[$State.PathKind] -f $shown } else { $shown }
         }
     }
     # custom の種類 (PathKind) は、入れる前なら当たり前なので ⚠ にしない
@@ -444,7 +470,10 @@ function Format-PortableState {
             $cut = $State.PathResolved.LastIndexOf('\')
             $dir = if ($cut -ge 0) { $State.PathResolved.Substring(0, $cut) } else { $State.PathResolved }
             $leaf = $State.PathResolved.Substring($cut + 1)
-            [pscustomobject]@{ Text = "※ PATH のずれは $($Tool.Command) では直らない。$($Tool.PathOtherFix -f $dir, $leaf)"; Warn = $false }
+            # WinGet\Links の、ほかのパッケージの symlink。WinGet\Links を PATH から外すと winget の portable のどれもが引けなくなるので、表の
+            # PathOtherFix を使わない
+            $fix = if ($State.PathLinkTarget) { "$dir の $leaf は $($State.PathLinkTarget) を指す (ほかのパッケージの symlink)。指す先を入れたパッケージを winget uninstall で外すか、その symlink を消す (win/README.md の「$($Tool.Readme)」)" } else { $Tool.PathOtherFix -f $dir, $leaf }
+            [pscustomobject]@{ Text = "※ PATH のずれは $($Tool.Command) では直らない。$fix"; Warn = $false }
         } elseif (($State.PathKind -eq 'none') -and ($State.Plan -notin @('install', 'relink'))) {
             [pscustomobject]@{ Text = "※ $($Tool.PathNoneFix)"; Warn = $false }
         }
@@ -551,6 +580,22 @@ function Get-PortableInstalledVersion {
     Get-PortableVersionFromOutput -Lines $out -Pattern $Pattern
 }
 
+# symlink の指す先 (絶対パス)。symlink でない・読めなければ $null。5.1 の Target は文字列の並び、7 は文字列なので、@() で包んで 1 つ目を取る
+function Get-PortableLinkTarget {
+    param([string]$Path)
+    try {
+        $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    } catch {
+        return $null
+    }
+    if ("$($item.LinkType)" -ne 'SymbolicLink') { return $null }
+    $target = @($item.Target | Where-Object { $_ }) | Select-Object -First 1
+    if (-not $target) { return $null }
+    $target = "$target" -replace '^\\\\\?\\', '' -replace '^\\\?\?\\', ''
+    if (-not [IO.Path]::IsPathRooted($target)) { $target = [IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $Path) $target)) }
+    $target
+}
+
 # これから開く PowerShell が使う PATH (マシン → ユーザーの順)。今のプロセスの PATH は古いことがある
 function Get-PortablePathValue {
     @([Environment]::GetEnvironmentVariable('Path', 'Machine'), [Environment]::GetEnvironmentVariable('Path', 'User')) -join ';'
@@ -570,7 +615,9 @@ function Get-PortableBusyProcess {
 
 # 今の PowerShell が UAC で昇格した token (TokenElevationTypeFull) で動いているか。winget 1.30 が user スコープの portable を断るのと同じ見方
 # (winget の Runtime::IsRunningWithNonDefaultFullToken)。UAC の分かれていない管理者 (Administrator・UAC が off) は Default なので当たらない。
-# token を読めなければ、管理者のロールで代える
+# token を読めなければ (Add-Type が方針で止められたなど) 昇格していないとして winget を打つ。管理者のロールで代えると、UAC が off の管理者を
+# 昇格したと見誤り、winget が断らないのに入れられなくなる。見誤って打っても、winget が断れば終了コード 0x8A15007D に直し方を添える
+# (Get-WingetFailureHint)
 function Test-WingetElevated {
     try {
         if (-not ('DotfilesWinget.TokenInfo' -as [type])) {
@@ -586,8 +633,7 @@ public static extern bool GetTokenInformation(IntPtr token, int infoClass, out i
         if ([DotfilesWinget.TokenInfo]::GetTokenInformation($identity.Token, 18, [ref]$type, 4, [ref]$returned)) { return ($type -eq 2) }
     } catch {
     }
-    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-    (New-Object Security.Principal.WindowsPrincipal $identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    $false
 }
 
 # 開発者モード (設定 > システム > 開発者向け) が on か。on なら、昇格していない winget も WinGet\Links に symlink を作れる
@@ -604,7 +650,7 @@ function Get-PortableState {
     $installed = $null
     if ($exists) { $installed = Get-PortableInstalledVersion -Exe $exe -Pattern $Tool.VersionPattern }
     # 入っていなければ、winget が足すはずのディレクトリ (manifest の RelativeFilePath の親) で PATH を見る
-    $exeDir = if ($exe) { Split-Path -Parent $exe } else { Split-Path -Parent (Join-PortablePath -Root $Tool.PackageDir -Relative $Tool.ExePath[0]) }
+    $exeDir = if ($exe) { Get-PortableParent -Path $exe } else { Get-PortableParent -Path "$($Tool.PackageDir.TrimEnd('\'))\$($Tool.ExePath[0])" }
     $wingetVersion = Get-WingetClientVersion -Lines (Invoke-Winget -Arguments @('--version')).Lines
     $pins = Invoke-Winget -Arguments @('pin', 'list', '--id', $Tool.PackageId, '--exact', '--accept-source-agreements', '--disable-interactivity')
     $show = Invoke-Winget -Arguments @('show', '--id', $Tool.PackageId, '--exact', '--versions', '--source', 'winget', '--accept-source-agreements', '--disable-interactivity')
@@ -614,26 +660,30 @@ function Get-PortableState {
     if ($versions.Count -gt 0) { $latest = $versions[0] }
     $names = @(@('exe', 'cmd', 'bat', 'ps1') | ForEach-Object { "$($Tool.CommandName).$_" })
     $resolved = Resolve-PortableOnPath -PathValue (Get-PortablePathValue) -Names $names -Exists { param($p) Test-Path -LiteralPath $p -PathType Leaf }
-    $custom = Invoke-PortableHook -Tool $Tool -Name 'PathKind' -Parameters @{ Tool = $Tool; Resolved = $resolved }
+    # WinGet\Links のものなら、symlink の指す先 (この道具の置き場所か、ほかのパッケージか)
+    $linkTarget = $null
+    if ($resolved -and ((Get-PortableParent -Path $resolved) -eq $Tool.LinksDir.TrimEnd('\'))) { $linkTarget = Get-PortableLinkTarget -Path $resolved }
+    $custom = Invoke-PortableHook -Tool $Tool -Name 'PathKind' -Parameters @{ Tool = $Tool; Resolved = $resolved; LinkTarget = $linkTarget }
     $msi = $null
     if ($Tool.Msi) { $msi = Find-PortableMsiExe -ProgramFiles @($env:ProgramFiles, ${env:ProgramFiles(x86)}) -Relative $Tool.Msi }
     $elevated = Test-WingetElevated
     $state = [ordered]@{
-        Exists        = $exists
-        Installed     = $installed
-        Exe           = $exe
-        Plan          = $null
-        Direction     = $null
-        Pinned        = Test-WingetPinned -Lines $pins.Lines -PackageId $Tool.PackageId
-        Versions      = $versions
-        Latest        = $latest
-        PathResolved  = $resolved
-        PathKind      = Get-PortablePathKind -Resolved $resolved -ExeDir $exeDir -LinksDir $Tool.LinksDir -Custom $custom
-        BusyCount     = @(Get-PortableBusyProcess -Tool $Tool).Count
-        MsiExe        = $msi
-        WingetVersion = $wingetVersion
-        Elevated      = $elevated
-        Route         = Get-WingetRoute -Elevated $elevated -WingetVersion $wingetVersion
+        Exists         = $exists
+        Installed      = $installed
+        Exe            = $exe
+        Plan           = $null
+        Direction      = $null
+        Pinned         = Test-WingetPinned -Lines $pins.Lines -PackageId $Tool.PackageId
+        Versions       = $versions
+        Latest         = $latest
+        PathResolved   = $resolved
+        PathLinkTarget = $linkTarget
+        PathKind       = Get-PortablePathKind -Resolved $resolved -ExeDir $exeDir -LinksDir $Tool.LinksDir -Custom $custom -LinkTarget $linkTarget -PackageDir $Tool.PackageDir
+        BusyCount      = @(Get-PortableBusyProcess -Tool $Tool).Count
+        MsiExe         = $msi
+        WingetVersion  = $wingetVersion
+        Elevated       = $elevated
+        Route          = Get-WingetRoute -Elevated $elevated -WingetVersion $wingetVersion
     }
     $extra = Invoke-PortableHook -Tool $Tool -Name 'ReadState' -State ([pscustomobject]$state)
     if ($extra) {
@@ -694,7 +744,7 @@ function Invoke-WingetPortable {
     }
     # 揃える手順で直す差が無く、残っているのは人が直すこと (PATH のずれなど) だけ
     if (-not (Test-PortableDrift -Tool $Tool -State $state)) {
-        Write-Host "$($Tool.Synced) は揃っている。残りの差は $($Tool.Command) では直らない (上の ※ の行の手順で直す)"
+        Write-Host "$($Tool.Synced) は揃っている。残りの差は $($Tool.Command) では直らない (※ の行・締めの行の手順で直す)"
         Write-PortableVerdict -Tool $Tool -State $state
         return 1
     }
@@ -735,7 +785,11 @@ function Invoke-WingetPortable {
     # 入れ替える・入れ直すときは、古い版の pin を残さないよう先に外す (入れた後に足し直す)
     if (($state.Plan -in @('change', 'relink')) -and $state.Pinned) {
         $unpin = Invoke-Winget -Arguments @('pin', 'remove', '--id', $Tool.PackageId, '--exact', '--accept-source-agreements', '--disable-interactivity')
-        if ($unpin.ExitCode -ne 0) { Write-Host ('winget pin remove が失敗した (終了コード 0x{0:X8})' -f $unpin.ExitCode) }
+        if ($unpin.ExitCode -ne 0) {
+            Write-Host ('winget pin remove が失敗した (終了コード 0x{0:X8})' -f $unpin.ExitCode)
+            $hint = Get-WingetFailureHint -Tool $Tool -ExitCode $unpin.ExitCode
+            if ($hint) { Write-Host $hint }
+        }
     }
     $null = Invoke-PortableHook -Tool $Tool -Name 'BeforeWinget' -State $state
     foreach ($arguments in @(Get-WingetCommands -Tool $Tool -Plan $state.Plan -Version $Version)) {
@@ -757,7 +811,12 @@ function Invoke-WingetPortable {
     if ((Find-PortableExe -Tool $Tool) -and -not (Test-WingetPinned -Lines $pins.Lines -PackageId $Tool.PackageId)) {
         $pin = Invoke-Winget -Arguments @('pin', 'add', '--id', $Tool.PackageId, '--exact', '--accept-source-agreements', '--disable-interactivity')
         if ($pin.ExitCode -eq 0) { Write-Host 'winget pin を足した (winget upgrade --all から外れる)' }
-        else { Write-Host ('winget pin add が失敗した (終了コード 0x{0:X8})' -f $pin.ExitCode) }
+        else {
+            Write-Host ('winget pin add が失敗した (終了コード 0x{0:X8})' -f $pin.ExitCode)
+            # 昇格した会話でも pin を足すだけなら見張りは止めない。winget が断ったら直し方を添える
+            $hint = Get-WingetFailureHint -Tool $Tool -ExitCode $pin.ExitCode
+            if ($hint) { Write-Host $hint }
+        }
     }
     $null = Invoke-PortableHook -Tool $Tool -Name 'AfterWinget' -State $state
 

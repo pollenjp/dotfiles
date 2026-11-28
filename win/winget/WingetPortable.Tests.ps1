@@ -13,7 +13,11 @@
 #   - 入っていなければ install、版が違う・読めなければ change、版が同じで道具が入れ直すと決めれば relink、ほかは none
 #   - install は portable を名指しし (表の InstallerType)、change と relink は uninstall → install (どれも upgrade を打たず、
 #     --include-pinned も付けない)。取得だけを確かめる winget download も同じ installer を名指しする
-#   - PATH で引かれるもの (WinGet\Links なら links、置き場所の exe のディレクトリなら package、custom の種類、ほかは other)
+#   - PATH で引かれるもの (WinGet\Links なら links、置き場所の exe のディレクトリなら package、custom の種類、ほかは other)。WinGet\Links の
+#     symlink がほかのパッケージを指せば links にせず、指す先を出して、WinGet\Links を PATH から外させない直し方を添える
+#   - 本物の Get-PortableState を、葉 (ファイルの有無・winget・PATH・symlink・MSI・昇格・動いている exe) だけ偽物にして流し、読んだ値の入り先と、
+#     custom の口 (PathKind・ReadState・Reinstall) が受け取るものを見る
+#   - custom の口が $null を返しても、行・止める理由・見張りにしない
 #   - 見張り: MSI の道具 (入れるかによらず)・道具の見張り・昇格した会話の winget 1.30 以降 (入れる・入れ替える・入れ直すときだけ)。
 #     当たれば終了コードは 1 (入っていなくても 3 にしない)、締めの行はその 1 行だけ、揃える流れは winget を 1 つも打たない
 #   - 終了コード (揃っていれば 0・差があれば 1・入っていなければ 3)・状態の表の行・締めの行 (runner と WSL の wrapper が読む字)
@@ -184,7 +188,7 @@ Test-Case 'どの plan も upgrade を打たず、--include-pinned も付けな�
 Test-Case '取得だけを確かめる winget download の引数 (portable を名指しする)' "download --id $Id --exact --source winget --version $V --installer-type portable --download-directory C:\tmp\dl --skip-dependencies --accept-package-agreements --accept-source-agreements --disable-interactivity" { (Get-WingetDownloadArguments -Tool $T -Version $V -Directory 'C:\tmp\dl') -join ' ' }
 Test-Case 'InstallerType が無ければ download も名指ししない' "download --id $Id --exact --source winget --version $V --download-directory C:\tmp\dl --skip-dependencies --accept-package-agreements --accept-source-agreements --disable-interactivity" { (Get-WingetDownloadArguments -Tool (New-Tool @{ InstallerType = $null }) -Version $V -Directory 'C:\tmp\dl') -join ' ' }
 
-Test-Case '0x8A15007D には、昇格していない PowerShell で打ち直す行を添える' '昇格した会話から user スコープの portable を入れる・外すのを winget が断った (0x8A15007D)。昇格していない PowerShell で Install-Tool を打ち直す' { Get-WingetFailureHint -Tool $T -ExitCode -1978335107 }
+Test-Case '0x8A15007D には、昇格していない PowerShell で打ち直す行を添える' '昇格した会話から user スコープの portable を扱うのを winget が断った (0x8A15007D)。昇格していない PowerShell で Install-Tool を打ち直す' { Get-WingetFailureHint -Tool $T -ExitCode -1978335107 }
 Test-Case 'ほかの終了コードには添えない' '' { Get-WingetFailureHint -Tool $T -ExitCode 1 }
 
 # ---------------------------------------------------------------------------
@@ -206,6 +210,18 @@ Test-Case 'ほかの場所なら other' 'other' { Get-PortablePathKind -Resolved
 Test-Case '道具の custom の種類 (Links・置き場所でないとき)' 'preview' { Get-PortablePathKind -Resolved 'C:\P\tool.exe' -ExeDir $Pkg -LinksDir $Links -Custom 'preview' }
 Test-Case 'Links・置き場所なら custom の種類より先' 'links' { Get-PortablePathKind -Resolved "$Links\tool.exe" -ExeDir $Pkg -LinksDir $Links -Custom 'preview' }
 Test-Case '見つからなければ none' 'none' { Get-PortablePathKind -Resolved $null -ExeDir $Pkg -LinksDir $Links }
+# WinGet\Links の symlink の指す先 (ほかのパッケージの同じ名前の symlink を links と読まない)
+Test-Case 'Links の symlink が置き場所の exe を指せば links' 'links' { Get-PortablePathKind -Resolved "$Links\tool.exe" -ExeDir $Pkg -LinksDir $Links -LinkTarget "$Pkg\tool.exe" -PackageDir $Pkg }
+Test-Case 'Links の symlink が置き場所の下 (exe のディレクトリでなくても) を指せば links' 'links' { Get-PortablePathKind -Resolved "$Links\tool.exe" -ExeDir "$Pkg\bin" -LinksDir $Links -LinkTarget "$($Pkg.ToUpper())\bin\tool.exe" -PackageDir $Pkg }
+Test-Case 'Links の symlink がほかのパッケージを指せば other' 'other' { Get-PortablePathKind -Resolved "$Links\tool.exe" -ExeDir $Pkg -LinksDir $Links -LinkTarget 'C:\O\tool.exe' -PackageDir $Pkg }
+Test-Case 'Links の symlink がほかを指せば、道具の custom の種類' 'preview' { Get-PortablePathKind -Resolved "$Links\tool.exe" -ExeDir $Pkg -LinksDir $Links -Custom 'preview' -LinkTarget 'C:\P\tool.exe' -PackageDir $Pkg }
+Test-Case '名前の頭が同じだけのディレクトリ (置き場所 + X) は置き場所の下にしない' 'other' { Get-PortablePathKind -Resolved "$Links\tool.exe" -ExeDir $Pkg -LinksDir $Links -LinkTarget "${Pkg}X\tool.exe" -PackageDir $Pkg }
+Test-Case 'Links の指す先が読めなければ links のまま' 'links' { Get-PortablePathKind -Resolved "$Links\tool.exe" -ExeDir $Pkg -LinksDir $Links -LinkTarget $null -PackageDir $Pkg }
+
+Test-Case '\ で区切ったパスの親 (\ が無ければ空・末尾の \ は飛ばす)' 'C:\a|True|C:\a' { "$(Get-PortableParent -Path 'C:\a\b.exe')|$($null -eq (Get-PortableParent -Path 'b.exe'))|$(Get-PortableParent -Path 'C:\a\b\')" }
+Test-Case '置き場所の下か (大文字小文字を区別しない・同じパスと頭が同じだけの名前は下にしない・空は下にしない)' 'True True False False False' {
+    "$(Test-PortableUnder -Path 'C:\R\x.exe' -Root 'C:\R') $(Test-PortableUnder -Path 'c:\r\a\x.exe' -Root 'C:\R\') $(Test-PortableUnder -Path 'C:\R' -Root 'C:\R') $(Test-PortableUnder -Path 'C:\RX\x.exe' -Root 'C:\R') $(Test-PortableUnder -Path $null -Root 'C:\R')"
+}
 
 # ---------------------------------------------------------------------------
 # 状態から決めること
@@ -216,8 +232,8 @@ function New-State {
     param([hashtable]$Change = @{})
     $s = [ordered]@{
         Exists = $true; Installed = $V; Exe = "$Pkg\tool.exe"; Plan = 'none'; Direction = 'same'; Pinned = $true
-        Versions = @($V, $Older); Latest = $V; PathResolved = "$Pkg\tool.exe"; PathKind = 'package'; BusyCount = 0; MsiExe = $null
-        WingetVersion = [version]'1.30.310'; Elevated = $false; Route = 'direct'
+        Versions = @($V, $Older); Latest = $V; PathResolved = "$Pkg\tool.exe"; PathLinkTarget = $null; PathKind = 'package'; BusyCount = 0
+        MsiExe = $null; WingetVersion = [version]'1.30.310'; Elevated = $false; Route = 'direct'
     }
     foreach ($k in $Change.Keys) { $s[$k] = $Change[$k] }
     [pscustomobject]$s
@@ -297,6 +313,12 @@ Test-Case '入れるだけなら動いている数は見ない' '' { Get-Portabl
 Test-Case 'pin を足すだけなら止めない' '' { Get-PortableApplyBlocker -Tool $T -State (New-State @{ Pinned = $false; Versions = @(); BusyCount = 3 }) -Target 'x' }
 Test-Case '道具の止める理由 (Blocker が行を返す) は custom。動いているより先' 'custom' { Get-PortableApplyBlocker -Tool $blockTool -State (New-State (Join-Change $handNewer @{ Installed = 'blocked'; BusyCount = 1 })) -Target $V }
 Test-Case 'winget に無いのは道具の止める理由より先' 'not-listed' { Get-PortableApplyBlocker -Tool $blockTool -State (New-State (Join-Change $handNewer @{ Installed = 'blocked' })) -Target '0.9.0' }
+# 口が $null を返しても「無い」と同じ (return $null も 1 つの値になり、@() で包むと数に入る)
+function Get-NullHook { param($Tool, $State) $null }
+function Get-NullRows { param($Tool, $State) $null; @{ Label = '別名'; Value = 'ある'; Warn = $false }; $null }
+Test-Case 'Blocker が $null を返しても止めない' '' { Get-PortableApplyBlocker -Tool (New-Tool @{ Hooks = @{ Blocker = 'Get-NullHook' } }) -State (New-State $handNewer) -Target $V }
+Test-Case 'Holds が $null を返しても見張りは当たらない' 'True' { $null -eq (Get-PortableHold -Tool (New-Tool @{ Hooks = @{ Holds = 'Get-NullHook' } }) -State (New-State $handNewer)) }
+Test-Case '見張りの行に $null が混ざっても行にしない' '⚠ 古い|※ 直す' { @((New-PortableHold -Name 'x' -Rows @($null, @{ Text = '⚠ 古い'; Warn = $true }, $null, @{ Text = '※ 直す'; Warn = $false }) -Verdict 'v' -Message 'm').Rows | ForEach-Object { $_['Text'] }) -join '|' }
 
 # ---------------------------------------------------------------------------
 # 状態の表と締めの行
@@ -337,6 +359,17 @@ function Get-SampleNotes { param($Tool, $State) @{ Text = '※ 自動更新が�
 $rowTool = New-Tool @{ Hooks = @{ RowsBeforePath = 'Get-SampleRowsBefore'; RowsAfterPath = 'Get-SampleRowsAfter'; Notes = 'Get-SampleNotes' } }
 Test-Case 'RowsBeforePath は PATH の行の前、RowsAfterPath は後、Notes は終わりに足す' '  別名            : ある|  PATH の tool    : winget の portable のもの (置き場所)|⚠ 同梱の rg       : 無い → 足す|⚠ 化けた行        : 1 行|※ 自動更新が有効' { @((Get-Rows (New-State) $rowTool) | Select-Object -Skip 5 | ForEach-Object { $_.Text }) -join '|' }
 Test-Case '足した行の ⚠ は Warn になる' 2 { @((Get-Rows (New-State) $rowTool) | Where-Object { $_.Warn }).Count }
+Test-Case '行・終わりの行の口が $null を返しても行にしない (混ざった $null も除く)' '6 7 6' {
+    "$((Get-Rows (New-State) (New-Tool @{ Hooks = @{ RowsBeforePath = 'Get-NullHook'; RowsAfterPath = 'Get-NullHook' } })).Count) $((Get-Rows (New-State) (New-Tool @{ Hooks = @{ RowsAfterPath = 'Get-NullRows' } })).Count) $((Get-Rows (New-State) (New-Tool @{ Hooks = @{ Notes = 'Get-NullHook' } })).Count)"
+}
+# WinGet\Links の symlink がほかを指すとき: 指す先も出し、WinGet\Links を PATH から外させない
+$foreignLink = @{ PathKind = 'other'; PathResolved = "$Links\tool.exe"; PathLinkTarget = 'C:\O\tool.exe' }
+Test-Case 'Links の symlink がほかのパッケージを指せば、指す先を ⚠ で出し、外し方を ※ で添える (表の PathOtherFix は使わない)' "⚠ PATH の tool    : $Links\tool.exe → C:\O\tool.exe (winget の portable のものではない)|※ PATH のずれは Install-Tool では直らない。$Links の tool.exe は C:\O\tool.exe を指す (ほかのパッケージの symlink)。指す先を入れたパッケージを winget uninstall で外すか、その symlink を消す (win/README.md の「tool の節」)" {
+    $r = Get-Rows (New-State $foreignLink) (New-Tool @{ PathOtherFix = '{0} をユーザーの PATH から外す' }); "$($r[5].Text)|$($r[-1].Text)"
+}
+Test-Case 'custom の種類でも、Links の symlink なら {0} に指す先も入れる' "⚠ PATH の tool    : $Links\tool.exe → C:\P\tool.exe (Preview のもの)" { (Get-Rows (New-State @{ PathKind = 'preview'; PathResolved = "$Links\tool.exe"; PathLinkTarget = 'C:\P\tool.exe' }) (New-Tool @{ PathTexts = @{ preview = '{0} (Preview のもの)' } }))[5].Text }
+Test-Case 'Links の symlink が置き場所を指せば (links) 指す先は出さない' '  PATH の tool    : winget の portable のもの (WinGet\Links の symlink) 6' { $r = Get-Rows (New-State @{ PathKind = 'links'; PathResolved = "$Links\tool.exe"; PathLinkTarget = "$Pkg\tool.exe" }); "$($r[5].Text) $($r.Count)" }
+Test-Case 'Links の symlink がほかを指せば、締めの行は PATH のずれ' '⚠️ PATH の tool が winget の portable のものではない → ※ の手順で直す ⚠️' { (@(Format-PortableVerdict -Tool $T -State (New-State $foreignLink)) | ForEach-Object { "$_" }) -join "`n" }
 Test-Case 'custom の種類の PATH は PathTexts の字 ({0} は引かれたもの)。入れる前でなければ ⚠' '⚠ PATH の tool    : C:\P\tool.exe (Preview のもの)' { (Get-Rows (New-State @{ PathKind = 'preview'; PathResolved = 'C:\P\tool.exe' }) (New-Tool @{ PathTexts = @{ preview = '{0} (Preview のもの)' } }))[5].Text }
 Test-Case 'custom の種類の PATH は、入れる前なら ⚠ にしない' '  PATH の tool    : C:\P\tool.exe (Preview のもの)' { (Get-Rows (New-State (Join-Change $missing @{ PathKind = 'preview'; PathResolved = 'C:\P\tool.exe' })) (New-Tool @{ PathTexts = @{ preview = '{0} (Preview のもの)' } }))[5].Text }
 
@@ -355,6 +388,7 @@ $verdictTool = New-Tool @{ Hooks = @{ Verdict = 'Get-SampleVerdict' } }
 Test-Case '道具の Verdict は、入れるときは「入れる」の後' "⚠️ tool が入っていない → Install-Tool で入れる ⚠️`n⚠️ 道具の行 (install) ⚠️" { Get-Verdict (New-State $missing) $verdictTool }
 Test-Case '道具の Verdict は、ほかは「揃える」と PATH の行の間' "⚠️ 固定した版と揃っていない → Install-Tool で揃える ⚠️`n⚠️ 道具の行 (change) ⚠️`n⚠️ PATH の tool が winget の portable のものではない → ※ の手順で直す ⚠️" { Get-Verdict (New-State ($handNewer + $other)) $verdictTool }
 Test-Case '道具の見張りがあれば、その 1 行だけ' '⚠️ 古い → ※ の手順で直す ⚠️' { Get-Verdict (New-State (Join-Change $handNewer @{ Installed = 'old' })) $holdTool }
+Test-Case '締めの行の口が $null を返しても行にしない' '0 1' { $t = New-Tool @{ Hooks = @{ Verdict = 'Get-NullHook' } }; "$(@(Format-PortableVerdict -Tool $t -State (New-State)).Count) $(@(Format-PortableVerdict -Tool $t -State (New-State $handNewer)).Count)" }
 
 # ---------------------------------------------------------------------------
 # Windows に触る関数のうち、Linux でも確かめられるもの
@@ -394,6 +428,70 @@ New-Item -ItemType File -Force -Path $pf64Exe | Out-Null
 Test-Case '両方にあれば %ProgramFiles% の下を先に見る' $pf64Exe { Find-PortableMsiExe -ProgramFiles @($pf64, $pf86) -Relative 'tool\bin\tool.exe' }
 Test-Case 'ProgramFiles が無ければ (Linux の pwsh) 空' '' { Find-PortableMsiExe -ProgramFiles @($null, '') -Relative 'tool\bin\tool.exe' }
 Remove-Item -LiteralPath $pfRoot -Recurse -Force
+
+# Test-WingetElevated: token を読めなければ (Linux の pwsh では WindowsIdentity が無い) 昇格していないとして winget を打つ
+Test-Case 'token を読めなければ昇格していないとする (管理者のロールで代えない)' 'False' { Test-WingetElevated }
+
+# Get-PortableState: 本物の Get-PortableState を、葉 (ファイルの有無・Join-Path・exe の版・winget・PATH・symlink・MSI・昇格・動いている exe)
+# だけ偽物にして流し、読んだ値が状態のどこに入るかと、custom の口 (PathKind・ReadState・Reinstall) が何を受け取るかを確かめる。偽物は
+# Get-WiredState の中で定義するので、外の試験には漏れない (呼んだ関数からは、呼び出し元の関数が見える)
+function Get-WiredState {
+    param([hashtable]$World = @{}, [hashtable]$Change = @{})
+    $wired = @{
+        Files = @("$Pkg\tool.exe"); Installed = $V; Winget = 'v1.30.310'; Pinned = $true; PathValue = "C:\Windows;$Pkg"; Links = @{}
+        Msi = $null; Elevated = $false; Busy = 0
+    }
+    foreach ($k in $World.Keys) { $wired[$k] = $World[$k] }
+    function Test-Path { param([string]$LiteralPath, [string]$PathType) $wired.Files -contains $LiteralPath }
+    function Join-Path { param([Parameter(Position = 0)][string]$Path, [Parameter(Position = 1)][string]$ChildPath) "$($Path.TrimEnd('\'))\$ChildPath" }
+    function Get-PortableInstalledVersion { param($Exe, $Pattern) $wired.Installed }
+    function Invoke-Winget {
+        param([string[]]$Arguments)
+        $lines = switch ($Arguments[0]) {
+            '--version' { @($wired.Winget) }
+            'pin' { if ($wired.Pinned) { @('Name Id Version Source Pin type', "tool $Id $V winget Pinning") } else { @('none') } }
+            'show' { @('Found tool [Example.Tool]', 'Version', '-------', $Newer, $V, $Older) }
+            default { @() }
+        }
+        [pscustomobject]@{ ExitCode = 0; Lines = @($lines) }
+    }
+    function Get-PortablePathValue { $wired.PathValue }
+    function Get-PortableLinkTarget { param($Path) $wired.Links[$Path] }
+    function Find-PortableMsiExe { param($ProgramFiles, $Relative) $wired.Msi }
+    function Test-WingetElevated { $wired.Elevated }
+    function Get-PortableBusyProcess { param($Tool) @(for ($i = 0; $i -lt $wired.Busy; $i++) { [pscustomobject]@{ Id = 1000 + $i } }) }
+    Get-PortableState -Tool (New-Tool $Change) -Target $V
+}
+function Format-Wired { param($State) "$($State.Exists) $($State.Installed) $($State.Plan) $($State.Direction) $($State.Pinned) $($State.PathKind) $($State.Route)" }
+# custom の口 (受け取った State の Plan と、ReadState が足した値を見る)
+function Get-SampleWiredPathKind { param($Tool, $Resolved, $LinkTarget) if ((Test-PortableUnder -Path $LinkTarget -Root 'C:\P') -or (Test-PortableUnder -Path $Resolved -Root 'C:\P')) { 'preview' } }
+function Read-SampleWiredState { param($Tool, $State) @{ Extra = 'x'; PlanSeen = ($null -eq $State.Plan) } }
+function Test-SampleWiredReinstall { param($Tool, $State) ($State.Extra -eq 'x') -and ($null -eq $State.Plan) }
+
+Test-Case '本物の Get-PortableState: 置き場所の exe が PATH で引かれ、版と pin が揃っている' 'True 1.2.0 none same True package direct' { Format-Wired (Get-WiredState) }
+Test-Case '本物の Get-PortableState: winget の版の一覧・最新版・winget 自身の版・exe・動いている数・MSI・Links の指す先' "$Newer $V $Older|$Newer|1.30.310|$Pkg\tool.exe|0|True|True" {
+    $s = Get-WiredState; "$($s.Versions)|$($s.Latest)|$($s.WingetVersion)|$($s.Exe)|$($s.BusyCount)|$($null -eq $s.MsiExe)|$($null -eq $s.PathLinkTarget)"
+}
+Test-Case '本物の Get-PortableState: 入っていなければ install (PATH に無いのは none)' 'False  install unknown True none direct' { Format-Wired (Get-WiredState @{ Files = @(); Installed = $null }) }
+Test-Case '本物の Get-PortableState: 版が違えば change、pin が無ければ Pinned は False' 'True 1.1.0 change up False package direct' { Format-Wired (Get-WiredState @{ Installed = $Older; Pinned = $false }) }
+Test-Case '本物の Get-PortableState: WinGet\Links の symlink が置き場所を指せば links (指す先も状態に入る)' "True 1.2.0 none same True links direct|$Pkg\tool.exe" {
+    $s = Get-WiredState @{ Files = @("$Pkg\tool.exe", "$Links\tool.exe"); PathValue = "$Links;$Pkg"; Links = @{ "$Links\tool.exe" = "$Pkg\tool.exe" } }; "$(Format-Wired $s)|$($s.PathLinkTarget)"
+}
+Test-Case '本物の Get-PortableState: WinGet\Links の symlink がほかのパッケージを指せば other' 'other|C:\O\tool.exe' {
+    $s = Get-WiredState @{ Files = @("$Pkg\tool.exe", "$Links\tool.exe"); PathValue = "$Links;$Pkg"; Links = @{ "$Links\tool.exe" = 'C:\O\tool.exe' } }; "$($s.PathKind)|$($s.PathLinkTarget)"
+}
+Test-Case '本物の Get-PortableState: PathKind の口は Links の指す先も受け取る' 'preview preview' {
+    $c = @{ Hooks = @{ PathKind = 'Get-SampleWiredPathKind' } }
+    $viaLink = Get-WiredState @{ Files = @("$Pkg\tool.exe", "$Links\tool.exe"); PathValue = "$Links;$Pkg"; Links = @{ "$Links\tool.exe" = 'C:\P\tool.exe' } } $c
+    $direct = Get-WiredState @{ Files = @("$Pkg\tool.exe", 'C:\P\tool.exe'); PathValue = "C:\P;$Pkg" } $c
+    "$($viaLink.PathKind) $($direct.PathKind)"
+}
+Test-Case '本物の Get-PortableState: Links の外の PATH では symlink を読まない' 'True' { $null -eq (Get-WiredState @{ Links = @{ "$Pkg\tool.exe" = 'C:\O\tool.exe' } }).PathLinkTarget }
+Test-Case '本物の Get-PortableState: 昇格した会話で winget 1.30 以降なら elevated、1.29 なら direct' 'elevated direct' { "$((Get-WiredState @{ Elevated = $true }).Route) $((Get-WiredState @{ Elevated = $true; Winget = 'v1.29.380' }).Route)" }
+Test-Case '本物の Get-PortableState: 表に Msi があれば MSI の exe を読み、動いている数を数える' "$Msi 2" { $s = Get-WiredState @{ Msi = $Msi; Busy = 2 } @{ Msi = 'tool\bin\tool.exe' }; "$($s.MsiExe) $($s.BusyCount)" }
+Test-Case '本物の Get-PortableState: ReadState と Reinstall は Plan が決まる前の State を受け取り、Reinstall が $true なら relink' 'x True relink' {
+    $s = Get-WiredState @{} @{ Hooks = @{ ReadState = 'Read-SampleWiredState'; Reinstall = 'Test-SampleWiredReinstall' } }; "$($s.Extra) $($s.PlanSeen) $($s.Plan)"
+}
 
 # ---------------------------------------------------------------------------
 # 入口 (Install-*.ps1)。枠を使う入口を全部見る
@@ -511,6 +609,12 @@ Test-Case '取得が落ちたら、何も変えずに止まる' '1 [download] Tr
 Test-Case 'uninstall が落ちたら install せず、pin を足す (入っている版は残る)' '1 [download uninstall pin list pin add]' { $r = Invoke-Flow -States @($changeState, $changeState) -Fail @{ uninstall = 1 } -ExeExists; "$($r.Code) [$($r.Calls)]" }
 Test-Case 'uninstall の後に install が落ちたら、入れ直し方を出す' 'True True' { $r = Invoke-Flow -States @($changeState, (New-State $missing)) -Fail @{ install = 1 } -ExeExists; "$($r.Code -eq 1) $($r.Text -like '*Install-Tool を打ち直す (dotfiles apply でも入る)*')" }
 Test-Case '0x8A15007D で落ちたら、昇格していない PowerShell で打ち直す行を添える' 'True' { $r = Invoke-Flow -States @((New-State $missing), (New-State $missing)) -Fail @{ install = -1978335107 }; $r.Text -like '*0x8A15007D*昇格していない PowerShell で Install-Tool を打ち直す*' }
+Test-Case '昇格した会話で pin を足すだけのとき、winget が断ったら (0x8A15007D) 打ち直す行を添える' '1 [pin list pin add] True' {
+    $pinOnly = New-State ($elevated + @{ Pinned = $false })
+    $r = Invoke-Flow -States @($pinOnly, $pinOnly) -ExeExists -Fail @{ 'pin add' = -1978335107 }
+    "$($r.Code) [$($r.Calls)] $($r.Text -like '*pin add が失敗した (終了コード 0x8A15007D)*昇格していない PowerShell で Install-Tool を打ち直す*')"
+}
+Test-Case 'pin を外すのを winget が断っても (0x8A15007D)、打ち直す行を添える' 'True' { $r = Invoke-Flow -States @((New-State $pinnedNewer), $synced) -ExeExists -Fail @{ 'pin remove' = -1978335107 }; $r.Text -like '*pin remove が失敗した (終了コード 0x8A15007D)*昇格していない PowerShell で Install-Tool を打ち直す*' }
 Test-Case '固定した版が winget に無ければ、winget を打たずに止まる' '1 []' { $r = Invoke-Flow -States @((New-State ($missing + @{ Versions = @($Newer); Latest = $Newer }))); "$($r.Code) [$($r.Calls)]" }
 $pathOnly = New-State $other
 Test-Case 'PATH のずれだけなら winget を打たずに 1 で止まり、※ の手順で直すと出す' '1 [] True' { $r = Invoke-Flow -States @($pathOnly) -ExeExists -PinListed; "$($r.Code) [$($r.Calls)] $($r.Text -like '*※ の手順で直す*')" }
