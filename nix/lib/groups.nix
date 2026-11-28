@@ -204,8 +204,8 @@ let
   # linuxSkillOn で読む)。同じ key でも OS で意味が違う道具 (herdrHub) があるので、OS ごとに書く。SKILL.md の frontmatter には書かない
   # (表を 1 つに保つ。Nix は YAML を読めない)。key が表にあることと、skill が nix/files/claude/skills/ にあることは tests/groups.nix が見る
   #
-  # ハブと子の土台の skill は、Windows では集約ハブ (herdrHub。herdr-app のハブ) のホスト、Linux では hc が入るホスト (herdrCore。子が
-  # 動く所と Linux のハブ) に出す
+  # ハブと子の土台の skill (と、その hc の pack の入口 pjp-pack-hc) は、Windows では集約ハブ (herdrHub。herdr-app のハブ) のホスト、
+  # Linux では hc が入るホスト (herdrCore。子が動く所と Linux のハブ) に出す
   skills =
     let
       hubAndChild = {
@@ -217,6 +217,7 @@ let
       pjp-hc-child = hubAndChild;
       pjp-hc-hub = hubAndChild;
       pjp-hc-hub-panel = hubAndChild;
+      pjp-pack-hc = hubAndChild;
     };
 
   # switch の無い基本の道具 (今の module が常に入れるもの。minimum の中)。外したいホストが出たら、そのとき switch を足して tools に移す

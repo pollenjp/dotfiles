@@ -816,6 +816,14 @@
               system
               ;
           };
+          claude-hub-skills = import ./tests/claude-hub-skills.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
           claude-notion-state = import ./tests/claude-notion.nix {
             inherit
               lib

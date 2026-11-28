@@ -1612,7 +1612,12 @@ mod tests {
         let minimum = host("").unwrap();
         let hub = host("[tools]\nwindowsClaudeCode = true\nwindowsHerdr = true\nherdrHub = true\n")
             .unwrap();
-        for name in ["pjp-hc-hub", "pjp-hc-child", "pjp-hc-hub-panel"] {
+        for name in [
+            "pjp-hc-hub",
+            "pjp-hc-child",
+            "pjp-hc-hub-panel",
+            "pjp-pack-hc",
+        ] {
             assert!(!minimum.skill_on(name), "{name}");
             assert!(hub.skill_on(name), "{name}");
         }

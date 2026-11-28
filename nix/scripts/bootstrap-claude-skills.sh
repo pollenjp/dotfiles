@@ -15,6 +15,8 @@
 #      (rules/ は拡張子・置き場所で絞った rule。~/.claude/rules/ の symlink の rule も paths 付きで読まれることを
 #      Claude Code 2.1.322 で確かめた。dotfiles-private の docs/superpowers/plans/2026-11-13-lang-prefs-pack-dotfiles.md)
 #   3. リポジトリから消えたものの symlink を掃除する
+#   4. 公開の土台の skill (dotfiles の nix/files/claude/skills/ のハブと子の skill。下の「公開の土台の skill」) のうち、claude-skills に
+#      同じ名前が無いものを張る
 #
 # 冪等。skill を足したあとや、別マシンでの変更を取り込むときに何度でも実行してよい。
 #
@@ -69,6 +71,15 @@
 #
 # 同名の実体や別の symlink が既にある場合は **上書きせず警告して飛ばす**。
 #
+# ## 公開の土台の skill
+#
+# ハブと子の skill (pjp-hc-hub など) は、公開の dotfiles に土台を移した (dotfiles-private の ADR 124)。claude-skills の片付けの PR までは
+# claude-skills にも同じ名前の写しがあり、その間は claude-skills の写しを張る (dotfiles が譲る)。home-manager (modules/claude.nix) は、
+# claude-skills を使うホストではこの skill を ~/.claude/skills/ に張らず、名前と store のパスを 1 行 1 つ (<名前><TAB><パス>) で
+# ~/.local/state/dotfiles/claude-base-skills.tsv に書く。ここで、claude-skills の clone に同じ名前があればそちら (上の 2.) を張り、無ければ
+# (片付けの PR の後・clone を取れない) store のパスを張る。前に張った土台のリンクは、リンク先が store のパスの形 (<store>/<32 字>-<名前>)
+# かで見分ける (store のパスが替われば張り替え、表から外れた名前のものは外す)。
+#
 # ## 自分が張ったリンクの見分け方
 #
 # 台帳は持たない。「リンク先が作業クローンの中か」だけで判定する
@@ -93,6 +104,10 @@ git_github_hint=""
 claude_dir="${HOME}/.claude"
 state_dir="${HOME}/.local/state/dotfiles"
 state_file="${state_dir}/claude-skills-dir"
+# 公開の土台の skill の表 (home-manager が書く。上の「公開の土台の skill」)
+base_file="${state_dir}/claude-base-skills.tsv"
+# store の場所 (土台のリンクを見分ける。Nix と同じ NIX_STORE_DIR。試験が一時のディレクトリにする)
+store_dir="${NIX_STORE_DIR:-/nix/store}"
 
 dir_arg=""
 do_pull=1
@@ -285,6 +300,21 @@ is_ours() {
   return 1
 }
 
+# リンク先 $1 が、土台の skill $2 の store のパスの形 (<store>/<32 字>-<名前>) か
+is_base_target() {
+  [[ $1 == "${store_dir}"/????????????????????????????????-"$2" ]]
+}
+
+# 土台の skill の表 (名前 → store のパス)
+declare -A base_path=()
+if [[ -r ${base_file} ]]; then
+  while IFS=$'\t' read -r base_name base_target || [[ -n ${base_name} ]]; do
+    if [[ -n ${base_name} && -n ${base_target} ]]; then
+      base_path[${base_name}]=${base_target}
+    fi
+  done <"${base_file}"
+fi
+
 ##########
 # 取得   #
 ##########
@@ -371,6 +401,12 @@ link_kind() {
         linked=$((linked + 1))
         continue
       fi
+      if [[ ${kind} == skills ]] && is_base_target "${target}" "${name}"; then
+        # 前に張った公開の土台の skill。claude-skills に同じ名前がある間は、claude-skills の写しへ張り替える
+        run ln -sfn "${src}" "${dest}"
+        linked=$((linked + 1))
+        continue
+      fi
       real=$(readlink -f "${dest}" 2>/dev/null || true)
       if [[ ${real} == /nix/store/* ]]; then
         warn "${kind}/${name}: Nix 管理のものと名前が衝突しています。飛ばします。" \
@@ -422,6 +458,65 @@ prune_kind() {
     run rm -f "${dest}"
     removed=$((removed + 1))
   done
+}
+
+# 公開の土台の skill を張る (上の「公開の土台の skill」)。clone を取れないときも張る (clone のものを消さないので、別マシンのリンクに触らない)
+link_base_skills() {
+  local dest_dir="${claude_dir}/skills"
+  local name path dest target
+
+  if [[ ${#base_path[@]} == 0 && ! -d ${dest_dir} ]]; then
+    return 0
+  fi
+  while IFS= read -r name; do
+    [[ -n ${name} ]] || continue
+    path=${base_path[${name}]}
+    dest="${dest_dir}/${name}"
+    # claude-skills の clone に同じ名前がある間は、そちら (link_kind が張った)
+    if [[ ${unreachable} == 0 && -e ${dir}/skills/${name} ]]; then
+      continue
+    fi
+    if [[ -L ${dest} ]]; then
+      target=$(readlink "${dest}")
+      if [[ ${target} == "${path}" ]]; then
+        continue
+      fi
+      if is_base_target "${target}" "${name}" || is_ours "${target}"; then
+        run ln -sfn "${path}" "${dest}"
+        linked=$((linked + 1))
+        continue
+      fi
+      warn "skills/${name}: 別の symlink が既にあります (-> ${target})。公開の土台の skill を張らずに飛ばします。"
+      skipped=$((skipped + 1))
+      continue
+    fi
+    if [[ -e ${dest} ]]; then
+      warn "skills/${name}: 実体が既にあります。公開の土台の skill を張らずに飛ばします。"
+      skipped=$((skipped + 1))
+      continue
+    fi
+    if [[ ! -d ${dest_dir} ]]; then
+      run mkdir -p "${dest_dir}"
+    fi
+    run ln -s "${path}" "${dest}"
+    linked=$((linked + 1))
+  done < <(printf '%s\n' "${!base_path[@]}" | sort)
+
+  # 表から外れた名前 (herdr-core を外したホストなど) の、土台の形のリンクを外す
+  if [[ -d ${dest_dir} ]]; then
+    for dest in "${dest_dir}"/*; do
+      [[ -L ${dest} ]] || continue
+      name=$(basename "${dest}")
+      if [[ -n ${base_path[${name}]+x} ]]; then
+        continue
+      fi
+      target=$(readlink "${dest}")
+      if is_base_target "${target}" "${name}"; then
+        run rm -f "${dest}"
+        removed=$((removed + 1))
+      fi
+    done
+  fi
 }
 
 ##########
@@ -492,12 +587,17 @@ if [[ ${unreachable} == 0 ]]; then
     link_kind "${kind}"
     prune_kind "${kind}"
   done
+  link_base_skills
   note "追加/更新 ${linked} / 削除 ${removed} / 飛ばした ${skipped}"
 
   if [[ ${dry_run} == 0 ]]; then
     mkdir -p "${state_dir}"
     printf '%s\n' "${dir}" >"${state_file}"
   fi
+elif [[ ${#base_path[@]} -gt 0 ]]; then
+  echo "==> ~/.claude/skills/ へ公開の土台の skill をリンク (claude-skills を取れていない)"
+  link_base_skills
+  note "追加/更新 ${linked} / 削除 ${removed} / 飛ばした ${skipped}"
 fi
 
 echo

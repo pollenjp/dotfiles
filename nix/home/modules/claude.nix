@@ -143,6 +143,14 @@ let
   claudeRoot = ../../files/claude;
   cfg = config.dotfiles.claude;
 
+  # ハブと子の土台の skill (lib/groups.nix の skills の表にある skill。dotfiles-private の ADR 124)。表の道具 (Linux は herdrCore) が
+  # off のホストには置かない。claude-skills を使うホストでは ~/.claude/skills/ に張らず、名前と store のパスを claude-base-skills.tsv に
+  # 書く: claude-skills の片付けの PR までは claude-skills にも同じ名前の写しがあり、その間は claude-skills の写しを張る (dotfiles が譲る)。
+  # 張るのは scripts/bootstrap-claude-skills.sh (claude-skills に同じ名前が無ければ、この store のパスを張る)
+  groups = import ../../lib/groups.nix;
+  gatedSkills = builtins.attrNames groups.skills;
+  baseSkills = builtins.filter (groups.linuxSkillOn config.dotfiles) gatedSkills;
+
   # このマシンの cc-pages の port (null なら cc-pages の既定の 7777。home/modules/cc-pages.nix は config.toml を置かない)。
   # footer の cc-page の規則 (claude-footer-links.json) と status line の 📄top (statusline-command.sh) の @ccPagesPort@ を埋める
   ccPagesPort = if config.dotfiles.ccPages.port == null then 7777 else config.dotfiles.ccPages.port;
@@ -252,7 +260,10 @@ let
     kind:
     let
       dir = claudeRoot + "/${kind}";
-      entries = lib.filterAttrs (name: _type: name != "README.md") (builtins.readDir dir);
+      # ハブと子の土台の skill は下の home.file で張り分ける (上の gatedSkills)
+      entries = lib.filterAttrs (
+        name: _type: name != "README.md" && !(kind == "skills" && builtins.elem name gatedSkills)
+      ) (builtins.readDir dir);
     in
     lib.mapAttrs' (
       name: _type:
@@ -686,6 +697,22 @@ lib.mkMerge [
       (linkEntries "skills")
       (linkEntries "agents")
       (linkEntries "commands")
+
+      # ハブと子の土台の skill (上の gatedSkills・baseSkills)。claude-skills を使わないホストは、ここで張る
+      (lib.mkIf (!cfg.privateSkills.enable) (
+        builtins.listToAttrs (
+          map (
+            name: lib.nameValuePair ".claude/skills/${name}" { source = claudeRoot + "/skills/${name}"; }
+          ) baseSkills
+        )
+      ))
+      # claude-skills を使うホストは、名前と store のパスを書くだけにする (張るのは bootstrap-claude-skills.sh。表が空でも書き、外した
+      # 名前の土台のリンクを外させる)。確かめるのは tests/claude-hub-skills.nix (flake の checks)
+      (lib.mkIf cfg.privateSkills.enable {
+        ".local/state/dotfiles/claude-base-skills.tsv".text = lib.concatMapStrings (
+          name: "${name}\t${claudeRoot + "/skills/${name}"}\n"
+        ) baseSkills;
+      })
     ];
   })
 

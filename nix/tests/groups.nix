@@ -30,8 +30,8 @@
 #     無い。止める条件の道具と要る道具は全部 runnerTools にある
 #   - herdrHub の runner の側の依存は Linux の既定を変えない: all の Linux のホストで herdr.hub.enable は on、minimum では off (Nix の
 #     requires は持たない)
-#   - groups.json の skills は、ハブと子の土台の skill 3 つ (pjp-hc-child・pjp-hc-hub・pjp-hc-hub-panel) が Windows は herdrHub、Linux は
-#     herdrCore。表の windows の key は runnerTools に、linux の key は表 (tools) にある。linuxSkillOn は herdrCore の値に従い、表に無い
+#   - groups.json の skills は、ハブと子の土台の skill 3 つ (pjp-hc-child・pjp-hc-hub・pjp-hc-hub-panel) と hc の pack の入口 (pjp-pack-hc)
+#     が Windows は herdrHub、Linux は herdrCore。表の windows の key は runnerTools に、linux の key は表 (tools) にある。linuxSkillOn は herdrCore の値に従い、表に無い
 #     skill はいつも true
 {
   lib,
@@ -371,7 +371,7 @@ let
         }).dotfiles.herdr.hub.enable;
     }
     {
-      name = "groups.json の skills は土台の skill 3 つが Windows は herdrHub・Linux は herdrCore で、key は表にあり、linuxSkillOn は herdrCore に従う";
+      name = "groups.json の skills は土台の skill 3 つと hc の pack の入口が Windows は herdrHub・Linux は herdrCore で、key は表にあり、linuxSkillOn は herdrCore に従う";
       ok =
         let
           hubAndChild = {
@@ -388,6 +388,7 @@ let
           pjp-hc-child = hubAndChild;
           pjp-hc-hub = hubAndChild;
           pjp-hc-hub-panel = hubAndChild;
+          pjp-pack-hc = hubAndChild;
         }
         && builtins.all (s: builtins.all (k: builtins.elem k groups.runnerTools) s.windows) (
           builtins.attrValues groups.skills

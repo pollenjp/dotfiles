@@ -20,6 +20,10 @@
 #   - 履歴が分岐していたら fast-forward できない警告を出し、ssh で取り直さない。手元の clone のままリンクは張る
 #   - --dry-run では取得も merge もせず、走るコマンド (git_github -C <dir> fetch) を見せるだけ
 #   - rules/ の rule も ~/.claude/rules/ へ 1 つずつ張り (README.md は張らない)、repo から消えた rule の symlink は外す
+#   - 公開の土台の skill (home-manager が ~/.local/state/dotfiles/claude-base-skills.tsv に名前と store のパスを書いたもの): claude-skills の
+#     clone に同じ名前があればそちらを張り (前に張った土台のリンクも張り替える)、無ければ store のパスを張る。store のパスが替われば張り
+#     替え、表から外れた名前の土台のリンクは外す。土台の形でないリンク・実体は張り替えず、警告する。clone が無くても土台は張る
+#     (store は NIX_STORE_DIR の一時のディレクトリ)
 #
 # git gh の代わりに偽の git-gh を置く (引数を書き留めて本物の git に渡すか、落ちる)。gh も偽物で、
 # auth token の終了コードだけを返す。偽のコマンドの shebang は $BASH から作る (サンドボックスに /usr/bin/env が無い)。
@@ -218,6 +222,87 @@ if [[ $(rc "${h}") == 0 && ! -L ${h}/.claude/rules/pjp-rust.md && ! -e ${h}/.cla
   ok "repo から消えた rule の symlink は外す"
 else
   ng "消えた rule を外す" "$(detail "${h}")"$'\n'"rules=$(ls -la "${h}/.claude/rules" 2>&1)"
+fi
+
+# 7. 公開の土台の skill (claude-base-skills.tsv)。ケース 4 で分岐させた clone に依らないよう、別の bare repo と clone で流す
+bbare="${work}/base-remote.git"
+bclone="${work}/base-skills"
+git init --quiet --bare "${bbare}"
+git -C "${bbare}" symbolic-ref HEAD refs/heads/main
+git clone --quiet "${bbare}" "${work}/base-author" 2>/dev/null
+mkdir -p "${work}/base-author/skills/pjp-hub"
+printf '# hub (claude-skills の写し)\n' >"${work}/base-author/skills/pjp-hub/SKILL.md"
+git -C "${work}/base-author" add -A
+git -C "${work}/base-author" commit --quiet -m hub
+git -C "${work}/base-author" push --quiet origin HEAD:main
+git clone --quiet "${bbare}" "${bclone}"
+store="${work}/store"
+hash1=0123456789abcdefghijklmnopqrstuv
+hash2=vutsrqponmlkjihgfedcba9876543210
+for b in "${hash1}-pjp-hub" "${hash1}-pjp-child" "${hash2}-pjp-child"; do
+  mkdir -p "${store}/${b}"
+  printf '# %s (dotfiles の土台)\n' "${b}" >"${store}/${b}/SKILL.md"
+done
+h="${work}/t7"
+mkdir -p "${h}/.local/state/dotfiles" "${h}/.claude/skills"
+base_tsv="${h}/.local/state/dotfiles/claude-base-skills.tsv"
+# $@: 名前<TAB>パス の行
+write_base() { printf '%s\n' "$@" >"${base_tsv}"; }
+run_base() {
+  env HOME="${h}" NIX_STORE_DIR="${store}" PATH="${fakebin}:${PATH}" GITGH_LOG="${h}/gitgh.log" \
+    "${BASH}" "${script}" --dir "$1" >"${h}/out" 2>"${h}/err"
+  echo $? >"${h}/rc"
+}
+# pjp-hub は前に張った土台のリンクがある (claude-skills の写しへ張り替わる)。pjp-child は claude-skills に無い
+ln -s "${store}/${hash1}-pjp-hub" "${h}/.claude/skills/pjp-hub"
+write_base "pjp-hub"$'\t'"${store}/${hash1}-pjp-hub" "pjp-child"$'\t'"${store}/${hash1}-pjp-child"
+run_base "${bclone}"
+if [[ $(rc "${h}") == 0 && $(readlink "${h}/.claude/skills/pjp-hub") == "${bclone}/skills/pjp-hub" ]] \
+  && [[ $(readlink "${h}/.claude/skills/pjp-child") == "${store}/${hash1}-pjp-child" ]] && ! grep -q '飛ばし' "${h}/err"; then
+  ok "claude-skills に同じ名前があればそちら (前の土台のリンクも張り替える)、無ければ土台の store のパスを張る"
+else
+  ng "土台の skill を張る" "$(detail "${h}")"$'\n'"skills=$(ls -la "${h}/.claude/skills" 2>&1)"
+fi
+# store のパスが替わった (home-manager の新しい世代): 張り替える
+write_base "pjp-hub"$'\t'"${store}/${hash1}-pjp-hub" "pjp-child"$'\t'"${store}/${hash2}-pjp-child"
+run_base "${bclone}"
+if [[ $(rc "${h}") == 0 && $(readlink "${h}/.claude/skills/pjp-child") == "${store}/${hash2}-pjp-child" ]]; then
+  ok "土台の store のパスが替われば張り替える"
+else
+  ng "土台の張り替え" "$(detail "${h}")"$'\n'"skills=$(ls -la "${h}/.claude/skills" 2>&1)"
+fi
+# claude-skills から消えた (片付けの PR の後): claude-skills のリンクを外し、土台を張る
+git -C "${work}/base-author" rm --quiet -r skills/pjp-hub
+git -C "${work}/base-author" commit --quiet -m 'drop hub'
+git -C "${work}/base-author" push --quiet origin HEAD:main
+run_base "${bclone}"
+if [[ $(rc "${h}") == 0 && $(readlink "${h}/.claude/skills/pjp-hub") == "${store}/${hash1}-pjp-hub" ]]; then
+  ok "claude-skills から消えた名前は、claude-skills のリンクを外して土台を張る"
+else
+  ng "片付けの後の土台" "$(detail "${h}")"$'\n'"skills=$(ls -la "${h}/.claude/skills" 2>&1)"
+fi
+# 表から外れた名前の土台のリンクは外す。土台の形でないリンク・実体には触らず、警告する
+write_base "pjp-hub"$'\t'"${store}/${hash1}-pjp-hub" "pjp-own"$'\t'"${store}/${hash1}-pjp-own" "pjp-real"$'\t'"${store}/${hash1}-pjp-real"
+ln -s "${work}/somewhere" "${h}/.claude/skills/pjp-own"
+mkdir -p "${h}/.claude/skills/pjp-real"
+run_base "${bclone}"
+if [[ $(rc "${h}") == 0 && ! -e ${h}/.claude/skills/pjp-child && ! -L ${h}/.claude/skills/pjp-child ]] \
+  && [[ $(readlink "${h}/.claude/skills/pjp-own") == "${work}/somewhere" && -d ${h}/.claude/skills/pjp-real && ! -L ${h}/.claude/skills/pjp-real ]] \
+  && grep -q 'skills/pjp-own: 別の symlink' "${h}/err" && grep -q 'skills/pjp-real: 実体' "${h}/err"; then
+  ok "表から外れた名前の土台のリンクは外し、土台の形でないリンクと実体には触らずに警告する"
+else
+  ng "土台の外し方と衝突" "$(detail "${h}")"$'\n'"skills=$(ls -la "${h}/.claude/skills" 2>&1)"
+fi
+# clone を取れない (git の repo でないディレクトリ。GitHub へは出ない) ときも土台は張る
+h="${work}/t7b"
+mkdir -p "${h}/.local/state/dotfiles" "${work}/not-a-clone"
+base_tsv="${h}/.local/state/dotfiles/claude-base-skills.tsv"
+write_base "pjp-child"$'\t'"${store}/${hash2}-pjp-child"
+run_base "${work}/not-a-clone"
+if [[ $(rc "${h}") == 0 && $(readlink "${h}/.claude/skills/pjp-child") == "${store}/${hash2}-pjp-child" ]]; then
+  ok "claude-skills の clone が無くても土台の skill は張る"
+else
+  ng "clone の無いときの土台" "$(detail "${h}")"$'\n'"skills=$(ls -la "${h}/.claude/skills" 2>&1)"
 fi
 
 echo "== ${pass} passed, ${fail} failed"
