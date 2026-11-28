@@ -89,11 +89,13 @@ API キー・パスワード・token の値は、会話に貼らせない・フ�
 値が要る program を起こす・`.env` や認証の設定を書く・値を貼られた・平文を見つけたときは `pjp-secrets` skill を読む。
 
 例外: Claude Code の token のファイル (`~/.config/claude-accounts/<名前>.env` の `CLAUDE_CODE_OAUTH_TOKEN`) は、ユーザーの決定
-(2026-11-19) でローカルに値を置く。値はユーザーが `claude-account set-token <名前>` で入れ、Claude は読まない・書かない・出さない
-(有る無しと権限は `claude-account check <名前>` で見る)。わけと守りは dotfiles-private の ADR 082。
+(2026-11-19) でローカルに値を置く。値はユーザーが `claude-account set-token <名前>` (宣言に 1Password の参照があれば `pjp token-push` で
+まとめて) で入れ、Claude は読まない・書かない・出さない (`pjp token-push` は `--dry-run` だけ。有る無しと権限は
+`claude-account check <名前>` で見る)。わけと守りは dotfiles-private の ADR 082。
 
 例外: Notion の API キー (`~/.config/pjp/env` の `PJP_NOTION_TOKEN_<名前>`。Windows は `%USERPROFILE%\.config\pjp\env`) は、ユーザーの決定
 (2026-11-26。Windows は 2026-11-27) でローカルに値を置く。
-値はユーザーが `pjp notion-profile set-token <名前>` で入れ、Claude は `set-token` を打たず、そのファイルを開かず (Read・cat も)、
+値はユーザーが `pjp notion-profile set-token <名前>` (宣言に 1Password の参照があれば `pjp token-push` でまとめて) で入れ、Claude は
+`set-token` を打たず (`pjp token-push` は `--dry-run` だけ)、そのファイルを開かず (Read・cat も)、
 値を読まない・書かない・出さない (確かめるのは棚卸しの skill と setup の知らせ (Windows は runner の notion-tokens) で、有る無しと権限と
 日数だけ)。わけと守りは dotfiles-private の ADR 112 (Windows は ADR 114)。
