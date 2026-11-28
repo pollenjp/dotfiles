@@ -6008,7 +6008,8 @@ herdr-app と hc の集約ハブと、ハブが立てる子の道具 (`pjp hub`�
 - 入口は公開の `pjp` の 1 つだけ (ホストによって `pjp` の中身を変えない)。`pjp hub|child|mark|pack …` は同じディレクトリの `pjp-<道具>` を
   起こし、ほかの `pjp …` (`pjp ticket` など・`--build`・`--supervise`) は claude-skills の shim `pjp-skills` (PATH → `$CARGO_HOME/bin` →
   `~/.cargo/bin`。[次の節](#claude-skills-の-rust-の道具-shim-の-pjp)) にそのまま渡す。`pjp-skills` が無いホストでは「private な claude-skills の
-  道具で、このホストには入っていません」と出して終了コード 127
+  道具で、このホストには入っていません」と出して終了コード 127。`pjp-<道具>` が無いときも 127 (入口は自分で終えるときに 2 を使わない。
+  Claude Code の hook は 2 を「止める」と読み、ハブの guard の hook は入口から打つ)
 - 公開の道具は private な足し分を前提にしない。足し分 (`pjp-skills`・`~/.claude/skills/pjp-hc-hub-private/`) があるときだけ、その案内
   (`pjp hub hello` の見回り役の行・`pjp mark hook` の `pjp ticket wait` の添え書きなど) を出す
 - 確かめる: `pjp --version` (版・Release の key (Linux の Nix の build は空)・`pjp-skills` の場所の 3 行)。試験は flake の checks の

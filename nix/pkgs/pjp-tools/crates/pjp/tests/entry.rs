@@ -6,7 +6,9 @@
 //! - ほかの `pjp <引数…>` (`--build`・`--supervise` も) は `pjp-skills` (PATH → CARGO_HOME の bin → ~/.cargo/bin) に引数をそのまま渡し、
 //!   その終了コードで終わる
 //! - `pjp-skills` が無ければ、道具の名前と「private な claude-skills の道具で、このホストには入っていません」を出して終了コード 127
-//! - 同じディレクトリに `pjp-<道具>` が無ければ、そのパスを出して終了コード 2
+//! - 同じディレクトリに `pjp-<道具>` が無ければ、そのパスを出して終了コード 127
+//! - `pjp-skills` が入口そのもの (入口の写しを置いた) なら、渡し合いを止めて終了コード 1
+//! - 入口が自分で終えるときは 2 を使わない (Claude Code の hook は 2 を「止める」と読む。ハブの雛形の guard の hook は入口から打つ)
 //! - `pjp --version` は `pjp <版>`・`key=<key>`・`pjp-skills=<場所か 無い>` の 3 行。`pjp --help` と引数なしは使い方 (公開の道具と
 //!   終了コード 127) を出して 0
 //!
@@ -217,13 +219,24 @@ fn without_pjp_skills_a_private_tool_exits_127() {
 }
 
 #[test]
-fn missing_public_tool_names_its_path_and_exits_2() {
+fn missing_public_tool_names_its_path_and_exits_127() {
     let sb = Sandbox::new("no-hub");
-    let out = sb.run(&["hub", "init"], 0, "");
-    assert_eq!(out.status.code(), Some(2));
+    // hook の guard と同じ打ち方 (2 で終わると、ハブの会話の Write / Edit が全部止まる)
+    let out = sb.run(&["hub", "guard"], 0, "{}");
+    assert_eq!(out.status.code(), Some(127), "{}", text(&out.stderr));
     let err = text(&out.stderr);
     let want = sb.dir("bin").join(format!("pjp-hub{EXE}"));
     assert!(err.contains(&want.display().to_string()), "{err}");
+}
+
+#[test]
+fn pjp_skills_that_is_this_entry_stops_with_1() {
+    let sb = Sandbox::new("skills-is-entry");
+    std::fs::copy(PJP, sb.dir("skills").join(format!("pjp-skills{EXE}"))).unwrap();
+    let out = sb.run(&["ticket", "list"], 0, "");
+    assert_eq!(out.status.code(), Some(1), "{}", text(&out.stderr));
+    let err = text(&out.stderr);
+    assert!(err.contains("は公開の入口 pjp そのものです"), "{err}");
 }
 
 #[test]

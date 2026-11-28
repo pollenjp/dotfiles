@@ -1,9 +1,14 @@
 //! 入口 `pjp` (dotfiles-private の ADR 124)。bash でも PowerShell でも `pjp <道具> <引数>…` と同じ字面で打てる。
 //!
 //! - `pjp hub|child|mark|pack <引数…>`: 公開の道具。この exe と同じディレクトリの `pjp-<道具>` を起こし、引数と stdio をそのまま
-//!   渡して、その終了コードで終わる (Unix は exec、Windows は待って終了コードを写す。待つ間の Ctrl+C は子に任せる)
+//!   渡して、その終了コードで終わる (Unix は exec、Windows は待って終了コードを写す。待つ間の Ctrl+C は子に任せる)。無ければ、その
+//!   パスを出して終了コード 127
 //! - ほかの `pjp <引数…>` (`--build`・`--supervise` も): private な claude-skills の shim `pjp-skills` ([`pjp_core::extras::shim`]) に
 //!   そのまま渡す。無ければ、private な道具がこのホストに無いと出して終了コード 127 (シェルの「コマンドが無い」と同じ)
+//!
+//! 入口が自分で終えるときは終了コード 2 を使わない。Claude Code の hook は 2 を「止める」と読む (PreToolUse は書き込みを、
+//! UserPromptSubmit は発言を、Stop は会話が終わるのを止める)。ハブの雛形の guard の hook は入口から `pjp hub guard` を打つので、
+//! 道具が無いだけでハブの会話の Write / Edit が全部止まってしまう。道具が無い・見つからないは 127、ほかは 1。
 //!
 //! 入口はどのホストでも公開のこの 1 つ (ホストによって `pjp` の中身が違う形にしない)。Linux は home-manager の package、Windows は
 //! runner の手順 pjp-tools が `%LOCALAPPDATA%\dotfiles\bin\` に置く。
@@ -11,6 +16,7 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
+use pjp_core::exit::Launch;
 use pjp_core::process::{self, Cmd};
 use pjp_core::{Error, Result, exit, extras};
 
@@ -19,8 +25,8 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 const KEY: Option<&str> = option_env!("PJP_TOOLS_KEY");
 /// 公開の道具 (この exe と同じディレクトリの `pjp-<道具>`)。
 const PUBLIC_TOOLS: [&str; 4] = ["hub", "child", "mark", "pack"];
-/// private な道具 (`pjp-skills`) が無いときの終了コード。
-const NO_PRIVATE_TOOL: u8 = 127;
+/// 道具 (公開の `pjp-<道具>`・private な `pjp-skills`) が無い・見つからないときの終了コード (シェルの「コマンドが無い」と同じ)。
+const NO_TOOL: u8 = 127;
 
 const USAGE: &str = "\
 pjp — ハブと子の道具の入口 (dotfiles の nix/pkgs/pjp-tools)
@@ -35,8 +41,8 @@ pjp — ハブと子の道具の入口 (dotfiles の nix/pkgs/pjp-tools)
   pjp --help           この説明
 
 公開の道具 (hub・child・mark・pack) は、この exe と同じディレクトリの pjp-<道具> を起こす。ほかは claude-skills の shim
-pjp-skills (PATH → CARGO_HOME の bin → ~/.cargo/bin の順に探す) に渡し、無ければ終了コード 127 で終わる (private な
-claude-skills を読めないホストには入らない)。
+pjp-skills (PATH → CARGO_HOME の bin → ~/.cargo/bin の順に探す) に渡す (private な claude-skills を読めないホストには入らない)。
+どちらも無ければ終了コード 127 で終わる。
 ";
 
 fn main() {
@@ -72,15 +78,28 @@ fn run_public(tool: &str, args: &[OsString]) -> Result<u8> {
         std::env::current_exe().map_err(|e| Error::io("pjp の exe の場所が分かりません", &e))?;
     let exe = sibling(&here, tool);
     if !exe.is_file() {
-        return Err(Error::config(format!(
-            "{} がありません (pjp と同じディレクトリに pjp-{tool} を置く。Linux は home-manager の pjp-tools、Windows は dotfiles の runner の手順 pjp-tools が置く)",
-            exe.display()
-        )));
+        return Err(Error::new(
+            NO_TOOL,
+            format!(
+                "{} がありません (pjp と同じディレクトリに pjp-{tool} を置く。Linux は home-manager の pjp-tools、Windows は dotfiles の runner の手順 pjp-tools が置く)",
+                exe.display()
+            ),
+        ));
     }
     match process::exec_replace(&Cmd::new(&exe).args(args)) {
         Ok(never) => match never {},
-        Err(e) => Err(e),
+        Err(e) => Err(launch_error(e)),
     }
+}
+
+/// 道具を起こせなかったエラーを入口の終了コードにする: 見つからなければ 127、ほかは 1 (2 にしない。この file の頭)。
+fn launch_error(e: Error) -> Error {
+    let code = match e.launch() {
+        Some(Launch::NotFound) => NO_TOOL,
+        _ if e.code() == exit::CONFIG => exit::FAILURE,
+        _ => e.code(),
+    };
+    Error::new(code, e.message())
 }
 
 /// `here` (この exe) と同じディレクトリの `pjp-<tool>` (拡張子は OS の形)。
@@ -99,7 +118,7 @@ fn run_private(argv: &[OsString]) -> u8 {
             extras::SHIM,
             PUBLIC_TOOLS.join("・")
         );
-        return NO_PRIVATE_TOOL;
+        return NO_TOOL;
     };
     // pjp-skills が公開の入口そのもの (名前を替えて置いた写し) なら、渡し合いが止まらないので止める
     if std::env::current_exe()
@@ -114,11 +133,11 @@ fn run_private(argv: &[OsString]) -> u8 {
             "pjp: {} は公開の入口 pjp そのものです (claude-skills の shim を入れ直す。dotfiles の手順 pjp・bootstrap-pjp.sh)",
             shim.display()
         );
-        return exit::CONFIG;
+        return exit::FAILURE;
     }
     let code = match process::exec_replace(&Cmd::new(&shim).args(argv)) {
         Ok(never) => match never {},
-        Err(e) => Err(e),
+        Err(e) => Err(launch_error(e)),
     };
     exit::report("pjp", code, &mut std::io::stderr())
 }
