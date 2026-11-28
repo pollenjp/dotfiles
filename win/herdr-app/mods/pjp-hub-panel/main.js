@@ -44,15 +44,20 @@
 //   順に縦に並べる (文はそれぞれ TextView で出し、リンクの扱いは上の「リンク」のまま)。絵だけの行は、前の空白はいくつでもよく、後ろに字を
 //   続けない (後ろの空白はよい。``` や ~~~ で囲んだコードの中の行は絵にしない)。図のパスは image の節の src と同じ決まり (下の「図の置き場所」の
 //   pjp-hub-panel-media/ からのパス。"mods/" で始まれば home から)。ハブは、絵を付ける項目の詳細の最後の行のすぐ後ろ (次の見出しの項目の前) に置く。
-//   - 大きさは 1 つ: 幅 200・高さ 80 (この mod を書いたときの px。100% で 240×96) を panel の文字の % で変え、ペインの幅には合わせない。ペインが
-//     狭くて入らないときだけ、縦横の比を保って縮める (0.1 倍まで)。動き (marks) は付けない。
+//   - 大きさ: 置き場の幅 (ペインの幅から一覧と節のカードの余白・節の中の箱の余白 (Q&A の項目のカードと答えの字下げ)・左の空き (下の「横の位置」)
+//     を引いた幅) いっぱいの 16:9 の枠に、縦横の比 (幅 200・高さ 80 の 5:2) を保って収まるいっぱい (contain) で出す。5:2 は 16:9 より横長
+//     なので、右の端が置き場の右の縁に届く (縦長の比なら、枠の高さ = 幅 × 9/16 で止まる)。ペインの境を動かしたとき・panel の文字の % を
+//     変えたとき (左の空きと箱の余白が変わる) に追う。幅を知るまで (最初の描画) は、幅 200・高さ 80 を panel の文字の % で変えた大きさ (100% で
+//     240×96)。0.1 倍より小さくはしない。動き (marks) は付けない。図は SVG の根の width・height の 2 倍で 1 回だけ絵になる (下の「図の大きさと、
+//     大きく見る小窓」) ので、ハブは根を viewBox (0 0 200 80) より大きくして描く。
 //   - 横の位置は、すぐ上の行 (空の行は飛ばす) の字の頭にそろえる。絵の行の前の空白の数は見ない。箇条書きなら記号の後ろの字の頭で、
 //     herdr-app の TextView (gpui-base 0.7.3〜0.10.0) は入れ子の箇条書きを 1 段ごとに 1 段の幅 (字の大きさの 1.4 倍) ずつ下げ、項目の記号
 //     (1 段目から "•"・"◦"・"▪"・"‣"・"⁃"。番号は 1 段目が "1."、2 段目が "A."、3 段目からは "a." で、並びの最初の番号から数える) を記号の欄
 //     (幅は 1 段の幅より狭くならず、記号の右に 1 段の幅の 0.3 倍の空き) に置いて、欄の後ろに字を置くので、1 段の幅 × (段 - 1) + 記号の欄の幅に
 //     する。記号の欄の幅は、節の中の見えない物差し (記号の欄と同じ作りの要素) の on_size_change で測る (測る前の最初の 1 回は 1 段の幅)。
 //     段は、切った文の塊ごとに頭から字下げで数える。すぐ上も絵なら、その絵と同じ位置。
-//   - 押すと、image の節の図と同じ小窓で大きく見る (題は節の題、説明は小窓の図の説明)。ポインタを載せると、説明と図と同じヒント
+//   - 押すと、image の節の図と同じ小窓で大きく見る (題は節の題、説明は小窓の図の説明。小窓では幅 200・高さ 80 の 8 倍まで大きくする。広い
+//     ペインのミニ絵は 4 倍を超えるので、image の節の図の 4 倍までより大きく)。ポインタを載せると、説明と図と同じヒント
 //     「クリックで大きく見る (Esc で閉じる)」を出す。説明はミニ絵の下には出さない。
 //   - 出せないとき (パスが空・絶対パス・.. を含む・URL・図が無い・SVG を読めない) は、その場所に薄い字 (dim) で 1 行「ミニ絵を出せない: <わけ>」と
 //     出す。図があるかは、panel.json を読み直すたびに readTextFile で確かめる (SVG は中身に <svg があるかも見る。SVG でない図は、有るかだけ)。
@@ -254,7 +259,8 @@
 //   読まず見張らず、図の題・図 (marks も)・図の説明だけを出し、図を小窓の図の欄に縦横とも収める (0.1〜4 倍。欄の大きさも zoom で割る)。
 //   地は theme の popover (herdr-app の dialog の mod と同じ)。閉じるのは Esc・「閉じる」・図の欄のクリック (ダブルクリックの 2 回目は
 //   数えない。図をダブルクリックしても、開いた小窓がすぐ閉じない。外のクリックと Esc では herdr-app も閉じる)。開いたときに小窓の
-//   handle に focus する (Esc を受けるため)。開く mod の名前は MOD から取るので、写しを試すときは MOD を写しの名前に書き換える (書き
+//   handle に focus する (Esc を受けるため)。小窓に渡す図の節に bigMax (数) があれば、4 倍の代わりにその倍率まで大きくする (この mod が
+//   ミニ絵を開くときに足す。panel.json の image の節には書かない)。開く mod の名前は MOD から取るので、写しを試すときは MOD を写しの名前に書き換える (書き
 //   換えないと写しの図から本物の pjp-hub-panel の小窓が開く。shared の名前と ring.svg・copy.svg のパスも写しのものになる)。SVG の図を大きく
 //   したときの細かさは herdr-app の画像の読み込み次第 (GPUI 本家の img() は、SVG を SVG の width・height の 2 倍で 1 回だけ絵にして、
 //   引き伸ばして描く。それより大きく描くとにじむ)。
@@ -649,8 +655,9 @@ const markdownTexts = (secs) => {
 };
 
 // ---- ミニ絵 (頭のコメントの「ミニ絵」) ----
-// 大きさ (この mod を書いたときの px。fs() で panel の % に従う) と、文とミニ絵の間 (px。% に従わない)
-const MINI = { w: 200, h: 80, gap: 4 };
+// 縦横の比を決める大きさ (この mod を書いたときの px。幅を知るまでは fs() で panel の % に従うこの大きさで出す)、文とミニ絵の間 (px。% に
+// 従わない)、置き場の幅に対する枠の縦横の比 (16:9。この枠に収まるいっぱいで出す)、小窓で大きくする上限 (w・h の何倍か)
+const MINI = { w: 200, h: 80, gap: 4, frame: 16 / 9, bigMax: 8 };
 // 絵だけの行: 前の空白はいくつでもよく、後ろは空白だけ。説明に ] と改行を、パスに空白と括弧を含めない
 const MINI_LINE = /^[ \t]*!\[([^\]\r\n]*)\]\(([^()\s]*)\)[ \t]*$/;
 // コードの囲みの行 (``` か ~~~。前の空白は 3 つまで)。囲みの中の行は絵にしない
@@ -1604,20 +1611,20 @@ export default class HubPanel extends View {
       .when(prefixes.length > 0, (el) => el.child(this.miniRulers(id, prefixes)));
   }
 
-  // ミニ絵 (か、出せないわけの 1 行)。左は、すぐ上の行の字の頭 (miniX) まで空ける。大きさは fs(MINI.w)×fs(MINI.h) で、ペインの幅には
-  // 合わせず、ペインが狭くて入らないときだけ比を保って縮める (PIC.min 倍まで)。押すと image の節の図と同じ小窓で大きく見る
+  // ミニ絵 (か、出せないわけの 1 行)。左は、すぐ上の行の字の頭 (miniX) まで空ける。大きさは、置き場の幅いっぱいの 16:9 の枠 (MINI.frame) に
+  // MINI.w:MINI.h の比で収まるいっぱい (PIC.min 倍より小さくしない)。押すと image の節の図と同じ小窓で大きく見る
   mini(p, s, id, k, c) {
     const x = this.miniX(p.align);
     const why = p.why ?? this.miniCheck.get(p.path)?.why ?? null;
     if (why) return div().pl(x).text_size(this.ts(11)).text_color(c.dim).child(`ミニ絵を出せない: ${why}`);
-    // 大きさは fs (done の節の中でも小さくしない。図の大きさは済んだものでも今のまま。頭のコメントの「済んだもの」)
-    const W = this.fs(MINI.w);
-    const H = this.fs(MINI.h);
     // ペインの幅 (zoom で割った px) から一覧と節のカードの余白 (PIC.pad)・節の中の箱の余白 (s.inset。Q&A の項目のカードと答えの字下げ)・
-    // 左の空きを引いた幅。幅を知るまで (最初の描画) は等倍
+    // 左の空きを引いた幅 (置き場の幅)。その幅の 16:9 の枠に収まるいっぱいにする。done の節の中でも小さくしない (頭のコメントの「済んだもの」)。
+    // 幅を知るまで (最初の描画) は fs の大きさ
     const avail = this.width == null ? null : this.width / appZoom() - PIC.pad - (s.inset ?? 0) - x;
-    const r = avail == null ? 1 : clamp(avail / W, PIC.min, 1);
-    const fig = { title: s.title, src: p.path, width: MINI.w, height: MINI.h, caption: p.alt };
+    const W = avail == null ? this.fs(MINI.w) : MINI.w;
+    const H = avail == null ? this.fs(MINI.h) : MINI.h;
+    const r = avail == null ? 1 : Math.max(PIC.min, Math.min(avail / MINI.w, avail / MINI.frame / MINI.h));
+    const fig = { title: s.title, src: p.path, width: MINI.w, height: MINI.h, caption: p.alt, bigMax: MINI.bigMax };
     const hint = "クリックで大きく見る (Esc で閉じる)";
     return div()
       .pl(x)
@@ -2661,7 +2668,9 @@ export default class HubPanel extends View {
     const z = appZoom();
     const box = this.bigBox;
     // 図の欄の大きさ (zoom で割った px) に縦横とも収める。欄の大きさを知るまで (最初の描画) は等倍
-    const k = box ? clamp(Math.min(box.width / z / W, box.height / z / H), PIC.min, BIG.max) : 1;
+    // 上限は BIG.max 倍 (ミニ絵は、開くときに足した bigMax 倍)
+    const max = typeof s.bigMax === "number" && Number.isFinite(s.bigMax) && s.bigMax > 0 ? s.bigMax : BIG.max;
+    const k = box ? clamp(Math.min(box.width / z / W, box.height / z / H), PIC.min, max) : 1;
     return v_flex()
       .id("hp-big")
       .track_focus(this.handle)
