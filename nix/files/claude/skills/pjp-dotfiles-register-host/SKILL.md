@@ -7,7 +7,8 @@ description: この PC (Linux / macOS / WSL) の home-manager のホストを、
   ホスト … があります」「この PC は dotfiles-private に … として登録されていますが」「dotfiles-private のこの PC のホストの要約
   (docs/hosts/nix/<ホスト>.md と HTML 版) が今の設定と違います / がありません」と知らせたとき、ホストの要約 (dotfiles-private の
   docs/hosts/ の md と図の HTML 版。win/hosts/ の Windows のホストの分も) を出し直すとき、登録の PR が merge されて ~/dotfiles/flake.nix を
-  仕上げるとき、新しい PC を登録するときに読む。
+  仕上げるとき、新しい PC を登録するときに読む。machine (PC・VM・WSL) を足す・外す・作り直すときは、ここと一緒に
+  pjp-machine-add-remove (一緒に直すものの表) をなぞる。
   ローカル flake を今の雛形へ移すだけの話は pjp-dotfiles-local-flake-migrate の側。
 metadata:
   pjp-pack: machine
@@ -37,6 +38,19 @@ Windows のホスト (`win/hosts/<ユーザー>@<PC>.toml`) の `win/<名前>.md
 道具が書くもので、`summaries` は残して書き直す (比べるときは外す)。
 
 決まった処理 (名前・調べる・下書き・比べる・要約) は本体の `nix/scripts/private-host.sh` が持つ。この skill は手順・判断・確認の取り方を教える。
+
+## machine を足す・外す・作り直すとき
+
+ホストのファイルは、machine にまつわる置き場の 1 つにすぎない。machine (PC・VM・WSL・hc の machine) を足す・外す・作り直すときは、
+claude-skills の skill `pjp-machine-add-remove` を読み、その表 (ssh の接続先・hc の machine・定期の一覧・ホストの宣言・台帳など、
+一緒に直すもの) を上から順になぞる。この skill はその表の「dotfiles-private のホスト」の行を受け持つ。
+
+- 足す: ホストのファイルに、その machine に置く token の宣言も書く (Notion の API キーの `claude.notion.tokens`、claude の
+  setup-token の token の `claude.tokens`。素の claude を token で起こすなら `default`)。同じ token を置くほかのホストと同じ呼び名・参照にする
+- 外す: ホストのファイルを消す PR で、その machine にあった token の宣言も消える。同じ token (同じ呼び名・参照) をほかのホストにも
+  置いているなら、回す (作り直す) かをユーザーに聞く (外した machine に token が残っているかもしれない)
+- 作り直す: 新しい machine では set-token を打ち直す (token のファイルと入れた時刻の控えは machine の中にある)
+- `pjp-machine-add-remove` が skill の一覧に無いマシンでは、この節の 3 行と、dotfiles の `nix/README.md`「新規マシンの手順」に従う
 
 ## はじめにユーザーへ伝える
 
@@ -348,3 +362,5 @@ pjp-dotfiles-local-flake-migrate の「確認の形」に、次を足す。
 - pjp-dotfiles-local-flake-migrate — 手順 6 の、ローカル flake を今の雛形へ移す側
 - pjp-herdr-other-repo — dotfiles-private の worktree を作る・子に任せる
 - pjp-dev-tracker — PR とチケットを結ぶ
+- pjp-machine-add-remove (claude-skills) — machine を足す・外す・作り直すときに一緒に直すものの表 (この skill はその 1 行)
+- dotfiles の `nix/README.md`「claude の token の置き場を宣言する」・dotfiles-private の ADR 112 (Notion の API キー)・ADR 123 (claude の token)

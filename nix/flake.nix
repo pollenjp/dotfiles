@@ -629,6 +629,16 @@
                     ];
                     inherit profileBin;
                   }
+                } ${
+                  # 素の claude を token で起こすホストのもの (dotfiles.claude.tokens.default の宣言がある。home/modules/claude.nix)
+                  pkgs.callPackage ./pkgs/claude-account {
+                    defaults = [
+                      "personal"
+                      "work"
+                    ];
+                    inherit profileBin;
+                    bareToken = true;
+                  }
                 }
                 touch $out
               '';
@@ -785,6 +795,14 @@
               ;
           };
           claude-notion-tokens-state = import ./tests/claude-notion-tokens.nix {
+            inherit
+              lib
+              pkgs
+              mkHome
+              system
+              ;
+          };
+          claude-tokens-state = import ./tests/claude-tokens.nix {
             inherit
               lib
               pkgs

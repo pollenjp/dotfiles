@@ -22,6 +22,9 @@
 #   dotfiles.claude.notion.tokens -> ~/.local/state/dotfiles/notion-tokens.json
 #                                     (Notion の API キーを使うプロファイルと種類。setup の bootstrap-notion-tokens.sh と
 #                                     claude-skills の棚卸しの skill が読む。下記)
+#   dotfiles.claude.tokens -> ~/.local/state/dotfiles/claude-tokens.json
+#                                     (どのアカウントにどの claude setup-token の token を置いたか。claude-account audit が読む。
+#                                     default (素の claude) を宣言すると、素の claude の wrapper も置く。下記)
 #   (op-reason-guard.sh が読む ~/.local/state/dotfiles/claude-op-reason.json は home/modules/op-reason.nix が書く)
 #   files/claude/footer-links.json -> ~/.local/state/dotfiles/claude-footer-links.json
 #                                     (settings.json の footerLinksRegexes に写す値。cc-page の規則の
@@ -107,6 +110,20 @@
 # 管理のコマンド、claude-<名前> は launcher。既定の claude-<名前> は package の中の link で、claude-account add で足したアカウント
 # (subscription か、claude setup-token の token で動く token) の launcher は ~/.local/bin/claude-<名前> から profile の bin の
 # claude-account への link (package は後から足せないため)。dotfiles-private の docs/adr/082_claude_token_accounts_* を参照。
+#
+# ## claude の token の置き場の宣言と、素の claude を token で起こす wrapper (dotfiles.claude.tokens)
+#
+# dotfiles.claude.tokens (このホストのどのアカウントに、どの claude setup-token の token を置いたか。値は持たない) を
+# ~/.local/state/dotfiles/claude-tokens.json に書き出す (宣言が無くても {"accounts":{}})。claude-account audit がこれと、このホストの
+# 登録・token のファイル・set-token の時刻の控えを並べる。中身の形と assertions は lib/claude-tokens.nix。
+#
+# 素の claude (名前 default) を宣言したホストでは、素の claude が ~/.config/claude-accounts/default.env の token で起きる (~/.claude の
+# まま。CLAUDE_CONFIG_DIR は付けない)。claude-account の script を ~/.local/share/claude-account/bin/claude (wrapper) として置き、
+#   - login の環境 (hc の core・hc exec。子を立てる pjp child の command -v claude も) の PATH の頭 (home.sessionPath の先頭)
+#   - 対話のシェル (fish・bash) の PATH の頭。mise activate が claude の install の場所を前に足すので、その後に置き直す (mise の
+#     activate_aggressive は既定の false で、activate の後に前へ足した dir は前に残る)
+# に足す。wrapper は CLAUDE_CONFIG_DIR を付けて起こされたら (claude-<名前> の launcher・T3 Code・bootstrap) 何もせずに本物の claude を
+# 起こす。dotfiles-private の docs/adr/123_claude_token_watch_* を参照。
 #
 # ## Claude Code を入れるホストだけ (dotfiles.claude.enable)
 #
@@ -196,7 +213,30 @@ let
   claudeAccount = pkgs.callPackage ../../pkgs/claude-account {
     defaults = accounts;
     profileBin = "${config.home.profileDirectory}/bin";
+    inherit bareToken bareBinRel;
   };
+
+  # claude の token の置き場の宣言 (tokens) から、claude-tokens.json の中身と、宣言を確かめる assertions を作る
+  claudeTokens = import ../../lib/claude-tokens.nix { inherit lib; };
+  # 素の claude (default) を宣言したか。宣言したホストでは、素の claude を token で起こす wrapper を置く
+  bareToken = cfg.tokens ? ${claudeTokens.bareName};
+  # wrapper を置く dir (家からの相対。claude-account の script も同じ値で wrapper を見分ける)
+  bareBinRel = ".local/share/claude-account/bin";
+  # 対話のシェルで PATH の頭に置き直す行 (mise activate の後)
+  bareFishInit = ''
+    # 素の claude を token で起こす wrapper を、mise の claude より先に引く (home/modules/claude.nix。dotfiles.claude.tokens.default)
+    set -gx PATH "$HOME/${bareBinRel}" (string match -v -- "$HOME/${bareBinRel}" $PATH)
+  '';
+  bareBashInit = ''
+    # 素の claude を token で起こす wrapper を、mise の claude より先に引く (home/modules/claude.nix。dotfiles.claude.tokens.default)
+    _claude_bare_bin="$HOME/${bareBinRel}"
+    _claude_bare_path=":$PATH:"
+    _claude_bare_path=''${_claude_bare_path//":$_claude_bare_bin:"/":"}
+    _claude_bare_path=''${_claude_bare_path#:}
+    _claude_bare_path=''${_claude_bare_path%:}
+    export PATH="$_claude_bare_bin''${_claude_bare_path:+:$_claude_bare_path}"
+    unset _claude_bare_bin _claude_bare_path
+  '';
 
   # claude のアカウント (素の claude と上の claude-<名前>) と option を矢印キーで選んで起こす claude-selector (pkgs/claude-selector。
   # 略語 cs は modules/fish.nix の abbr・modules/bash.nix の alias)。既定のアカウントは下の claude-accounts.json から読む
@@ -255,7 +295,9 @@ lib.mkMerge [
       }
     ]
     # notion.tokens の名前の形・同じ変数になる名前・item の形 (値を書けないように。止めるときの文に書いた字を出さない)
-    ++ notionTokens.assertions cfg.notion.tokens;
+    ++ notionTokens.assertions cfg.notion.tokens
+    # tokens の名前・label・item の形 (同じわけ)
+    ++ claudeTokens.assertions cfg.tokens;
 
     # Dev Tracker を使うのに Notion の宛先の既定 (profile) を選んでいないマシンでは、規則に当たらない
     # repo と repo の外で ticket.sh が「宛先が決まらない」で止まる。どの経路の switch でも気付けるよう、
@@ -404,6 +446,20 @@ lib.mkMerge [
       {
         ".local/state/dotfiles/notion-tokens.json".text = notionTokens.stateText cfg.notion.tokens;
       }
+
+      # claude の token の置き場の宣言 (tokens)。宣言が無くても {"accounts":{}} を書く (ファイルが無いのは「dotfiles が古い」と、
+      # claude-account audit が見分けられるように)。値 (token) は持たない (dotfiles-private の ADR 123)。中身の形は lib/claude-tokens.nix:
+      #
+      #   {"accounts": {"alt": {"item": null, "label": "alt"}}}
+      {
+        ".local/state/dotfiles/claude-tokens.json".text = claudeTokens.stateText cfg.tokens;
+      }
+
+      # 素の claude を token で起こす wrapper (default を宣言したホストだけ)。claude-account の script への link で、呼ばれた名前 (claude) で
+      # wrapper として動く。package に入れないわけは pkgs/claude-account/default.nix
+      (lib.mkIf bareToken {
+        "${bareBinRel}/claude".source = "${claudeAccount}/bin/claude-account";
+      })
 
       # 解説動画を答えを待たずに作り始めるか (videoOffer.autoStart.enable。ADR 023)。
       #
@@ -631,5 +687,13 @@ lib.mkMerge [
       (linkEntries "agents")
       (linkEntries "commands")
     ];
+  })
+
+  # 素の claude を token で起こす wrapper の dir を PATH の頭に足す (default を宣言したホストだけ)。login の環境 (hc の core・hc exec) は
+  # home.sessionPath の先頭で、対話のシェルは mise activate の後 (順番 2000。mise の activate は既定の順番) に置き直す
+  (lib.mkIf (cfg.enable && bareToken) {
+    home.sessionPath = lib.mkBefore [ "$HOME/${bareBinRel}" ];
+    programs.fish.interactiveShellInit = lib.mkOrder 2000 bareFishInit;
+    programs.bash.initExtra = lib.mkOrder 2000 bareBashInit;
   })
 ]

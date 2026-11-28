@@ -4859,7 +4859,7 @@ Windows の Claude Code (herdr-app のハブなど) では、Windows の runner 
 
 | コマンド | 使う config dir | ログイン |
 | --- | --- | --- |
-| `claude` | `~/.claude`（今まで通り） | 今まで通り |
+| `claude` | `~/.claude`（今まで通り） | 今まで通り。ホストの宣言 `dotfiles.claude.tokens.default` のあるホストは `claude setup-token` の token（[後述](#素の-claude-を-token-で起こす-default)） |
 | `claude-personal` | `~/.claude-personal` | 個人のアカウント（初回に `/login`） |
 | `claude-work` | `~/.claude-work` | 会社のアカウント（初回に `/login`） |
 | `claude-<名前>`（`claude-account add` で足したもの） | `~/.claude-<名前>` | subscription は初回に `/login`。token は `claude setup-token` の token（[後述](#token-のアカウント)） |
@@ -4881,7 +4881,9 @@ claude-account set-token token1                # token を見えない入力で�
 claude-account add sub2 --mode subscription    # /login で入るアカウント (claude-sub2 を起こして /login)
 claude-account list                            # 既定と登録のアカウントと、その状態
 claude-account check token1                    # 0 = 使える (stdout に 1 行) / 1 = 用意が無い (stderr に手) / 2 = 知らない名前
+claude-account check default                   # 素の claude (~/.claude) の用意 (宣言のあるホストは token、無ければ /login の資格情報)
 claude-account remove token1 [--purge]         # 登録と launcher を消す (--purge なら ~/.claude-token1 と token のファイルも)
+claude-account audit                           # token の置き場の宣言と、このホストの token・入れた時刻を値を見ずに並べる (後述)
 claude-account help token [token1]             # token をこのマシンとほかのマシンに置く手順
 ```
 
@@ -4898,8 +4900,10 @@ claude-account help token [token1]             # token をこのマシンとほ�
 - `remove` は `~/.claude-<名前>`（ログイン・履歴）と token のファイルを残す。`--purge` は両方を消すが、中のリンクは辿らない
   （`~/.claude` の中身は消えない）。登録から外したあとでも `--purge` で消せる
 - 名前の規則は既定と同じ（英小文字・数字で始まり、英小文字・数字・`-`・`_`）で、32 字まで。`account`・`selector`（`claude-selector` と
-  取り合う）・既定の名前・`sk-ant-` で
+  取り合う）・`default`（素の claude の名前）・既定の名前・`sk-ant-` で
   始まるもの（token の頭）は使えない。規則に合わない文字列は文に出さない（token を名前の所に渡しても、画面に出さない）
+- `set-token` は token を書いたあと、入れた時刻（日本時間・秒まで）を `~/.local/state/claude-accounts/tokens.json` に控える（値は置かない。
+  `remove --purge` は控えからも外す）。棚卸し（`audit`）が入れてからの日数を出すのに使う
 
 #### token のアカウント
 
@@ -4929,6 +4933,7 @@ claude-account help token [token1]             # token をこのマシンとほ�
     `~/.claude` のログインには触らない）
   - Claude Code（2.1.327 で確かめた）は token を Bash・hook・MCP の process に渡さない。版が変わっても漏らさないよう、会話で
     `env`・`printenv` を出さない。会話の中の素の `claude` は `CLAUDE_CONFIG_DIR` だけを受け継ぎ、token の無い claude になる
+    （素の claude の wrapper も、`CLAUDE_CONFIG_DIR` のある起こし方には手を出さない）
   - 共有の `settings.json` の `apiKeyHelper`・env の `ANTHROPIC_API_KEY`・`ANTHROPIC_AUTH_TOKEN` は token より先に効く（今は無い）
 
 #### `~/.claude-<名前>/` の中身
@@ -5015,6 +5020,104 @@ cp -Rpn ~/.claude-work/projects/. ~/.claude/projects/ && rm -rf ~/.claude-work/p
 
 経緯と、採らなかった案（`~/.claude` をリンクにする、3 つの dir に一式を配る、など）は
 [ADR 009](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/009_claude_account_config_dirs_20260927T161411JST/README.md)。
+
+### claude の token の置き場を宣言する (dotfiles.claude.tokens)
+
+`claude setup-token` の token（1 年有効）を、どのホストのどのアカウント（と素の `claude`）に置いたかを、ホストの設定に宣言する。値は書かない。
+宣言は、素の `claude` を token で起こすスイッチ（`default`）と、月ごとの棚卸し（`claude-account audit`）の元になる。設計は dotfiles-private の
+ADR 123（`docs/adr/123_claude_token_watch_*`）。Windows のホストは dotfiles-private の `win/hosts/` の toml に同じ形で書く
+（`win/README.md` の「[claude の token の置き場の宣言 ([claude.tokens])](../win/README.md#claude-の-token-の置き場の宣言-claudetokens)」）。
+
+```nix
+# dotfiles-private の nix/hosts/<user>@<hostname>.nix の mkHome の引数
+claude.tokens = {
+  default = { };               # 素の claude (~/.claude) が token で起きる
+  "alt" = {                     # claude-account add alt --mode token で足したアカウント
+    label = "alt";              # token の呼び名 (同じ token を置いたホスト・アカウントで同じにする。書かなければアカウントの名前)
+    item = null;               # 元の token を置いた 1Password の欄までの参照 (op://<vault>/<項目>/<欄>。値ではない。分かるまで null)
+  };
+};
+```
+
+- キーはアカウントの名前（claude-account の名前と同じ形）。`default` は素の `claude`。ほかの名前は `claude-account add <名前> --mode token`
+  で足したアカウントで、宣言はアカウントを作らない（作るのは add）
+- switch が `~/.local/state/dotfiles/claude-tokens.json`（`{"accounts":{"alt":{"item":null,"label":"alt"}}}`。宣言が無くても
+  `{"accounts":{}}`）を置く（`claude.enable` のホスト）。中身の形と評価の止め方は `lib/claude-tokens.nix`
+- 名前・`label`・`item` の形が違うと評価で止まる。止めるときの文には書いた字を出さない（token の値を書いてしまったときに、端末や CI の
+  ログへ出ないように。名前は数だけ、`label`・`item` は宣言の名前だけを出す）
+- token の値は各ホストの `~/.config/claude-accounts/<名前>.env` に、ユーザーが自分の端末で `claude-account set-token <名前>` で入れる
+  （Claude は打たない。シークレットの決まりの例外は [token のアカウント](#token-のアカウント) と同じ）
+
+#### 素の claude を token で起こす (default)
+
+`default` を宣言したホスト（ブラウザが無く `/login` できない VM など）では、素の `claude` が `~/.config/claude-accounts/default.env` の
+token で起きる。`~/.claude` のまま（`CLAUDE_CONFIG_DIR` は付けない）で、履歴・memory・設定はほかのマシンの素の `claude` と同じ形。
+
+- `home/modules/claude.nix` が、claude-account の script を `~/.local/share/claude-account/bin/claude`（wrapper）として置き、その dir を
+  - login の環境の PATH の頭（`home.sessionPath` の先頭。hc の core・`hc exec`・子を立てる pjp child の `command -v claude` が引く）
+  - 対話のシェル（fish・bash）の PATH の頭（`mise activate` が mise の claude の場所を前に足すので、その後に置き直す。mise の
+    `activate_aggressive` は既定の false で、activate の後に前へ足した dir は前に残る）
+  に足す。package の中（profile の bin）に置かないのは、ほかの package の `claude` とぶつかり、対話のシェルでは mise の claude より後ろに
+  なるため
+- wrapper は、`CLAUDE_CONFIG_DIR` を付けずに起こされたら token を渡し（受け継いだ `ANTHROPIC_API_KEY`・`ANTHROPIC_AUTH_TOKEN`・
+  `CLAUDE_CODE_OAUTH_TOKEN` は外す）、本物の claude（PATH の claude のうち wrapper でない最初のもの。無ければ `mise which claude`）を
+  起こす。`CLAUDE_CONFIG_DIR` を付けて起こされたら（`claude-<名前>` の launcher・T3 Code・bootstrap）、何もせずに本物の claude を起こす。
+  `claude-<名前>` の launcher と bootstrap の plugin の手順は、wrapper を飛ばして本物の claude を引く
+- token が無い・形が違う・権限が緩いと、claude を起こさずに置き方を出して止まる（`claude --version` も止まる。token を使わずに本物の
+  claude を起こすなら `mise which claude` が出すパスを直に打つ）。読み方（ローカル・`op://`）は token のアカウントと同じ
+- `claude-account check default` は token のファイルと wrapper の有る無しを見る（宣言の無いホストは `~/.claude/.credentials.json`）。
+  `claude-account set-token default` は宣言のあるホストでだけ打てる。`add`・`remove` に `default` は使えない
+- 宣言して switch した後は、立っている hc の core を login の環境で立て直す（core は PATH を立てたときに 1 回だけ読むので、立て直すまで
+  hc の子と pjp child が wrapper を引かない。[hc の core の env と hc の子の PATH](#hc-の-core-の-env-と-hc-の子の-path)）
+- 会話の Bash の中の素の `claude` も wrapper を通り、token のファイルを読んで起きる（`claude-<名前>` の会話の中では `CLAUDE_CONFIG_DIR`
+  を受け継ぐので、今までどおり token の無い claude）
+
+使い始める（宣言して switch した後、そのホストの端末で。token はブラウザのある端末で `claude setup-token` を打って出す）:
+
+```sh
+claude-account set-token default      # 見えない入力で token を貼る (1Password から移すなら op read '<参照>' | claude-account set-token default)
+claude-account check default          # 0 なら使える (値は出さない)
+claude                                # token で起きる
+```
+
+#### 棚卸し (claude-account audit)
+
+宣言と、このホストの実際の token のアカウント（登録）・token のファイルの有る無しと権限・入れた時刻と経った日数を、値を見ずに並べて
+判定を出す。月ごとに流し（claude-skills の棚卸しの skill と定期の一覧）、期限の 1 年の 1 か月より前に気付く。
+
+```text
+claude-account audit: example-host (2026-11-28 21:00 JST・入れてから 330 日を超えたら回す)
+宣言: ~/.local/state/dotfiles/claude-tokens.json (1 件)
+控え: ~/.local/state/claude-accounts/tokens.json (1 件)
+
+| アカウント | 呼び名 | 1Password の参照 | 置き方 | 権限 | 入れた時刻 | 日数 | 判定 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| alt | alt | - | ローカル | 600 | 2026-11-18 21:00 | 10 | ok |
+| token1 | - | - | ローカル | 600 | - | - | 宣言漏れ |
+
+- token1: 宣言漏れ — 宣言 (dotfiles.claude.tokens.token1) が無い token の置き場 (回す対象から漏れている。宣言に足すか、要らなければ claude-account remove token1 --purge)
+  - 入れた時刻の控えが無い (set-token で入れていない。ファイルの時刻は 2026-11-19 10:12。同じ token を set-token で入れ直せば控えができる)
+
+呼び名が同じ行は、ほかのホストの同じ呼び名の行とも同じ token。回すときは、その全部のホストで貼り直す。
+判定: ok 1・回す 0・入れる 0・直す 0・宣言漏れ 1
+```
+
+| 判定 | わけ |
+| --- | --- |
+| ok | 宣言どおりに入っていて、入れてから 330 日以内 |
+| 回す | 入れてから 330 日を超えた・入れた時刻の控えが無い（set-token を通らずに置いた token。同じ token を set-token で入れ直せば控えができる） |
+| 入れる | 宣言はあるが、登録が無い・token のファイルが無い・空 |
+| 直す | token のファイルの形が違う・権限が 600 より緩い・持ち主が違う・宣言は token なのに subscription で登録している・素の claude の wrapper が無い |
+| 宣言漏れ | 宣言の無い token のアカウント・token のファイル（回す対象から漏れている。宣言に足すか、要らなければ消す） |
+
+- 終了コード: 0 = 手を入れるものが無い / 1 = ある / 2 = 宣言・登録・控えを読めない（stderr に 1 行）
+- 並べるのは、宣言・登録の token のアカウント・`~/.config/claude-accounts/*.env`・（宣言のあるホストの）`default` の和。subscription の
+  アカウントは並べない。値・token の長さは出さない（ファイルの形と権限と時刻だけを見る。op も呼ばない）
+- 同じ token（呼び名が同じ）をこのホストの 2 つのアカウントに置いていれば、その組も出す。ほかのホストとの突き合わせは、ホストごとの出力を
+  並べて呼び名で見る（棚卸しの skill）
+- 330 日（11 か月）は、月ごとの棚卸しで期限（1 年）の前に回せる線（棚卸しの間が 1 か月あいても、期限の前に「回す」が出る）
+- 回す手順: `claude setup-token` で新しい token を出し、1Password の同じ欄の値を替え、同じ呼び名の全部のホストで
+  `claude-account set-token <名前>` を打ち、棚卸しを流し直す。古い token を 1 本ずつ取り消す手順は公式の文書に無い（ADR 123 の未決事項）
 
 ### アカウントと option を矢印キーで選んで起こす (claude-selector)
 
@@ -5964,6 +6067,8 @@ hc の core は、立てた hc の process の env を写して動き (Linux で
   ([前述](#1password-の-ssh-承認を知らせるフック))
 - 包みが外すのは上の名前だけ。対話のシェルや Claude Code の会話から core を立てると、ほかの固有の値 (mise の go の `GOROOT`・会話の
   `CLAUDECODE` など) は子に付くので、core は login の環境で立てる・立て直す (下)
+- 素の claude を token で起こすホスト (`dotfiles.claude.tokens.default`) では、wrapper の dir (`~/.local/share/claude-account/bin`) を login の
+  環境の PATH の頭に足す ([前述](#素の-claude-を-token-で起こす-default))。宣言して初めて switch したら、下のとおり core を立て直す
 - 立っている core の env は、立て直すまで変わらない。setup で login の PATH が変わったら、login の環境で core を立て直す。WSL (example-wsl) の core は
   Windows の PowerShell から (`--fresh` は、そのシェルの env を新しい端末に使う):
 

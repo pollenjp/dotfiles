@@ -18,6 +18,8 @@
 #     まとめ (DOTFILES_SETUP_WARNINGS) にも同じ行を残す。入れられなかった plugin が 2 つなら警告も 2 つ
 #   - claude が見つからなければ (PATH にも mise にも無い) 何も打たずに警告して exit 0
 #   - marketplace を登録できなければ plugin を入れずに警告して exit 0
+#   - 素の claude の wrapper (~/.local/share/claude-account/bin/claude。dotfiles.claude.tokens.default のホスト) が PATH の先にあっても、
+#     それを飛ばして本物の claude で入れる (plugin の出し入れに token は要らず、token の無い wrapper は止まる)
 #
 # 偽の claude は、受けた CLAUDE_CONFIG_DIR (無ければ <unset>) と引数を「<env>|<引数>」の形で $HOME/claude.log に 1 行ずつ
 # 残す。FAKE_CLAUDE_FAIL に plugin の名前を空白区切りで渡すと、その plugin install だけ「not found in marketplace」で
@@ -158,6 +160,22 @@ if [[ $(cat "${h}/rc") == 0 && $(cat "${h}/claude.log") == "<unset>|plugin marke
   ok "marketplace を登録できなければ plugin を入れずに警告して exit 0"
 else
   ng "marketplace を登録できないとき" "$(detail "${h}")"
+fi
+
+# 6. 素の claude の wrapper が PATH の先にある: 飛ばして本物の claude で入れる
+bare_home="${work}/bare-skip"
+mkdir -p "${bare_home}/.local/share/claude-account/bin"
+{
+  printf '#!%s\n' "${BASH}"
+  # shellcheck disable=SC2016 # 偽の wrapper の中身 ($* と ${HOME} は偽の wrapper が展開する)
+  printf '%s\n' 'echo "wrapper|$*" >>"${HOME}/claude.log"' 'exit 1'
+} >"${bare_home}/.local/share/claude-account/bin/claude"
+chmod +x "${bare_home}/.local/share/claude-account/bin/claude"
+h=$(run bare-skip "${bare_home}/.local/share/claude-account/bin:${fakebin}")
+if [[ $(cat "${h}/rc") == 0 && $(cat "${h}/claude.log") == "${want_log}" && ! -e ${h}/warnings ]]; then
+  ok "素の claude の wrapper が PATH の先にあっても、飛ばして本物の claude で入れる"
+else
+  ng "素の claude の wrapper があるとき" "$(detail "${h}")"
 fi
 
 echo "== ${pass} passed, ${fail} failed"

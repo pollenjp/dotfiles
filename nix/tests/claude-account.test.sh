@@ -5,7 +5,7 @@
 # 一時の HOME・偽の claude・偽の op で確かめる。
 #
 #   bash nix/tests/claude-account.test.sh <claude-account の package> <package に埋めた profileBin> <bootstrap-claude-accounts.sh> \
-#     [<既定に t3 を足した package>]
+#     [<既定に t3 を足した package>] [<素の claude を token で起こす package (bareToken)>]
 #
 # flake の checks (claude-account-test) が Nix のサンドボックスで流す。本物の claude・op・1Password は使わない。token の値はどれも
 # ダミー (dummy- で始まる) で、launcher と管理のコマンドの stdout・stderr に出ないことを見る (値を受けた偽の claude だけが控えに書く)。
@@ -48,6 +48,22 @@
 #   bootstrap
 #     - --account <名前> は、そのアカウントの dir だけを用意する
 #     - 引数なしは、既定に加えて登録のアカウントの dir も用意し、launcher の link が無ければ警告する
+#   入れた時刻の控えと棚卸し (dotfiles-private の ADR 123)
+#     - set-token は入れた時刻 (日本時間・秒まで) を ~/.local/state/claude-accounts/tokens.json (600) に控え、ほかの名前の時刻は残す。
+#       控えが読めない形なら値を読む前に 1 で止まり、何も書かない。remove --purge は控えからも外す
+#     - 素の claude (default): 宣言の無い package では check default が ~/.claude/.credentials.json を見て 0・1、set-token default は 2、
+#       list は default を素の claude として出す。add・remove の default は 2。help token default は素の claude の手順
+#     - audit: 宣言が無ければ「宣言: なし」で、置き場が無ければ 0。宣言・登録・token のファイル・控えから、ok・回す (330 日を超えた・控えが
+#       無い)・入れる (登録が無い・token が無い)・直す (権限)・宣言漏れ (宣言の無い token のアカウントと、宣言の無い default.env) を出し、
+#       手を入れるものがあれば 1。宣言・控えが読めない形なら 2。どの出力にも値を出さない
+#   素の claude の wrapper (5 つ目の引数の package。bareToken)
+#     - CLAUDE_CONFIG_DIR を付けずに claude を起こすと、default.env の token を渡し、CLAUDE_CONFIG_DIR を付けず、受け継いだ API キー・
+#       token を外して本物の claude (PATH の次の claude) を起こし、引数と終了コードを渡す。token が無ければ 1 で忠告 (ブラウザのある端末・
+#       set-token default)、権限が 644 なら 1、op の参照なら op を 1 回呼ぶ
+#     - CLAUDE_CONFIG_DIR を付けて起こすと、env に手を出さずに本物の claude を起こす。PATH に自分しか claude が無ければ 127
+#     - check default は token のファイルと wrapper の link を見る。set-token default は default.env に書いて時刻を控える。list は token
+#     - claude-<名前> の launcher は、PATH の先の wrapper を飛ばして本物の claude を起こす
+#     - audit は宣言した default を「default (素の claude)」として並べ、token が無ければ入れる
 #
 # 偽の claude は受けた env (CLAUDE_CONFIG_DIR・CLAUDE_CODE_OAUTH_TOKEN・ANTHROPIC_API_KEY・ANTHROPIC_AUTH_TOKEN) と引数を
 # $HOME/claude.log に書き、FAKE_CLAUDE_EXIT で終わる。偽の op は inject の stdin の {{ … }} を dummy-op-value に替え、呼ばれた
@@ -59,6 +75,7 @@ pkg=${1:?claude-account の package を渡す}
 profile_bin=${2:?package に埋めた profileBin を渡す}
 bootstrap=${3:?bootstrap-claude-accounts.sh を渡す}
 pkg_t3=${4:-}
+pkg_bare=${5:-}
 work=$(mktemp -d "${TMPDIR:-/tmp}/claude-account-test.XXXXXX")
 trap 'rm -rf "${work}"' EXIT
 
@@ -143,10 +160,23 @@ run() {
     input="${work}/stdin"
   fi
   rm -f "${home}/claude.log" "${home}/op.log"
-  env -i HOME="${home}" PATH="${linkbin}:${fakebin}:${coreutils_bin}:${jq_bin}:${home}/.local/bin" \
+  # RUN_NO_CONFIG_DIR: CLAUDE_CONFIG_DIR を渡さない (素の claude の wrapper)。RUN_NO_FAKE_CLAUDE: PATH に偽の claude・op を置かない。
+  # CLAUDE_ACCOUNT_NOW: 今の時刻 (控えと棚卸し)
+  local path="${linkbin}:${fakebin}:${coreutils_bin}:${jq_bin}:${home}/.local/bin"
+  local -a extra=()
+  if [[ -n ${RUN_NO_FAKE_CLAUDE-} ]]; then
+    path="${linkbin}:${coreutils_bin}:${jq_bin}:${home}/.local/bin"
+  fi
+  if [[ -z ${RUN_NO_CONFIG_DIR-} ]]; then
+    extra+=(CLAUDE_CONFIG_DIR=/somewhere/else)
+  fi
+  if [[ -n ${CLAUDE_ACCOUNT_NOW-} ]]; then
+    extra+=("CLAUDE_ACCOUNT_NOW=${CLAUDE_ACCOUNT_NOW}")
+  fi
+  env -i HOME="${home}" PATH="${path}" \
     ANTHROPIC_API_KEY=dummy-inherited-key ANTHROPIC_AUTH_TOKEN=dummy-inherited-auth CLAUDE_CODE_OAUTH_TOKEN=dummy-inherited-oauth \
-    CLAUDE_CONFIG_DIR=/somewhere/else FAKE_CLAUDE_EXIT="${FAKE_CLAUDE_EXIT:-0}" ${FAKE_OP_EXIT:+FAKE_OP_EXIT="${FAKE_OP_EXIT}"} \
-    ${FAKE_OP_VALUE+FAKE_OP_VALUE="${FAKE_OP_VALUE}"} \
+    FAKE_CLAUDE_EXIT="${FAKE_CLAUDE_EXIT:-0}" ${FAKE_OP_EXIT:+FAKE_OP_EXIT="${FAKE_OP_EXIT}"} \
+    ${FAKE_OP_VALUE+FAKE_OP_VALUE="${FAKE_OP_VALUE}"} "${extra[@]}" \
     "${linkbin}/${cmd}" "$@" <"${input}" >"${work}/out" 2>"${work}/err"
   echo $? >"${work}/rc"
 }
@@ -676,6 +706,336 @@ if [[ -n ${pkg_t3} ]]; then
   fi
   ln -sfn "${pkg}/bin/claude-account" "${linkbin}/claude-account"
   rm -f "${linkbin}/claude-t3"
+fi
+
+# --- set-token が入れた時刻の控え (ADR 123)
+times="${home}/.local/state/claude-accounts/tokens.json"
+reset_home
+run claude-account add token1 --mode token
+run claude-account add token2 --mode token
+CLAUDE_ACCOUNT_NOW='2026-11-28T21:00:00+09:00' STDIN_TEXT=$'sk-ant-oat01-dummy-rec-1\n' run claude-account set-token token1
+r1=$(rc)
+cp "${work}/out" "${work}/out1"
+CLAUDE_ACCOUNT_NOW='2026-11-29T08:30:15+09:00' STDIN_TEXT=$'sk-ant-oat01-dummy-rec-2\n' run claude-account set-token token2
+if [[ ${r1} == 0 && $(rc) == 0 ]] && [[ $(jq -r '.token1.set_at' "${times}") == '2026-11-28T21:00:00+09:00' ]] \
+  && [[ $(jq -r '.token2.set_at' "${times}") == '2026-11-29T08:30:15+09:00' ]] \
+  && grep -Fq '入れた時刻: 2026-11-28T21:00:00+09:00' "${work}/out1" && [[ $(stat -c %a "${times}") == 600 ]] \
+  && ! grep -Fq dummy "${times}" && no_values; then
+  ok "set-token は入れた時刻 (日本時間・秒まで) を控え (600)、ほかの名前の時刻は残す。控えに値は無い"
+else
+  ng "set-token の控え" "$(detail)
+--- tokens.json
+$(cat "${times}" 2>/dev/null)"
+fi
+cp "${times}" "${work}/times.bak"
+printf 'not json\n' >"${times}"
+put_token 'CLAUDE_CODE_OAUTH_TOKEN=dummy-keep-1
+' 600
+STDIN_TEXT=$'sk-ant-oat01-dummy-rec-3\n' run claude-account set-token token1
+if [[ $(rc) == 1 ]] && grep -Fq '入れた時刻の控え' "${work}/err" && grep -Fq 'dummy-keep-1' "${token_file}" && no_values; then
+  ok "控えが読めない形なら、値を読む前に 1 で止まり、token のファイルを書かない"
+else
+  ng "読めない控えの set-token" "$(detail)"
+fi
+cp "${work}/times.bak" "${times}"
+run claude-account remove token2 --purge
+if [[ $(rc) == 0 && $(jq -r '.token2 // "none"' "${times}") == none && $(jq -r '.token1.set_at' "${times}") == '2026-11-28T21:00:00+09:00' ]] \
+  && grep -Fq '控えから外しました: token2' "${work}/out"; then
+  ok "remove --purge は控えからもその名前の時刻を外し、ほかは残す"
+else
+  ng "remove --purge の控え" "$(detail)
+--- tokens.json
+$(cat "${times}" 2>/dev/null)"
+fi
+
+# --- 素の claude (default): 宣言の無いホストの package
+reset_home
+run claude-account check default
+r1=$(rc)
+cp "${work}/err" "${work}/err1"
+printf '{}\n' >"${home}/.claude/.credentials.json"
+run claude-account check default
+if [[ ${r1} == 1 ]] && grep -Fq 'claude: まだログインしていません' "${work}/err1" && grep -Fq '/login' "${work}/err1" \
+  && [[ $(rc) == 0 ]] && grep -Fxq 'claude: subscription (ログイン済み)' "${work}/out"; then
+  ok "宣言の無いホストの check default は ~/.claude/.credentials.json を見て 1・0"
+else
+  ng "check default (宣言なし)" "$(detail)"
+fi
+run claude-account list
+if [[ $(rc) == 0 ]] && grep -Eq '^default +subscription +素の claude +ログイン済み' "${work}/out"; then
+  ok "list は default を素の claude として出す"
+else
+  ng "list の default" "$(detail)"
+fi
+STDIN_TEXT=$'sk-ant-oat01-dummy-bare-0\n' run claude-account set-token default
+r1=$(rc)
+run claude-account add default --mode token
+r2=$(rc)
+run claude-account remove default
+r3=$(rc)
+if [[ ${r1} == 2 && ${r2} == 2 && ${r3} == 2 && ! -e ${home}/.config/claude-accounts/default.env ]] \
+  && [[ ! -e ${home}/.config/claude-accounts/accounts.json ]] && no_values; then
+  ok "宣言の無いホストの set-token default と、add・remove の default は 2 で、何も書かない"
+else
+  ng "default の断り (${r1}/${r2}/${r3})" "$(detail)"
+fi
+run claude-account help token default
+if [[ $(rc) == 0 ]] && grep -Fq 'claude-account set-token default' "${work}/out" && grep -Fq 'dotfiles.claude.tokens.default' "${work}/out" \
+  && ! grep -Fq 'claude-account add default' "${work}/out"; then
+  ok "help token default は素の claude の手順 (宣言と set-token default) を出す"
+else
+  ng "help token default" "$(detail)"
+fi
+
+# --- 棚卸し (audit)
+decl="${home}/.local/state/dotfiles/claude-tokens.json"
+reset_home
+CLAUDE_ACCOUNT_NOW='2026-11-28T21:00:00+09:00' run claude-account audit
+if [[ $(rc) == 0 ]] && grep -Fq '宣言: なし' "${work}/out" && grep -Fq 'token の置き場はありません' "${work}/out" \
+  && grep -Fq '入れてから 330 日を超えたら回す' "${work}/out"; then
+  ok "audit: 宣言も token も無ければ「宣言: なし」と置き場なしで 0"
+else
+  ng "audit (空)" "$(detail)"
+fi
+# 宣言: alt (ok にする)・x (登録が無い)。登録: alt・token1 (宣言なし)。token: alt・token1 (600)
+audit_setup() {
+  reset_home
+  mkdir -p "${home}/.config/claude-accounts" "${home}/.local/state/claude-accounts"
+  printf '{"accounts":{"alt":{"item":null,"label":"alt"},"x":{"item":"op://v/i/f","label":"shared"}}}\n' >"${decl}"
+  printf '{"version":1,"accounts":{"alt":{"mode":"token"},"token1":{"mode":"token"},"sub2":{"mode":"subscription"}}}\n' \
+    >"${home}/.config/claude-accounts/accounts.json"
+  printf 'CLAUDE_CODE_OAUTH_TOKEN=dummy-alt-1\n' >"${home}/.config/claude-accounts/alt.env"
+  printf 'CLAUDE_CODE_OAUTH_TOKEN=dummy-t1-1\n' >"${home}/.config/claude-accounts/token1.env"
+  chmod 600 "${home}/.config/claude-accounts/"*.env
+  printf '{"alt":{"set_at":"%s"}}\n' "${1:-2026-11-18T21:00:00+09:00}" >"${times}"
+}
+row() { grep -F "| $1 |" "${work}/out"; }
+audit_setup
+CLAUDE_ACCOUNT_NOW='2026-11-28T21:00:00+09:00' run claude-account audit
+if [[ $(rc) == 1 ]] && row alt >/dev/null && [[ $(row alt) == '| alt | alt | - | ローカル | 600 | 2026-11-18 21:00 | 10 | ok |' ]] \
+  && [[ $(row x) == '| x | shared | op://v/i/f | 無い | - | - | - | 入れる |' ]] \
+  && [[ $(row token1) == '| token1 | - | - | ローカル | 600 | - | - | 宣言漏れ |' ]] \
+  && grep -Fq -- '- x: 入れる — 登録が無い (claude-account add x --mode token を打ってから claude-account set-token x)' "${work}/out" \
+  && grep -Fq -- '- token1: 宣言漏れ — 宣言 (dotfiles.claude.tokens.token1) が無い token の置き場' "${work}/out" \
+  && grep -Fxq '判定: ok 1・回す 0・入れる 1・直す 0・宣言漏れ 1' "${work}/out" \
+  && grep -Fq '宣言: ~/.local/state/dotfiles/claude-tokens.json (2 件)' "${work}/out" \
+  && grep -Fq '控え: ~/.local/state/claude-accounts/tokens.json (1 件)' "${work}/out" && ! grep -Fq '| sub2 |' "${work}/out" && no_values; then
+  ok "audit: 宣言・登録・token のファイル・控えから ok・入れる (登録が無い)・宣言漏れを出して 1 (subscription は並べない。値は出さない)"
+else
+  ng "audit" "$(detail)"
+fi
+audit_setup '2025-12-31T21:00:00+09:00'
+CLAUDE_ACCOUNT_NOW='2026-11-28T21:00:00+09:00' run claude-account audit
+if [[ $(rc) == 1 ]] && [[ $(row alt) == '| alt | alt | - | ローカル | 600 | 2025-12-31 21:00 | 332 | 回す |' ]] \
+  && grep -Fq -- '- alt: 回す — 入れてから 332 日 (330 日を超えた。期限の 1 年まで残り 33 日)' "${work}/out"; then
+  ok "audit: 入れてから 330 日を超えた token は回す (期限までの残りの日数も出す)"
+else
+  ng "audit (330 日)" "$(detail)"
+fi
+audit_setup '2025-12-31T21:00:00+09:00'
+CLAUDE_ACCOUNT_NOW='2026-11-26T21:00:00+09:00' run claude-account audit
+if [[ $(row alt) == '| alt | alt | - | ローカル | 600 | 2025-12-31 21:00 | 330 | ok |' ]]; then
+  ok "audit: ちょうど 330 日は ok"
+else
+  ng "audit (ちょうど 330 日)" "$(detail)"
+fi
+audit_setup
+rm -f "${times}"
+CLAUDE_ACCOUNT_NOW='2026-11-28T21:00:00+09:00' run claude-account audit
+if [[ $(rc) == 1 ]] && [[ $(row alt) == '| alt | alt | - | ローカル | 600 | - | - | 回す |' ]] \
+  && grep -Fq -- '- alt: 回す — 入れた時刻の控えが無い (set-token で入れていない。ファイルの時刻は ' "${work}/out" \
+  && grep -Fq '同じ token を set-token で入れ直せば控えができる' "${work}/out" && grep -Fq '控え: なし' "${work}/out"; then
+  ok "audit: 入れた時刻の控えが無い token は回す (ファイルの時刻と、入れ直せば控えができることを添える)"
+else
+  ng "audit (控えなし)" "$(detail)"
+fi
+audit_setup
+chmod 644 "${home}/.config/claude-accounts/alt.env"
+CLAUDE_ACCOUNT_NOW='2026-11-28T21:00:00+09:00' run claude-account audit
+if [[ $(row alt) == '| alt | alt | - | ローカル | 644 | 2026-11-18 21:00 | 10 | 直す |' ]] \
+  && grep -Fq -- '- alt: 直す — token のファイルの権限が 644 です' "${work}/out"; then
+  ok "audit: token のファイルの権限が 600 より緩ければ直す"
+else
+  ng "audit (権限)" "$(detail)"
+fi
+audit_setup
+rm -f "${home}/.config/claude-accounts/alt.env"
+printf 'CLAUDE_CODE_OAUTH_TOKEN=dummy-bare-x\n' >"${home}/.config/claude-accounts/default.env"
+chmod 600 "${home}/.config/claude-accounts/default.env"
+CLAUDE_ACCOUNT_NOW='2026-11-28T21:00:00+09:00' run claude-account audit
+if [[ $(row alt) == '| alt | alt | - | 無い | - | 2026-11-18 21:00 | 10 | 入れる |' ]] \
+  && grep -Fq -- '- alt: 入れる — token が無い (claude setup-token で出し、このホストで claude-account set-token alt で入れる)' "${work}/out" \
+  && [[ $(row 'default (素の claude)') == '| default (素の claude) | - | - | ローカル | 600 | - | - | 宣言漏れ |' ]] \
+  && grep -Fq -- '- default: 宣言漏れ — 宣言 (dotfiles.claude.tokens.default) が無いのに、素の claude の token のファイルがある' "${work}/out" \
+  && no_values; then
+  ok "audit: 宣言した token のファイルが無ければ入れる、宣言の無い default.env は宣言漏れ (素の claude を先に並べる)"
+else
+  ng "audit (入れる・default.env)" "$(detail)"
+fi
+audit_setup
+printf '{"accounts":{"sk-ant-oat01-dummy":{"item":null,"label":"x"}}}\n' >"${decl}"
+CLAUDE_ACCOUNT_NOW='2026-11-28T21:00:00+09:00' run claude-account audit
+r1=$(rc)
+cp "${work}/err" "${work}/err1"
+audit_setup
+printf '[1]\n' >"${times}"
+CLAUDE_ACCOUNT_NOW='2026-11-28T21:00:00+09:00' run claude-account audit
+if [[ ${r1} == 2 && $(rc) == 2 ]] && grep -Fq '宣言' "${work}/err1" && ! grep -Fq dummy "${work}/err1" \
+  && grep -Fq '入れた時刻の控え' "${work}/err"; then
+  ok "audit: 宣言・控えが読めない形なら 2 (宣言の字は出さない)"
+else
+  ng "audit (読めない形)" "$(detail)"
+fi
+run claude-account audit extra
+if [[ $(rc) == 2 ]]; then ok "audit は引数を取らない (2)"; else ng "audit の引数" "$(detail)"; fi
+
+# --- 素の claude の wrapper (bareToken の package)
+if [[ -n ${pkg_bare} ]]; then
+  ln -sfn "${pkg_bare}/bin/claude-account" "${linkbin}/claude-account"
+  ln -sfn "${pkg_bare}/bin/claude-account" "${linkbin}/claude-personal"
+  ln -sfn "${pkg_bare}/bin/claude-account" "${linkbin}/claude"
+  bare_file="${home}/.config/claude-accounts/default.env"
+  reset_bare() {
+    reset_home
+    mkdir -p "${home}/.local/share/claude-account/bin"
+    ln -s "${pkg_bare}/bin/claude-account" "${home}/.local/share/claude-account/bin/claude"
+  }
+  put_bare() { # $1: 中身、$2: 権限
+    mkdir -p "${home}/.config/claude-accounts"
+    printf '%s' "$1" >"${bare_file}"
+    chmod "$2" "${bare_file}"
+  }
+  reset_bare
+  RUN_NO_CONFIG_DIR=1 run claude -p hi
+  if [[ $(rc) == 1 && ! -e ${home}/claude.log ]] && grep -Fq 'claude-account set-token default' "${work}/err" \
+    && grep -Fq 'ブラウザのある端末で claude setup-token' "${work}/err" && no_values; then
+    ok "wrapper: token が無ければ claude を起こさず 1 で、置き方 (ブラウザのある端末・set-token default) を出す"
+  else
+    ng "wrapper (token なし)" "$(detail)"
+  fi
+  put_bare 'CLAUDE_CODE_OAUTH_TOKEN=dummy-bare-1
+' 600
+  RUN_NO_CONFIG_DIR=1 FAKE_CLAUDE_EXIT=3 run claude -p hi
+  if [[ $(rc) == 3 ]] && grep -Fxq 'oauth=dummy-bare-1' "${home}/claude.log" && grep -Fxq 'dir=<unset>' "${home}/claude.log" \
+    && grep -Fxq 'key=<unset>' "${home}/claude.log" && grep -Fxq 'auth=<unset>' "${home}/claude.log" \
+    && grep -Fxq 'arg=-p' "${home}/claude.log" && grep -Fxq 'arg=hi' "${home}/claude.log" && no_values; then
+    ok "wrapper: CLAUDE_CONFIG_DIR を付けずに起こすと、default.env の token を渡し (CLAUDE_CONFIG_DIR は付けない。API キーは外す)、引数と終了コードを渡す"
+  else
+    ng "wrapper (token)" "$(detail)"
+  fi
+  run claude -p hi
+  if [[ $(rc) == 0 ]] && grep -Fxq 'dir=/somewhere/else' "${home}/claude.log" && grep -Fxq 'oauth=dummy-inherited-oauth' "${home}/claude.log" \
+    && grep -Fxq 'key=dummy-inherited-key' "${home}/claude.log"; then
+    ok "wrapper: CLAUDE_CONFIG_DIR を付けて起こすと、env に手を出さずに本物の claude を起こす"
+  else
+    ng "wrapper (CLAUDE_CONFIG_DIR あり)" "$(detail)"
+  fi
+  RUN_NO_CONFIG_DIR=1 RUN_NO_FAKE_CLAUDE=1 run claude -p hi
+  if [[ $(rc) == 127 ]] && grep -Fq 'claude: claude が見つかりません' "${work}/err"; then
+    ok "wrapper: PATH に自分しか claude が無ければ 127 (自分を起こし直さない)"
+  else
+    ng "wrapper (本物の claude なし)" "$(detail)"
+  fi
+  put_bare 'CLAUDE_CODE_OAUTH_TOKEN=dummy-bare-1
+' 644
+  RUN_NO_CONFIG_DIR=1 run claude
+  if [[ $(rc) == 1 && ! -e ${home}/claude.log ]] && grep -Fq 'chmod 600' "${work}/err" && no_values; then
+    ok "wrapper: default.env の権限が 644 なら 1 (chmod 600 を出す)"
+  else
+    ng "wrapper (644)" "$(detail)"
+  fi
+  put_bare 'CLAUDE_CODE_OAUTH_TOKEN=op://vault/item/field
+' 644
+  RUN_NO_CONFIG_DIR=1 run claude -p hi
+  if [[ $(rc) == 0 && $(grep -c . "${home}/op.log") == 1 ]] && grep -Fxq 'oauth=dummy-op-value' "${home}/claude.log" \
+    && grep -Fxq 'dir=<unset>' "${home}/claude.log" && no_values; then
+    ok "wrapper: default.env が op の参照なら op を 1 回呼び、claude に値が届く"
+  else
+    ng "wrapper (op)" "$(detail)
+--- op.log
+$(cat "${home}/op.log" 2>/dev/null)"
+  fi
+  FAKE_OP_VALUE='' RUN_NO_CONFIG_DIR=1 run claude
+  if [[ $(rc) == 70 && ! -e ${home}/claude.log ]] && grep -Fq 'claude-account set-token default' "${work}/err"; then
+    ok "wrapper: 1Password から読んだ値が空なら 70 で、set-token default を出す"
+  else
+    ng "wrapper (op の空)" "$(detail)"
+  fi
+  # check・set-token・list・launcher
+  reset_bare
+  run claude-account check default
+  r1=$(rc)
+  cp "${work}/err" "${work}/err1"
+  put_bare 'CLAUDE_CODE_OAUTH_TOKEN=dummy-bare-1
+' 600
+  run claude-account check default
+  r2=$(rc)
+  cp "${work}/out" "${work}/out2"
+  rm -f "${home}/.local/share/claude-account/bin/claude"
+  run claude-account check default
+  if [[ ${r1} == 1 && ${r2} == 0 && $(rc) == 1 ]] && grep -Fq 'claude-account set-token default' "${work}/err1" \
+    && grep -Fxq 'claude: token (ローカル)' "${work}/out2" && grep -Fq 'wrapper' "${work}/err" && no_values; then
+    ok "check default は token のファイル (無い 1・ある 0) と wrapper の link (無い 1) を見る"
+  else
+    ng "check default (宣言あり ${r1}/${r2})" "$(detail)"
+  fi
+  reset_bare
+  CLAUDE_ACCOUNT_NOW='2026-11-28T21:00:00+09:00' STDIN_TEXT=$'sk-ant-oat01-dummy-bare-2\n' run claude-account set-token default
+  if [[ $(rc) == 0 && $(stat -c %a "${bare_file}") == 600 ]] && grep -Fxq 'CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-dummy-bare-2' "${bare_file}" \
+    && grep -Fq '# claude (素の claude) の token' "${bare_file}" && [[ $(jq -r '.default.set_at' "${times}") == '2026-11-28T21:00:00+09:00' ]] \
+    && grep -Fq 'claude (素の claude) で起こせます' "${work}/out" && no_values; then
+    ok "set-token default は default.env に権限 600 で書き、入れた時刻を控える"
+  else
+    ng "set-token default" "$(detail)"
+  fi
+  run claude-account list
+  if [[ $(rc) == 0 ]] && grep -Eq '^default +token +素の claude +token \(ローカル\)' "${work}/out"; then
+    ok "list は宣言のあるホストの default を token として出す"
+  else
+    ng "list の default (宣言あり)" "$(detail)"
+  fi
+  mkdir -p "${home}/.claude-personal"
+  ln -s "${home}/.claude/settings.json" "${home}/.claude-personal/settings.json"
+  run claude-personal -p hi
+  if [[ $(rc) == 0 ]] && grep -Fxq "dir=${home}/.claude-personal" "${home}/claude.log" && grep -Fxq 'oauth=<unset>' "${home}/claude.log"; then
+    ok "claude-<名前> の launcher は、PATH の先の wrapper を飛ばして本物の claude を起こす"
+  else
+    ng "launcher と wrapper" "$(detail)"
+  fi
+  # audit: 宣言した default
+  reset_bare
+  printf '{"accounts":{"default":{"item":null,"label":"main"}}}\n' >"${decl}"
+  CLAUDE_ACCOUNT_NOW='2026-11-28T21:00:00+09:00' run claude-account audit
+  r1=$(rc)
+  cp "${work}/out" "${work}/out1"
+  put_bare 'CLAUDE_CODE_OAUTH_TOKEN=dummy-bare-1
+' 600
+  mkdir -p "${home}/.local/state/claude-accounts"
+  printf '{"default":{"set_at":"2026-11-27T21:00:00+09:00"}}\n' >"${times}"
+  CLAUDE_ACCOUNT_NOW='2026-11-28T21:00:00+09:00' run claude-account audit
+  if [[ ${r1} == 1 ]] && grep -Fxq '| default (素の claude) | main | - | 無い | - | - | - | 入れる |' "${work}/out1" \
+    && grep -Fq -- '- default: 入れる — token が無い (ブラウザのある端末で claude setup-token を打ち、このホストで claude-account set-token default で入れる)' "${work}/out1" \
+    && [[ $(rc) == 0 ]] && grep -Fxq '| default (素の claude) | main | - | ローカル | 600 | 2026-11-27 21:00 | 1 | ok |' "${work}/out" \
+    && grep -Fxq '判定: ok 1・回す 0・入れる 0・直す 0・宣言漏れ 0' "${work}/out" && no_values; then
+    ok "audit は宣言した default を素の claude として並べる (token が無ければ入れる、入れて控えがあれば ok で 0)"
+  else
+    ng "audit (default)" "$(detail)
+--- 1 回目
+$(cat "${work}/out1")"
+  fi
+  printf '{"accounts":{"default":{"item":null,"label":"shared"},"alt":{"item":null,"label":"shared"}}}\n' >"${decl}"
+  printf '{"version":1,"accounts":{"alt":{"mode":"token"}}}\n' >"${home}/.config/claude-accounts/accounts.json"
+  printf 'CLAUDE_CODE_OAUTH_TOKEN=dummy-alt-1\n' >"${home}/.config/claude-accounts/alt.env"
+  chmod 600 "${home}/.config/claude-accounts/alt.env"
+  CLAUDE_ACCOUNT_NOW='2026-11-28T21:00:00+09:00' run claude-account audit
+  if grep -Fxq '同じ token (呼び名 shared) を置いたアカウント: default・alt (回すときは、どれも貼り直す)' "${work}/out"; then
+    ok "audit は同じ呼び名のアカウントを並べる"
+  else
+    ng "audit (同じ呼び名)" "$(detail)"
+  fi
+  ln -sfn "${pkg}/bin/claude-account" "${linkbin}/claude-account"
+  ln -sfn "${pkg}/bin/claude-account" "${linkbin}/claude-personal"
+  rm -f "${linkbin}/claude"
 fi
 
 echo

@@ -227,10 +227,17 @@ fi
 
 # claude の探し方は bootstrap-claude-plugins.sh と同じ。
 # mise は `mise activate` 方式なので、同じ setup.sh の実行内で入った直後は PATH に無い。
+# 素の claude の wrapper (dotfiles.claude.tokens.default のホストの ~/.local/share/claude-account/bin/claude。素の claude を token で
+# 起こす。home/modules/claude.nix) は飛ばす。plugin の出し入れに token は要らず、token がまだ無いと wrapper は claude を起こさずに止まる
 claude=""
-if command -v claude &>/dev/null; then
-  claude=$(command -v claude)
-elif command -v mise &>/dev/null; then
+bare_wrapper="${HOME}/.local/share/claude-account/bin/claude"
+while IFS= read -r c; do
+  if [[ -n ${c} && ${c} != "${bare_wrapper}" ]]; then
+    claude=${c}
+    break
+  fi
+done < <(type -ap claude 2>/dev/null || true)
+if [[ -z ${claude} ]] && command -v mise &>/dev/null; then
   claude=$(mise which claude 2>/dev/null || true)
 fi
 

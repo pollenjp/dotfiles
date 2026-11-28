@@ -87,10 +87,17 @@ summary_warn() {
 # (shim ディレクトリは PATH に無い)。同じ setup.sh の実行内で mise が
 # claude を入れた直後は PATH が古いままなので command -v では見つからない。
 # その場合は mise which で実体を引く。
+# 素の claude の wrapper (dotfiles.claude.tokens.default のホストの ~/.local/share/claude-account/bin/claude。素の claude を token で
+# 起こす。home/modules/claude.nix) は飛ばす。plugin の出し入れに token は要らず、token がまだ無いと wrapper は claude を起こさずに止まる
 claude=""
-if command -v claude &>/dev/null; then
-  claude=$(command -v claude)
-elif command -v mise &>/dev/null; then
+bare_wrapper="${HOME}/.local/share/claude-account/bin/claude"
+while IFS= read -r c; do
+  if [[ -n ${c} && ${c} != "${bare_wrapper}" ]]; then
+    claude=${c}
+    break
+  fi
+done < <(type -ap claude 2>/dev/null || true)
+if [[ -z ${claude} ]] && command -v mise &>/dev/null; then
   claude=$(mise which claude 2>/dev/null || true)
 fi
 
