@@ -1,0 +1,1173 @@
+# panel (pjp-hub-panel) でユーザーに見せる
+
+panel は、ハブの端末の横のペインに出す herdr-app の mod `pjp-hub-panel`。ユーザーへの問い (選んで送る)・ユーザーの問いへの答え
+(Q&A。問い 1 つを開け閉めできる項目 1 つにする)・進み具合の木 (この会話の
+下に、子と、子の進み具合の段と PR を入れ子にして並べる。チケットがあれば行はチケットにし、ID と題は押すと開くリンク。ユーザーの番の段は
+押すと、その段の answer をハブの端末へ送れる)・図 (SVG と、その上に重ねる動き)・図に
+描けないことの短い説明 (markdown) を出す。ユーザーは要らなくなった節に × で印を付け、次にハブが書き直したときに消せる。mod は
+dotfiles の `win/herdr-app/mods/pjp-hub-panel/` にあり、Windows の runner の手順 `herdr-app-mods` が herdr-app の home の
+`mods\pjp-hub-panel\` へ配る (dotfiles-private の ADR 068)。
+
+panel は 2 つのペインに分けて出す (ユーザーの指示 2026-11-17。問いと、まとめ・状況の説明を分け、問いは出たときにペインを足し、
+答え終わったら消す)。並びは、ふだんはまとめを左・ハブの端末を右の 2 分割にし、問いが出たら端末を割って、その右に問いを置く
+(ユーザーの指示 2026-11-18。この指示を、まとめと端末を入れ替える (`pane.swap`) 依頼ともみなす)。問いは初め端末の左に置いたが、
+閉じた幅が左隣のまとめへ行って [まとめ 3/4 | 端末 1/4] になったので、ユーザーの案で端末の右に替えた (同じ日)。
+
+```text
+ふだん: まとめを左・ハブの端末を右の 1:1
++--------------------+--------------------+
+| まとめ (summary)   |                    |  まとめ: 開いたら残す
+|  title・節         |  ハブの端末        |
+|                    |                    |
++--------------------+--------------------+
+
+問いがあるとき: 端末を割り、その右に問い (幅は 1/2・1/4・1/4)
++--------------------+---------+----------+
+| まとめ (summary)   | ハブの  | 問い     |  問い (questions): 問いがあるときだけ開き、
+|  title・節         | 端末    |          |  答えたら閉じる (幅は左隣の端末へ戻る)
+|                    |         |          |
++--------------------+---------+----------+
+```
+
+- 2 つのペインは同じ panel.json を読む。props の `role` で出すものが分かれる: `"summary"` は title・updated・sections だけ、
+  `"questions"` は questions だけ (空なら「問いはありません」)。`role` が無いと、今までどおり 1 つのペインに両方を出す
+- ペインを開け閉めするのはハブの Claude。問いのペインは、ユーザーが「送信」すると自分で閉じる。閉じたあとキーボードをハブの端末
+  (props の `terminal`) へ戻すのは、ユーザーがそのときハブの端末のある tab を見ているときだけ (送る間に別の space・tab へ移った
+  ユーザーを引き戻さない)。自分のペインだと確かめられないときは閉じず、「送った (閉じるのはハブ)」と出す
+- 開く・入れ替える・閉じるどのときも、ユーザーのキーボードの先 (今打ち込んでいるペイン) を動かさない
+- panel.json の形 (問い・節・図の欄と、図に重ねる marks の種類・進み具合の木と一覧の節の行・消す印と段を押した印のファイル・props) の正は、mod の `main.js`
+  の頭のコメント (最初の `import` の行より前)。ここには写さない (写すと mod を直したときに食い違う)。会話で初めて panel を書く前に、
+  配った写し `<home>\mods\pjp-hub-panel\main.js` の頭を Read で読む。ペインの並び (どのペインをどこに開くか) と、いつ何を
+  書くかの正はこの文書 (`main.js` の頭のコメントにも、dotfiles #255 の版から同じ並びが書いてある)
+- panel は Windows のハブだけで使う。ここの手は会話の PowerShell tool で打つ形で書き、SKILL.md の「bash でも PowerShell でも同じ
+  字面」の外にする。pwsh 7.3 以降が要る (`$PSVersionTable.PSVersion` で見る。Windows PowerShell 5.1 は外のコマンドに渡す引数の
+  中の `"` を落とすので、5.1 しか無ければ panel を開かず、返答の文だけで進める)。panel が答えを送るのに打つ
+  `hc send` (「答えが届いたら」) は mod の中の話で、これとは別
+- `herdr-app do` には、`ConvertTo-Json -Compress` で作った JSON を 1 つの引数で渡す (`pane.close` だけは下の「panel のペインを閉じる」の
+  形)
+- herdr-app の出力か終了コード (`$LASTEXITCODE`) を使う手は、いつも pipeline の次のコマンドへ流して待つ
+  (`$r = (herdr-app do pane.split $arg | Out-String).Trim()`・`herdr-app status | ConvertFrom-Json`・`herdr-app shot <png> | Out-Null`)。
+  herdr-app.exe は GUI の exe (PE の subsystem が 2) で、PowerShell は GUI の exe を、出力を pipeline に流すときにだけ終わりまで待つ。
+  流さない形 (`` (herdr-app …) -join "`n" ``・`$null = herdr-app …`・行に単独で打つ) は待たずに次へ進み、出力は空・`$LASTEXITCODE` は前の
+  コマンドの値のままで、herdr-app は後から書こうとして `failed printing to stdout: パイプを閉じています。 (os error 232)` で panic した
+  (2026-11-18。herdr-app 0.1.15・pwsh 7。`status`・`ls`・`do pane.split`・`shot` で)
+- 手を PowerShell の関数にまとめるときは、関数の中で出した値 (代入しない式・文字列だけの行・呼んだ関数の出力) がみな返り値に
+  混ざる。split したペインの ID を返す関数の中で、行を出すログの関数を呼んだら、ID にログの行が混ざって控えが壊れた (2026-11-18)。
+  ログを書く関数は何も出さない形 (`Add-Content` で書くだけ) にし、値を返す関数の中の要らない出力は `| Out-Null` で捨てる
+  (herdr-app には `$null = …` を使わない。上の「流して待つ」の決まり)
+- `<home>` は herdr-app の home。`HERDR_APP_HOME` → `%XDG_CONFIG_HOME%\herdr-app` → `%USERPROFILE%\.config\herdr-app` の順に決まり
+  (ふつうは最後の既定)、次の 1 行がそのパスを出す
+
+```powershell
+if ($env:HERDR_APP_HOME) { $env:HERDR_APP_HOME } elseif ($env:XDG_CONFIG_HOME) { Join-Path $env:XDG_CONFIG_HOME 'herdr-app' } else { Join-Path $HOME '.config\herdr-app' }
+```
+
+### 当てる順と、古い mod のとき
+
+- この手順は、`role` を見る mod を Windows に当ててから使う。古い mod は `role` を見ないので、
+  2 つのペインに同じもの (問いと節の両方) が出る
+- `main.js` の頭のコメントの props に `role` が無ければ古い mod。そのときは問いのペインを開かず (下の「問いを出す」の 2. を
+  飛ばす)、まとめのペインに問いも出す。新しい問いを出すときは version を替える (前の答えの「送った: …」の行と選んだ答えを消す
+  ため。替えると畳んだ節も初めの状態に戻る)
+- 一覧の節・消す印 (×)・markdown のリンクは dotfiles #256、図の幅合わせと小窓・答えの改行は #255 の mod から (どちらも
+  2026-11-19 に Windows に当てた)。`main.js` の頭のコメントに「節を消す印」が無ければ #256 の前の mod で、一覧の節は「知らない節」と
+  出て、× は出ない。そのときは一覧の節を置かず、PR とチケットは markdown の節に書く。「大きく見る小窓」も無ければ #255 の前で、
+  複数の答えは ` / ` でつないだ 1 行で届く
+- 答えを `hc send` で送る形 (「答えが届いたら」) は dotfiles #331 の mod から。`main.js` の頭のコメントの「答えの送り方」に
+  `hc send` の字が無ければ #331 の前の mod で、「送信」も段の「送る」もクリップボードを経てハブの端末にフォーカスを移して貼る
+  (ユーザーのクリップボードを答えで上書きし、別の space にいるユーザーを端末へ引き戻す)
+- 進み具合の木の節 (`work`) は、それを足した後の mod から。配った `main.js` の頭のコメント (最初の `import` の行より
+  前) に `type: "work"` の字が無ければ `work` を知らない mod で、`work` の節は「知らない節」と出る。そのときは `work` の節を置かず、
+  前の 3 つの節 (子の進み具合 `flow`・PR の一覧 `prs`・チケットの一覧 `tickets`) で書く (「チケット・進み具合・PR」の「`work` を
+  知らない mod のとき (3 つの節)」)。version は替えない。見分けるのは次の 1 行 (`work: True` なら `work` を使える。`<home>` は上の
+  1 行で出したパス)。会話で初めて panel を書く前に打ち、`work` を知らない mod の間は panel.json を書くたびに (消す印を読むのと同じ
+  時に) 打ち直して、True と出たら同じ節の「`work` を知る mod に切り替わったら」のとおり、その書き込みで切り替える
+- ミニ絵 (箇条書きの項目の下の小さな図。下の「ミニ絵」) も `work` と同じ直しの mod から。頭のコメントに `ミニ絵:` の字が無ければ (次の 1 行の
+  `ミニ絵: False`)、ミニ絵を出せない mod で、markdown の節に絵の行を書かない。False の間は、`work` と同じく panel.json を書くたびに
+  打ち直す
+
+- Q&A の節 (`qa`。下の「Q&A (ユーザーの問いへの答え)」) は、それを足した後の mod から。頭のコメントに
+  `// Q&A (type "qa"):` の字が無ければ (次の 1 行の `qa: False`)、qa を知らない mod で、qa の節は「知らない節」と出る。そのときは
+  同じ節の「qa を知らない mod のとき」のとおり、問いごとの markdown の節で書く。False の間は、`work` と同じく panel.json を書くたびに
+  打ち直す
+
+- 段の answer (ユーザーの番の段を押して送る。「チケット・進み具合・PR」の「段の answer (押して送る)」) は、それを足した後の
+  mod から。頭のコメントに `// 段の answer:` の字が無ければ (次の 1 行の `段の answer: False`)、answer を知らない mod で、段は押せず、段を
+  押した印のファイル (panel.steps.json) も書かれない。それでも answer は書いてよい (この mod は段の label と state だけを読み、ほかの欄を
+  捨てる。押せないだけで害は無く、mod を当てれば書き直さなくても押せるようになる)。False の間は、返答の文で段を押してとは頼まず、端末で
+  言ってもらう。`work` と同じく panel.json を書くたびに打ち直す
+
+- 済んだものを小さく畳んで出す形 (下の「済んだものを残す (小さく畳む)」) は、それを足した後の mod から。頭のコメントに
+  `// 済んだもの:` の字が無ければ (次の 1 行の `済んだもの: False`)、古い mod で、`done` の欄が効かず、済んだ行・段・節も小さくならない。
+  済んだ節は `collapsed` だけで畳むので、初めて読んだときと version の替わり目にしか畳まれず、後から足した節は開いて出る。それでも
+  `done: true` と `collapsed: true` は書いてよい (古い mod は知らない欄を捨てる)。False の間は、`work` と同じく panel.json を書くたびに打ち直す
+
+```powershell
+$h = ((Get-Content -Raw '<home>\mods\pjp-hub-panel\main.js') -split '(?m)^import ', 2)[0]; "work: $($h.Contains('type: "work"'))  ミニ絵: $($h.Contains('ミニ絵:'))  qa: $($h.Contains('// Q&A (type "qa"):'))  段の answer: $($h.Contains('// 段の answer:'))  済んだもの: $($h.Contains('// 済んだもの:'))"
+```
+
+## いつ使うか
+
+- 使えるのは mod のあるハブだけ: `<home>\mods\pjp-hub-panel\main.js` がある所 (今は Windows の runner が配った所だけ)。無ければ
+  panel を使わず、返答の文だけで進める
+- 使う場面:
+  - ユーザーに問いを出す (子の PR を merge してよいか・選択肢から選んでもらう)
+  - ユーザーの問い (知りたいこと・確かめたいこと) に答える: まとめの一番上の Q&A の節に項目を足して書き、端末には
+    「panel の Q&A に答えた: <問いの要旨>」の 1 行だけを返す (下の「Q&A (ユーザーの問いへの答え)」)
+  - この会話・子の進み具合・PR を、進み具合の木で見せる (panel を初めて書くときから一番上 (Q&A の節があればその下) に置き、子を立てた・子の報告で
+    段が進んだ・PR を出したときに行を進める。下の「チケット・進み具合・PR」)
+  - 状況・流れ・手順・比べる案・ユーザーにしてほしいこと (どこを見て何を押すか) を説明する
+- 説明は**まず図 (SVG と marks の動き) で描き**、文は図の上の「いま」・図の下の 1 行 (caption)・図に描けないこと (条件・例外・
+  写して打つコマンド) に留める (ユーザーの指示 2026-11-18)。「いま」と図に描けないことの箇条書きは、太字の見出しの項目を親にし、
+  詳細をその下に一段下げた子の項目にする (ユーザーの指示 2026-11-19。見出しの項目は「いま」が 1〜3 つ・図に描けないことが 3〜5 つ、
+  詳細はそれぞれ 1〜3 行)。文だけで足りるのは 1〜3 行の知らせなどに限る。何を図にするか・1 枚の形・色・動き・箇条書きの形・
+  雛形 (`assets/panel/`) は `panel-figures.md` (panel に説明を書く前に読む)
+- panel のペインが無ければ開く (下の「開く」)。ペインを作る・閉じるのはユーザーの画面を変える操作だが、ユーザーの指示 (2026-11-17。
+  問いだけでなく、今の状況の解説と図 (動く図も) を出せる panel にして状況を分かりやすくする指示と、上の 2 つのペインに分ける指示) を、ハブの会話で panel のペインを開け閉めする依頼とみなす
+- panel は返答の補い。問いは返答の文にも短く書く (ユーザーが panel を見ていないことがある)。ユーザーの問いへの答えだけは
+  逆で、答えの本文を panel の Q&A に書き、端末には 1 行だけ返す (ユーザーの指示 2026-11-23。端末では子の返答と重なって、どこで
+  答えたか分からなくなるため)
+
+## 置き場所
+
+| もの | 置き場所 | わけ |
+| --- | --- | --- |
+| panel.json | scratchpad の panel だけのフォルダ (例 `<scratchpad>\hub-panel\panel.json`)。props には絶対パスで渡す | panel はファイルのフォルダを見張り、同じフォルダのほかのファイルが変わっても読み直す。ハブの中・repo の中には置かない (ハブの決まり) |
+| ペインの控え (panes.json) | panel のフォルダの隣 (例 `<scratchpad>\hub-panel-panes.json`) | panel のペインの ID は `herdr-app ls` に出ず、開いたときの結果からしか引けない。会話が要約されても引けるようファイルに控える。panel のペインを開くときに割る端末のペインの ID も控える。panel のフォルダに置くと、書くたびに panel が読み直す |
+| 図 (SVG) | `<home>\pjp-hub-panel-media\<会話の名前>\<名前>.svg`。panel.json の src には `<会話の名前>/<名前>.svg` と書く。ミニ絵は名前を `mini-<名前>.svg` にし、markdown の絵の行に同じ形で書く (「ミニ絵」) | panel の `image()` は herdr-app の home の下しか読めない (scratchpad の絶対パスを渡すと何も出ない) |
+| 消す印 (panel.dismiss.json) | panel.json の隣。panel が書き、ハブは読むだけ (「節を消す印 (×)」) | panel が props の file の名前から決める |
+| 段を押した印 (panel.steps.json) | panel.json の隣。panel が書き、ハブは読むだけ (「段を押した印 (panel.steps.json)」) | 消す印と同じ |
+| `pjp hub bake` の写し (marks を焼いた SVG。panel の外で図を動かして見せるとき) | scratchpad の、panel のフォルダの外 (例 `<scratchpad>\baked\`)。`pjp hub bake` の `--out` に渡す (「図」) | panel のフォルダに書くと panel が読み直す。herdr-app の home の中は、図のフォルダの同じ名前なら panel の図を上書きし、mod のフォルダなら mod ごと読み直す (`pjp hub bake` はどちらも断る) |
+
+- panel のフォルダには、panel.json と panel が書く印のファイルのほか (控え・shot・子への答え・下書き) を置かない
+- どれも Write で絶対パスに書ける (無いフォルダは Write が作る。git の外なので、hook の `pjp hub guard` は止めない)
+- 図を mod のフォルダ (`<home>\mods\pjp-hub-panel\`) に置かない。dotfiles が配るフォルダで、そこにファイルを保存すると mod ごと
+  読み直す
+- 図のフォルダは会話で分ける (`<会話の名前>`)。チケットがあればチケットの ID (例 `TKT-n\`)、無ければ `t-<この端末の住所>`
+  (例 `t-t53\`。`pjp child` が子の控えに使う名前と同じ)。書き始めた後でチケットが付いても、フォルダは替えなくてよい。ほかの会話の図と
+  名前がぶつからない
+- 控えの形 (`questions` は問いのペインが無ければ `null`)。`terminalPane` はこの会話の端末が入っているペインの ID (「開く」の 2. で
+  引く)。まとめも問いも、このペインを割って開く。`closing` は開き直す間だけ置く、これから閉じる古い panel のペインの ID (「開き直す・
+  置き場所を移す」)。ペインを開けた・閉じたら、その場で Write で書き直す。ID は覚えに頼らず、使う前に控えから読む
+- `terminalPane` が無い控えは、この並びより前の手順 (まとめを端末の右に開き、問いはまとめの下に開いた) で開いた panel のもの。次に
+  問いを出す前に「開き直す・置き場所を移す」で今の並びに開き直す
+
+```json
+{ "file": "<panel.json の絶対パス>", "terminal": "<props の terminal>", "terminalPane": "p12", "summary": "p20", "questions": "p21" }
+```
+
+## panel のペインを開く・閉じる (共通の手)
+
+### 端末を割って開く (split・キーボードの先・まとめは入れ替え)
+
+panel のペインは、まとめも問いも、この会話の端末のペイン (控えの `terminalPane`。初めて開くときは「開く」の 2. で引く) を `right` に
+割って開く。herdr-app 0.1.15 の `pane.split` は元のペインを半分に割り、新しいペインを右か下に置くだけで (左・上は無い)、幅を
+決める・そろえる command も無い (`layout.resize` は窓の layout の node だけで、タブのペインには効かない)。まとめは端末の左に置く
+ので、割ってから `pane.swap` で新しいペインと端末の場所を入れ替える。問いは割ったまま端末の右に置く。まとめを開くと
+[まとめ | 端末] の 1:1 になり、続けて問いを開くと端末の半分が問いになって [まとめ 1/2 | 端末 1/4 | 問い 1/4] になった (2026-11-18。
+表示の px で 859・430・428)。
+
+ユーザーが見ている tab で split すると、キーボードは新しいペインへ動いた (2026-11-18。まとめ・問いのどちらも)。そこで split の
+前後で `herdr-app status` の space・tab・focused_pane を見て、同じ space・tab のままキーボードが新しいペインへ動いていたら、
+`pane.focus` で前のペインへ戻す (まとめは、戻してから入れ替える)。`pane.swap` はペインを動かすだけでキーボードの先を動かさず、
+ユーザーが見ている tab では、端末にあったキーボードは入れ替えた後も端末にあった (2026-11-18)。
+
+ユーザーが見ていない tab で split しても、表示の space・tab と `focused_pane` (ユーザーが今いるタブのキーボードの先) は動かな
+かった。ただし割ったタブの中のキーボードの先は新しいペインへ移り、ユーザーがそのタブに戻ると、キーボードは端末でなく新しい
+ペインにあった (2026-11-18。見ていない間に開き直したまとめで、戻った 3 回とも)。split の前後の status はユーザーの見ている
+別のタブを返すので、下の script の「戻す」の条件に当たらない。そこで script は、割ったのが見ていない tab なら
+`見ていない tab で割った` の行を出す。その行が出たら「見ていない tab で開いたとき」の script を裏で流し、ユーザーが来たときに
+端末へ戻す。
+
+```powershell
+# 埋めるもの: <端末のペイン>・<summary か questions>・<panel.json の絶対パス>
+# <端末のペイン>: 「開く」では 2. で引いたペイン、ほかでは控えの terminalPane
+# まとめ (summary) は割った後に端末と入れ替えて左へ移す。問い (questions) は入れ替えず、端末の右に置く
+$t = '<端末のペイン>'
+$role = '<summary か questions>'
+$me = hc get $env:HC_TERMINAL_ID --json | Out-String | ConvertFrom-Json
+$sp = "$($me.labels.'herdr.space')"; $tb = "$($me.labels.'herdr.tab')"   # ハブの端末がいる space と tab
+$ls = herdr-app ls | Out-String
+if (-not $t -or $ls -notmatch "\b$([regex]::Escape($t))\b") { "端末のペイン [$t] が herdr-app ls に出ない。割らない" }
+else {
+  $before = herdr-app status | ConvertFrom-Json
+  $arg = @{ direction = 'right'; pane = $t; mod = 'pjp-hub-panel'
+            props = @{ file = '<panel.json の絶対パス>'; terminal = $env:HC_TERMINAL_ID; role = $role } } | ConvertTo-Json -Compress
+  $r = (herdr-app do pane.split $arg | Out-String).Trim()
+  $code = $LASTEXITCODE
+  $after = herdr-app status | ConvertFrom-Json
+  "split: $code $r"
+  "errors: $(ConvertTo-Json -Compress -InputObject $after.errors)"
+  if (-not $before -or -not $after) { 'herdr-app status が読めない (キーボードの先を確かめられない)' }
+  $new = if ($code -eq 0) { ($r | ConvertFrom-Json).pane }
+  if (-not $sp -or -not $tb) { 'ハブの端末の space・tab を引けない (hc get の labels)。見ていない tab で割ったかを確かめられない' }
+  elseif ($new -and $before -and -not ("$($before.space)".EndsWith($sp) -and "$($before.tab)".EndsWith($tb))) {
+    "見ていない tab で割った ($new)。ユーザーが来たとき、キーボードは panel のペインに残る"
+  }
+  if ($new -and $before.focused_pane -and $before.focused_pane -ne $new -and $after.focused_pane -eq $new -and
+      $after.space -eq $before.space -and $after.tab -eq $before.tab) {
+    $o = (herdr-app do pane.focus (@{ pane = $before.focused_pane } | ConvertTo-Json -Compress) | Out-String).Trim()
+    "キーボードを $($before.focused_pane) へ戻した: $LASTEXITCODE $o"
+  }
+  if ($new -and $role -eq 'summary') {
+    $o = (herdr-app do pane.swap (@{ pane = $new; target = $t } | ConvertTo-Json -Compress) | Out-String).Trim()
+    "swap: $LASTEXITCODE $o"
+  }
+  $s = herdr-app status | ConvertFrom-Json
+  if ($new -and $before -and ($s.space -ne $before.space -or $s.tab -ne $before.tab -or $s.focused_pane -ne $before.focused_pane)) {
+    "!! 画面かキーボードの先が split の前と違う (space=$($s.space) tab=$($s.tab) focused=$($s.focused_pane))"
+  }
+}
+```
+
+- `割らない` で止まったら、`terminalPane` が古い (端末のペインでない) か空。「開く」の 2. のとおり `herdr-app ls` で今の端末の
+  ペインを引き直し、控えを直してから打つ。今の端末のペインかどうか (別の端末のペインでないか) は、会話を立て直したときの props の
+  確かめ (「開き直す・置き場所を移す」) で見る
+- split の結果は `{"pane": "<作ったペインの ID>"}` (失敗なら `{ "error": "…" }` と終了コード 1)。出た ID をすぐ控え (panes.json)
+  に書く。swap の結果は `{ "ok": true }` だった
+- `errors` が空かを見てから、shot で panel が出ているかを見る (下の「見た目を確かめる」)。panel の中の誤り (「読めない」「ファイルが無い」
+  「見張れない」) は panel の頭に出るだけで、`herdr-app status` には出ない
+- `pane.focus` も JSON の 1 引数で渡す (`{"pane": …}` か `{"terminal": …}`)。この形で、split で新しいペインへ動いたキーボードを
+  ハブの端末へ戻せた (2026-11-18)。`戻した:` の終了コードが 0 でなく、前のペインがハブの端末なら、
+  `(herdr-app do pane.focus (@{ terminal = $env:HC_TERMINAL_ID } | ConvertTo-Json -Compress) | Out-String).Trim()` で 1 度だけ
+  打ち直してよい。どちらにしても `pane.close` で代わりにしない (前のペインはふつうハブの端末で、閉じると会話が終わる)
+- `pane.swap` には `pane` と `target` の両方を渡す。`pane` を省く (null も同じ) と、キーボードのあるペイン (ふつうはハブの端末) が
+  入れ替わる。script は split が ID を返したときだけ入れ替える
+- `!!` の行が出たら、開いた後のユーザーの画面かキーボードの先が、split の前と違う。同じ space・tab のままキーボードだけが動いて
+  いれば、`pane.focus` で前のペインへ戻す。space か tab が替わっていたら何も打たず (ユーザーの画面を替える command は打たない)、
+  返答に 1 行書く
+- 入れ替えるのは、まとめを開くときに割ったばかりの 2 つ (新しいまとめと端末) だけにする。同じ幅なので、swap の後に幅が場所に
+  付いてもペインに付いても同じ並びになる (どちらなのかは確かめていない。2026-11-18 に入れ替えた組はどれも同じ幅で、見分けられ
+  なかった)。幅の違うペイン (3 列のときのまとめと端末など) は入れ替えない
+- `swap:` の終了コードが 0 でなければ、すぐ 1 度だけ打ち直す (割ったばかりで同じ幅のうちなら、入れ替えても幅は崩れない):
+  `(herdr-app do pane.swap (@{ pane = '<まとめ>'; target = '<端末のペイン>' } | ConvertTo-Json -Compress) | Out-String).Trim()`。
+  それでも入れ替わらなければ、まとめは端末の右に開いたまま (panel は使える)。控えはふだんどおり書き、返答に 1 行添えて進める。
+  ユーザーは、ペインの上端の真ん中のつまみをドラッグし、相手のペインの真ん中に落とせば入れ替えられる
+- terminal は問いのペインが答えを送る先。まとめのペインには要らないが、古い mod (role を見ない) でも答えが届くように付ける
+- `見ていない tab で割った` の行が出たら、控えを書いてから、下の「見ていない tab で開いたとき」の script を裏で流す
+
+### 見ていない tab で開いたとき (戻ったときのキーボード)
+
+ユーザーがハブのタブに来るまで裏で待ち、来たときにキーボードが panel のペイン (控えの `summary`・`questions`) にあれば、端末の
+ペイン (控えの `terminalPane`) へ戻す。来たタブはユーザーが見ているタブなので、`pane.focus` は上の script で戻すのと同じ手に
+なる。見ていないタブのペインに `pane.focus` を打つと、ユーザーの画面がそのタブへ移るかもしれない (試していない) ので、来る前には
+打たない。PowerShell tool の run_in_background で流す (終わると知らせが来る)。ユーザーが別の space を見ている間に開き直した
+まとめで流すと、ユーザーが来たときに `キーボードを <まとめ> から <端末> へ戻した: 0` が出て、キーボードは端末に戻り、画面は
+ユーザーが来たときのままだった (2026-11-18)。
+
+```powershell
+# 埋めるもの: <panes.json の絶対パス>
+$me = hc get $env:HC_TERMINAL_ID --json | Out-String | ConvertFrom-Json
+$sp = "$($me.labels.'herdr.space')"; $tb = "$($me.labels.'herdr.tab')"
+$deadline = (Get-Date).AddMinutes(60)
+$done = $false
+if (-not $sp -or -not $tb) { 'ハブの端末の space・tab を引けない (hc get の labels)。見張らない'; $done = $true }
+while (-not $done -and (Get-Date) -lt $deadline) {
+  $s = herdr-app status | ConvertFrom-Json
+  if ($s -and "$($s.space)".EndsWith($sp) -and "$($s.tab)".EndsWith($tb)) {
+    $c = Get-Content -Raw '<panes.json の絶対パス>' -ErrorAction SilentlyContinue | ConvertFrom-Json
+    if ($c -and $c.terminalPane -and $s.focused_pane -and $s.focused_pane -in @($c.summary, $c.questions)) {
+      $o = (herdr-app do pane.focus (@{ pane = $c.terminalPane } | ConvertTo-Json -Compress) | Out-String).Trim()
+      "ユーザーが来た。キーボードを $($s.focused_pane) から $($c.terminalPane) へ戻した: $LASTEXITCODE $o"
+    } else { "ユーザーが来た。キーボードは $($s.focused_pane) にあった (戻さない)" }
+    $done = $true
+  } else {
+    Start-Sleep -Milliseconds 500
+  }
+}
+if (-not $done) { '60 分のうちに、ユーザーがハブのタブに来なかった (戻していない)' }
+```
+
+- ユーザーが来た最初の 1 回だけ見て終わる。来てから戻すまでに 0.5 秒ほどかかり、その間に打った字は panel へ行く
+- panel のペインを続けて開いたとき (開き直しと問いなど) も 1 つ流せば足りる (来たときの控えを読む)。2 つ流しても、どちらも端末へ
+  戻すだけで害は無い
+- 60 分のうちに来なければ終わる。その後に来たときは、キーボードは panel に残っている (ユーザーが端末を押せば戻る)
+
+### panel のペインを閉じる
+
+- 閉じるのは、控えた ID を渡す形だけ。`pane.close` を pane なしで打つと、今キーボードのあるペインを閉じる。端末のペインを閉じると、
+  その端末が終わる (ハブの端末なら会話ごと終わる)
+- 閉じる前に、次の script で確かめる。どれかに当たれば閉じずに止まる
+  - ID が空でなく、控えが読める
+  - ID が控えの `summary` (今のまとめ) と違う。問いのペインを閉じるときに、まちがって今のまとめを閉じないため。開き直すときは、
+    控えの `summary` を `null` にしてから古いまとめを閉じ、その後で新しいまとめを開く (「開き直す・置き場所を移す」)
+  - `herdr-app ls` が読める (終了コード 0 で、何か出る)。読めないと、端末のペインかを確かめられない
+  - ID が `herdr-app ls` に出ない (端末のペインでない)。panel のペインは ls に出ない。出ていれば控えが誤っている
+- 形は `--pane <ID>`。`pane.close` に JSON を引用符で包んで渡したら効かず、`--pane <ID>` の形で効いた (2026-11-17)。開いている
+  panel のペインを閉じると `{ "ok": true }` が返り、端末にあったキーボードは端末のままだった (2026-11-18)
+
+```powershell
+# <閉じる panel のペイン>: 問いのペインなら控えの questions、開き直すときの古いペインなら控えの closing の先頭
+$c = Get-Content -Raw '<panes.json の絶対パス>' -ErrorAction SilentlyContinue | ConvertFrom-Json
+$id = '<閉じる panel のペイン>'
+$ls = herdr-app ls | Out-String
+$lsCode = $LASTEXITCODE
+if (-not $id) { '閉じるペインの ID が空。閉じない' }
+elseif (-not $c) { '控えが読めない。閉じない (控えを書き直してから打つ)' }
+elseif ($id -eq $c.summary) { "$id は控えの summary (今のまとめ)。閉じない" }
+elseif ($lsCode -ne 0 -or -not $ls.Trim()) { "herdr-app ls が読めない ($lsCode)。閉じない" }
+elseif ($ls -match "\b$([regex]::Escape($id))\b") { "$id は herdr-app ls に出る (端末のペイン)。閉じない" }
+else { $o = (herdr-app do pane.close --pane $id | Out-String).Trim(); "close: $LASTEXITCODE $o" }
+```
+
+- `閉じない` で止まったら控えを書き換えず、わけを確かめる
+- `close:` が 1 で `no pane "<ID>"` の error なら、もう閉じたペイン (送信で自分を閉じた問いのペインなど) として控えを書き換えて
+  よい。閉じたペインの ID を渡すと、今のペイン (ハブの端末のことがある) を閉じずに `{ "error": "no pane \"<ID>\"" }` と終了コード 1
+  で返った (2026-11-18)。ほかの error なら控えを書き換えずに止まり、わけを確かめる (shot でペインが残っているかを見る)。
+  `pane.focus --pane` に閉じたペインの ID を渡したときは、文言の違う `{"error": "no such pane"}` で返り、キーボードは動かなかった
+  (2026-11-18)
+
+- 閉じたペインの幅は左隣のペインへ行った (2026-11-18。herdr-app 0.1.15。[まとめ | 問い | 端末] で問いを閉じると、まとめが 3/4・
+  端末が 1/4 になった。[端末 | まとめ] でまとめを閉じると、端末へ行った)。同じ向きに割ったペインは入れ子にならず横に一続きで
+  並ぶとみられ、閉じた幅は割った元のペインではなく左隣へ行く。問いのペインは端末の右に開くので、閉じると幅は端末へ戻り、[まとめ | 端末]
+  の 1:1 に戻った (2026-11-18。問いのペインが送信で自分を閉じたときも、ハブが ID で閉じたときも。ID で閉じたときは `close: 0`
+  で、端末にあったキーボードは端末のままだった)。まとめと端末の 2 つだけのタブでまとめ (左端) を閉じると、端末がタブいっぱいに
+  なった
+- 閉じた後に並びや幅がずれて見えても、ペインを入れ替えて直そうとしない (上の「端末を割って開く」の決まり)。直すなら「開き直す・
+  置き場所を移す」で開き直す
+
+## 開く (まとめのペイン)
+
+開く前に控え (panes.json) を読む。`summary` に ID があれば開かない (まとめはもうある。props が今の scratchpad・端末と違えば
+「開き直す・置き場所を移す」)。会話が要約された後に覚えで開くと、まとめが 2 つになり、古い方の ID は控えから消えて閉じられなくなる。
+
+1. panel.json を先に書く (下の「書き方」。図を載せるなら、その SVG をさらに先に書く)。進み具合の木の節 (`work`) もこのときから
+   一番上に置く (下の「チケット・進み具合・PR」。`work` を知らない mod なら、代わりに一覧の節 `prs` (チケットのあるハブでは `tickets` も) を図に描けないことの
+   後ろに置く)。panel は開いたときにファイルのフォルダを見張り始め、見張れないと「見張れない」と出して、その後は読み直さない
+2. `herdr-app ls` (space > tab > 端末の木。端末ごとにペインの ID が出る。panel などの mod のペインは出ない) で、この会話の端末
+   (`$env:HC_TERMINAL_ID`。例 `t1m`) が入っているペインの ID (例 `p12`) を引く。`HC_TERMINAL_ID` は端末の名前で、ペインの ID ではない
+3. 「端末を割って開く」の script で、2. のペインを割り、role `summary` で開く (端末と入れ替えて左へ移し、[まとめ | 端末] の 1:1 に
+   なる)
+4. 作ったペインの ID を控え (panes.json) の `summary` に書く (`file`・`terminal`・`terminalPane` (2. のペイン) も。`questions` は
+   `null`)。同じ ID と props (file・terminal) と端末のペインを、返答にも 1 行で書いておく (scratchpad が消えたとき・会話を立て直した
+   とき (`claude -c` など) に、会話の記録から引く。Dev Tracker を使うホストでチケットのメモに残す手は、足し分の skill)。split が `{ "error": … }` を返したら控えを書かず、返答の文
+   だけで進める
+
+- まとめのペインは、開き直すとき (下の「開き直す・置き場所を移す」) だけ閉じる。会話の終わりにも、最後の状況を出したまま残す
+  (図のフォルダも消さなくてよい)
+
+## 問いを出す
+
+1. panel.json の questions に問いを書く (欄は下の「書き方」)。version は替えない (下の「書き方」。`role` を見ない古い mod のときは替える)
+2. 控えの `questions` を見る。
+   - `null` なら問いのペインを開く: 「端末を割って開く」の script で、控えの `terminalPane` のペインを割り、role `questions` で開く
+     (入れ替えない。端末の半分が問いになり、[まとめ | 端末 | 問い] になる)。作ったペインの ID を控えの `questions` に書く。split が
+     `{ "error": … }` を返したら控えは `null` のままにし、返答の文の問いで進める
+   - ID があれば開かない (今の問いのペインが、書き足した問いを読み直して出す。問いのペインは 1 つまで)。ユーザーが問いのペインを
+     手で閉じていると、ハブからは見えず、書き足した問いがどこにも出ない。ユーザーから問いが見えないと言われたら、その ID を
+     「panel のペインを閉じる」に通し、控えを `null` にしてから開き直す
+3. 問いは返答の文にも短く書く
+4. ターンを終える直前に `pjp mark asking '<問いの要旨>'` を打つ (space の一覧の会話の行に `❓` が出る。SKILL.md の 1.)。問いを
+   書き足して要旨が変わったら打ち直す
+
+- まとめのペインが無い (控えが無い・控えの `summary` が `null`) ときは、先に「開く」でまとめのペインを開いてから 2. をする
+- 控えに `terminalPane` が無い (この並びより前の手順で開いた panel。まとめが端末の右にある) ときは、先に「開き直す・置き場所を移す」で
+  今の並びに開き直してから 2. をする。前の並びのまま端末を割ると、[端末 | 問い | まとめ] の並びになる
+
+## 答えが届いたら
+
+- ユーザーが選んで「送信」(か問いのペインで Enter) を押すと、panel (mod) が端末の外から `hc send -- <ハブの端末> <答え>` を 1 回
+  打ち、hc が答えを 1 回で貼って Enter を 1 回押す。答えは問いごとに 1 行で、問いが複数なら問いの順に改行でつながり、複数行の
+  1 つの発言として届く (2 行の答えが 1 つの発言として届いた 2026-11-18。`hc send` の形でも 2026-11-27 に Windows で確かめた)。
+  クリップボードは使わず、ペインのフォーカスも動かさない (ユーザーが別の space・tab にいても、画面をハブへ引き戻さない)
+- 「入力欄に入れる」は貼るだけで Enter を押さない (ユーザーが書き足して送ることがある)。このときだけ、panel は答えを herdr-app の
+  クリップボードに入れ (入ったかを読み返して確かめる)、ハブの端末にフォーカスを移して貼る。ユーザーのクリップボードを答えの文で
+  上書きするのは、この「入力欄に入れる」だけ
+- ユーザーがハブの端末に打ちかけの文を残していると、`hc send` はそれが送られるか消されるまで待つ (人の最後のキーから最長 60 秒)。
+  その分だけ答えの届くのが遅れ、4 秒を超えると panel がわけと手 (入力欄の文を送るか消す。空に見えるなら端末で Enter を 1 回) を出す
+- ハブの端末が確かめの画面 (許可・AskUserQuestion など。blocked) で止まっていると、`hc send` は打たずに断り (終了コード 9)、panel は
+  わけを出す (答えは届かない。「入力欄に入れる」も貼らずに止まる)。ユーザーがその画面を済ませてから送り直す
+- 問いが複数で一部だけを選んで送ると、選んだ問いの答えだけが届く。どの行がどの問いの答えかは、answer の頭 (`#12 -> …`) で読む
+- 届く答えは `<hc>` の札の無い、ユーザーの発言になる (mod は端末の外から hc を打つので、hc が送り手の札を付けない)。子の
+  `<hc from=…>` の文はユーザーの承認ではないが、panel から届いた答えはユーザーの答えとして扱う
+- ユーザーが panel を使わず、端末で直に答えることもある。どちらでも次のとおりにする
+
+1. 答えた問いを panel.json の questions から消す (カードが残っていると、もう一度選んで送れる)
+2. 控えの `questions` に ID があれば、「panel のペインを閉じる」でその ID を閉じる。問いのペインは送信で自分を閉じていることが多いが、
+   ハブからはそれが分からない (端末で直に答えた・入力欄に入れてから送った・自分で閉じられなかった、のときは残っている)。もう
+   閉じたペインなら `no pane "<ID>"` で返る (「panel のペインを閉じる」) ので、それでよい
+3. 控えの `questions` を `null` に書き直す (script が `閉じない` で止まったとき・`no pane` でない error で返ったときは書き換えない)
+4. questions にまだ答えていない問いが残っていれば、「問いを出す」の 2. で問いのペインを開き直す
+5. 答えが届いた時点で、ハブの雛形の hook (`pjp mark hook prompt`) が `❓` を外し、要旨を `pjp.asked` に移している (SKILL.md の 1.)。
+   答えていない問いが残っていなければ `pjp mark answered` で `pjp.asked` を外し、残っていれば `pjp mark asking '<残った問いの要旨>'`
+   で `❓` を付け直す (どちらも打たずにターンを終えると、Stop の hook が 1 回確かめさせる。hook の無い古い worktree では、`❓` を
+   外すのも `pjp mark answered`)
+
+進み具合の木の段から届く answer (ユーザーが段を押して「送る」を押した。`… -> 確かめた` など) も、同じ手 (`hc send`。
+クリップボードもフォーカスも使わない) で、札の無いユーザーの発言として届く (打ちかけの文があると遅れる・blocked なら断られるのも
+同じ)。問いの答えではないので上の 1.〜4. (問いのカードとペイン) は当てず、「チケット・進み具合・PR」の「段の answer (押して送る)」の
+「届いたら」のとおりにする (確かめを頼んで答えを待つ印を付けていたら、5. と同じに外す)。
+
+## 開き直す・置き場所を移す
+
+次のときは、古い panel のペイン (問いとまとめ) を閉じてから、今の端末の左にまとめを開き直す:
+
+- 会話を立て直した (`claude -c` など) とき。控え (消えていれば、開いたときに返答に書いた 1 行) の props を今の scratchpad・
+  `$env:HC_TERMINAL_ID` と比べ、違えば (panel が
+  「見張れない」「ファイルが無い」と出たままのときも) すぐ開き直す。古い terminal のままだと、問いの答えがこの会話に届かない
+- 会話の途中で scratchpad が使えなくなった (2026-11-17 に起きた) とき
+- 控えに `terminalPane` が無く、問いを出すとき (この並びより前の手順で開いた panel。まとめが端末の右・問いがまとめの下にある)
+
+会話が別の端末に移ったときも、同じ端末のままのときも、古いまとめがもう無いときも、同じ手で開き直す。閉じてから割るので、前の並びや
+幅によらず [まとめ | 端末] の 1:1 になる (2026-11-18。指揮役のハブで、[まとめ 3/4 | 端末 1/4] からまとめを閉じ、端末を割って
+入れ替えて 1:1 に戻した)。新しいまとめを開いてから古いまとめを閉じると、閉じた幅が左隣へ行くので 1:1 にならない。下の 1.〜6. は、
+ユーザーが別の space を見ている間に流して通った (2026-11-18。`closing` から古いまとめを閉じて `close: 0`、割って入れ替えて
+`swap: 0`、`!!` は出ず、ユーザーが戻ると [まとめ | 端末] の 1:1 だった)。ただし、戻ったときのキーボードは新しいまとめに残って
+いた。見ていない間に開き直したら、「見ていない tab で開いたとき」の script を裏で流す。
+
+1. 前の控え (panes.json) から、古い問いとまとめのペインの ID を引く。控えが消えていれば、まとめの ID は開いたときに返答に書いた
+   1 行から引く (問いのペインの ID は書いていない。下の「問いのペインの ID が分からない」)
+2. 新しい置き場所 (今の scratchpad の panel のフォルダ) に panel.json を書く。前の panel.json が残っていれば、前の印のファイル (前の
+   panel.json の隣の、段を押した印と消す印) を読み、段を押した印を処理してから印の節を外して写し (印のファイルは写さない。新しい panel は
+   前の印を読まないので、写す前に処理する。「段を押した印 (panel.steps.json)」・「節を消す印 (×)」)、消えていれば今の状況から書き直す
+3. 控えを新しい置き場所の隣に書く (前の控えと同じ場所なら書き換える): `file` は 2. の panel.json、`terminal` は
+   `$env:HC_TERMINAL_ID`、`terminalPane` は今の端末のペイン (「開く」の 2. のとおり `herdr-app ls` で引き直す)、`summary` と
+   `questions` は `null`、`closing` は 1. の ID を閉じる順 (古い問い、古いまとめ) に並べた配列 (例 `"closing": ["p21", "p20"]`)。
+   `summary` を空けておくのは、
+   「panel のペインを閉じる」が控えの `summary` と同じ ID を閉じないため
+4. 控えの `closing` の ID を先頭から「panel のペインを閉じる」で閉じ、1 つ閉じるたびに `closing` から外して控えを書き直す。古い props
+   のままでは、新しい問いが出ず、答えもこの会話に届かない。`閉じない` で止まったら、先へ進まずにわけを確かめる。古い問いのペインを
+   閉じ終えるまで、古いまとめを閉じない (先にまとめを閉じると、閉じた幅の行き先がずれる)。閉じた幅は隣へ行き、まとめと端末だけの
+   タブなら端末がタブいっぱいになる
+5. `closing` が空になったら控えから外し、「端末を割って開く」の script で、3. の `terminalPane` のペインを割り、role `summary` で
+   新しいまとめを開く
+6. 新しいまとめの ID を控えの `summary` に書き、ID と props (file・terminal) と端末のペインを、返答にも 1 行で書く (「開く」の 4.)
+7. questions に答えていない問いが残っていれば、「問いを出す」の 2. で問いのペインを開く
+
+- 会話が要約されて途中が分からなくなったら、控えを読む。`closing` が残っていれば 4. から続ける
+- 古いペインが別の端末の横 (別のタブ) にあるときも、ID を渡して閉じる (別のタブのペインを ID で閉じたことは、まだ確かめていない)。
+  新しいまとめは今の端末の左に開く
+- 問いのペインの ID が分からない (控えが消えた) ときは、ハブからは閉じられない。返答の文で、古い問いのペイン (今の並びなら端末の
+  右、前の並びならまとめの下) をユーザーに閉じてもらうよう頼み (ペインの見出しの閉じるボタンなどで)、閉じたと返事が来るまで
+  古いまとめを閉じない
+- 新しい panel は、選んだ答えも畳んだ節も持ち越さない (panel.json の version は前のままでよい)
+
+## 書き方
+
+questions と sections は 1 つの panel.json に書く (まとめと問いの 2 つのペインが同じファイルを読み、role で出し分ける)。
+書くたびに、その前に段を押した印を読んで送られていない answer を処理し、消す印を読んで印の付いた節を外す (下の「段を押した印
+(panel.steps.json)」・「節を消す印 (×)」)。
+最小の例 (欄の意味と、ほかの節・marks の種類は `main.js` の頭のコメント。図の節は `assets/panel/sections.json` から写す。
+節の並びは、Q&A の節 `qa` を一番上に、その次に進み具合の木の節 `work` を置く。`qa` はユーザーの問いに初めて答えるときから置く
+(下の「Q&A (ユーザーの問いへの答え)」)。`work` はいつも置く (ユーザーが × で外した後を除く。`work` を知らない mod では、代わりに
+前の 3 つの節を図に描けないことの後ろに置く。下の「チケット・進み具合・PR」)):
+
+```json
+{
+  "version": 1,
+  "title": "ハブ: panel の × を直す",
+  "updated": "11/17 15:20",
+  "questions": [
+    {
+      "id": "merge-12",
+      "short": "#12",
+      "title": "dotfiles #12 を merge してよいか",
+      "body": "子 E の [dotfiles#12](https://github.com/pollenjp/dotfiles/pull/12)。**CI は通った**",
+      "options": [
+        { "label": "merge する", "recommended": true, "answer": "#12 -> merge する" },
+        { "label": "まだしない", "desc": "差分を見てから決める", "answer": "#12 -> まだ merge しない" }
+      ]
+    }
+  ],
+  "sections": [
+    {
+      "type": "qa", "id": "qa", "title": "Q&A",
+      "items": [
+        { "id": "qa-1117-1515", "q": "子 E は何を直している?", "at": "11/17 15:15", "a": "- **直しているもの**\n  - panel の mod の消す印 (×)\n- **いまの段**\n  - [dotfiles#12](https://github.com/pollenjp/dotfiles/pull/12) の merge 待ち", "open": true }
+      ]
+    },
+    {
+      "type": "work", "id": "work", "title": "チケット・進み具合・PR",
+      "rows": [
+        {
+          "title": "panel の × を直す (この会話)", "who": "ハブ",
+          "children": [
+            {
+              "id": "E", "title": "panel の mod を直す", "who": "子 E · <machine>/t13",
+              "steps": [
+                { "label": "PR", "state": "done" },
+                { "label": "merge", "state": "active" },
+                { "label": "当てる", "state": "todo" }
+              ],
+              "children": [
+                { "kind": "pr", "id": "dotfiles#12", "title": "panel の mod を直す", "url": "https://github.com/pollenjp/dotfiles/pull/12", "state": "open", "ci": "pass", "note": "merge を聞いている" }
+              ]
+            },
+            {
+              "id": "F", "title": "ハブの雛形の hook を直す", "who": "子 F · <machine>/t14",
+              "steps": [
+                { "label": "PR", "state": "done" },
+                { "label": "Windows で確かめ", "state": "active", "answer": "子 F ハブの hook を Windows で -> 確かめた" },
+                { "label": "merge", "state": "todo" }
+              ],
+              "children": [
+                { "kind": "pr", "id": "dotfiles#13", "title": "ハブの雛形の hook を直す", "url": "https://github.com/pollenjp/dotfiles/pull/13", "state": "open", "ci": "pending" }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    { "type": "markdown", "id": "now", "title": "いま", "text": "- **待っていること**\n  - 子 E の **#12** の merge\n- **あなたに頼むこと**\n  - 下の R1 の図の **①** と **②**\n  - 子 F の直しを Windows で確かめたら、段「Windows で確かめ」を押して送る" },
+    {
+      "type": "image", "id": "r1", "title": "R1 中継を通して承認する (① ②)",
+      "src": "t-t53/r1-approve.svg", "width": 460, "height": 300,
+      "caption": "私が端末 A から中継を通して ssh を打つ。依頼は中継を通って 1Password へ行く",
+      "marks": [
+        { "kind": "flow", "x1": 128, "y1": 152, "x2": 170, "y2": 152, "speed": 32, "color": "#61afef" },
+        { "kind": "flow", "x1": 290, "y1": 152, "x2": 332, "y2": 152, "speed": 32, "color": "#61afef" },
+        { "kind": "pulse", "x": 140, "y": 14, "w": 180, "h": 70, "radius": 8, "color": "#e5c07b" },
+        { "kind": "pulse", "x": 330, "y": 14, "w": 124, "h": 70, "radius": 8, "color": "#e5c07b" }
+      ]
+    }
+  ]
+}
+```
+
+- この例はチケットの無いハブの形 (図の `src` の `t-t53` は `<会話の名前>`)。チケットのあるハブの行の形は、下の「チケット・進み具合・PR」の
+  「行の種類」
+- 節の `collapsed` と `done` が効く時は mod で違う。新しい mod (「当てる順と、古い mod のとき」の 1 行が `済んだもの: True`) は、
+  version を替えなくても panel.json に書いた時点で効く (もう出ている節にも効く。ユーザーが手で開け閉めした節は、その形が先に効く)。
+  逆に、ハブが `collapsed` (や `done`) を外すと、手で開け閉めしていない節は開く。古い mod (`済んだもの: False`) は、初めて読んだときと
+  version の替わり目にしか `collapsed` を読まない
+- version は初めから書き、その後は替えない (古い mod では、無いと初めから畳む節 (`collapsed`) が開いて出る。替えると、選んだ答えと、
+  ユーザーが開いた・畳んだまとめの節と進み具合の木の行が初めの状態に戻る)。選んだ答えは問いのペインごとに持ち、問いのペインは
+  答えが届くたびに閉じて開き直すので、新しい問いを出すときも替えなくてよい (`role` を見ない古い mod のときだけ替える。「当てる順と、
+  古い mod のとき」の 2 つ目。`work` を知らないだけの mod では替えない)
+- 問いと節には、書き換えても変えない id を付ける (選んだ答えと畳んだ節を id で覚えている)。消す印の × は id のある節にだけ
+  出るので、どの節にも付ける。印のファイルにある id は、新しい中身の節に使わない (「節を消す印 (×)」)
+- 推す選択肢は先頭に置いて `recommended` を付ける (「推奨」の札が付くだけで、選んだ状態にはならない)
+- answer は「何を -> どうする」の形で、それだけで読める 1 行の文にする (例 `#12 -> merge する`。改行を入れない)。無いと
+  `<short> -> <label>` になる。問いが複数なら、問いの順に 1 つ 1 行で、改行でつないだ 1 つの発言として届く (「答えが届いたら」)
+- markdown の文 (markdown の節の text と問いの body) で使えたのは太字・箇条書き (空白 2 つで下げた入れ子も。親が「•」、子が「◦」で
+  一段下がって出た 2026-11-19)・code の span・リンク (表は試していない)。herdr-app の mod は HTML・CSS・web view を使えない
+- markdown の節の箇条書きは、太字の見出しの項目を親にし、詳細はその下に空白 2 つで一段下げた子の項目にする (ユーザーの指示
+  2026-11-19。text では `"- **見出し**\n  - 詳細"`。形と数は `panel-figures.md` の「箇条書きの形」)
+- 複雑な項目 (流れ・前と後・分岐・3 つ以上がかかわる) には、詳細の最後の行の後ろに絵だけの行 (`  ![説明](<会話の名前>/mini-<名前>.svg)`) を
+  1 行足して、ミニ絵を出せる (下の「ミニ絵」)
+- リンク: markdown の文の `[字](URL)`・`<URL>`・素の URL は、押すと既定のブラウザで開く。開くのは http と https の URL だけで、
+  ほかの scheme (`file:`・`mailto:` など) やパスは開かずに、panel の下の行にわけが出る。PR は字を短くして
+  `[dotfiles#12](https://github.com/pollenjp/dotfiles/pull/12)` と書く (チケットのあるハブでは、チケットも `[TKT-m](<チケットの URL>)`)。図の caption にはリンクを
+  書かない (caption は、panel が URL を確かめてから開く扱いの外)
+- 書くのは Write でよい (UTF-8 で BOM なし)。PowerShell のオブジェクトから書くなら `ConvertTo-Json -Depth 20` (既定の深さ 2 では
+  入れ子の配列が文字列に潰れる) と `Set-Content -Encoding utf8NoBOM`
+- 書いたら、JSON として読めるかと、herdr-app が誤りを出していないかを見る。`ConvertFrom-Json` は末尾のカンマ・コメント・一重
+  引用符を通すので、panel (JS の `JSON.parse`) と同じく厳しい `System.Text.Json` で読む
+
+```powershell
+[System.Text.Json.JsonDocument]::Parse((Get-Content -Raw '<panel.json の絶対パス>')).Dispose()   # 読めなければ例外が出る
+herdr-app status | Out-String                                                                     # errors が空か
+```
+
+### 済んだものを残す (小さく畳む)
+
+済んだもの (進み具合の木の済んだ行・済んだ話の節) は panel.json から消さずに残し、mod が小さく畳んで出す (ユーザーの指示 2026-11-27:
+済んだものは消さず、邪魔にならないよう小さく畳む。字を小さくして幅を取らず、トグルを閉じた形で出す)。ハブが自分の判断で済んだものを外すことはしない。外すのはユーザーが × を付けたときだけ (「節を消す印 (×)」)。
+
+- 進み具合の木の済んだ行は外さず、状態を進めるだけ (「チケット・進み具合・PR」の「済んだ行」)。mod が見分けて小さく出す
+- 済んだ話の節 (済んだ話の図・説明・前の話の「いま」) は、消さずに `done: true` と `collapsed: true` を付け、前の話として下へ移す
+  (type を問わない。id は替えない)。新しい mod は done の節を字を一回り小さく・色を薄く・余白を詰めて出し、畳む (version を替えなくても
+  書いた時点で効く。もう出ている節に後から付けても畳む。ユーザーが手で開けた節は開いたまま)。開いても小さいまま
+- 済んだ節の `done` と `collapsed` は外さない (外すと、新しい mod では手で開け閉めしていない節が開く)
+- collapsed も書くのは、done を知らない古い mod でも初めて読んだときと version の替わり目には畳むため (「当てる順と、古い mod の
+  とき」の `済んだもの: False`)
+- 「いま」の節を新しい話に書き直すときは、前の話の「いま」を新しい id の done の節として残す (`now` の id は今の話に使い続ける)
+- 済んだ節が増えて邪魔なら、ユーザーが × を付ける。ハブから外そうとは言わない
+
+```json
+{ "type": "image", "id": "r1", "title": "R1 中継を通して承認する (済んだ)", "src": "t-t53/r1-approve.svg", "width": 460, "height": 300, "done": true, "collapsed": true, "marks": [] }
+```
+
+## 節を消す印 (×)
+
+まとめのペインの、id のある節の右上には × が出る。ユーザーが押すと、その節に「次の更新で消す」印が付き (点線の枠・題の
+取り消し線・「次の更新で消える」の字)、「戻す」を押すと外れる。ハブは次に panel.json を書くときに、その節を外す (ユーザーの指示
+2026-11-18: もう出し続けなくてよいものを消すよう指示でき、次に panel を書き直すときに消える)。
+問いのペインには出ない。Q&A の節では、節の × のほかに項目ごとにも × が出る (ユーザーの指示 2026-11-23: トグル 1 つごとに
+消す指示を出せるボタンを置く)。項目の印も同じファイルの `dismissed` に、項目の id で書かれる (`section` に節の id も)。
+
+- 印は panel (mod) が panel.json の隣の `panel.dismiss.json` (panel.json の名前の `.json` を `.dismiss.json` に替えた名前) に書く。
+  印が付くまでファイルは無い。ハブが見るのは `dismissed` の各要素の `id` だけ (ほかの欄と形の正は `main.js` の頭のコメント)
+- panel.json はハブだけが書き、印のファイルは panel だけが書く。ハブは印のファイルを書き換えず、消さない (外した節の印は panel が消す)
+- 印が付いただけでは書き直さない。外すのは、ほかのわけ (問いを足す・子の報告で段を進めるなど) で次に panel.json を書くとき
+
+ハブは panel.json を書くたびに、その前に (段を押した印を読んで処理した後で。下の「段を押した印 (panel.steps.json)」。消す印より先に
+するのは、× で外す節 (進み具合の木) の段を押した印も拾うため):
+
+1. 印のファイルを読む (無ければ印は無い)
+2. 印の id の節を外し、残った Q&A の節 (`qa`) の `items` からも印の id の項目を外して書く
+3. 同じ話の新しい中身を続けて出すなら、印のファイルに無く、その会話でまだ使っていない別の id にする (`now` に印があれば `now-2`、
+   その次は `now-3`。mod は畳んだ節を id で覚えている)。印の付いた id の節は、印がある間は出ない。同じ中身を別の id で出し直さない
+   (ユーザーが消した節が戻る)。進み具合の木 (`work` を知らない mod では子の進み具合と一覧の節) に印が付いたときは、下の「行を
+   貯める節に × が付いたら」。Q&A の節そのものに印が付いたときは、「Q&A (ユーザーの問いへの答え)」の「消す印」
+
+```powershell
+# 埋めるもの: <panel.json の絶対パス>。$panel は書く中身 (今の panel.json を ConvertFrom-Json で読んで直したもの)
+$dismiss = '<panel.json の絶対パス>' -replace '\.json$', '.dismiss.json'
+$ids = @(); if (Test-Path $dismiss) { $ids = @((Get-Content -Raw $dismiss | ConvertFrom-Json).dismissed | ForEach-Object { $_.id }) }
+"印: $($ids -join ', ')"
+# id の無い節は残す。panel は id の大文字小文字を区別するので -cnotin で比べる
+$panel.sections = @($panel.sections | Where-Object { -not $_.id -or $_.id -cnotin $ids })
+# Q&A の節の項目も、印の id のものを外す (項目の印は、項目の id で書かれる)。items の無い・null の節は触らない (欄の無い節へ代入すると
+# 例外になり、null を pipeline に流すと [null] になって mod が中身の無い項目を出す)。id の無い項目は残す
+foreach ($s in $panel.sections) {
+    if ($s.type -eq 'qa' -and $null -ne $s.items) { $s.items = @($s.items | Where-Object { -not $_.id -or $_.id -cnotin $ids }) }
+}
+```
+
+- Write で書くときは、`印:` の行に出た id の節と Q&A の項目を書かない
+- 外し忘れても、印の後に panel.json の中身が変わると、panel はその節を出さない (キーの順と空白は比べない)。ただし外さずに同じ id へ
+  新しい中身を書くと、印がある間はユーザーに見えないままになる
+- ユーザーが「戻す」を押した節は、印のファイルから消えるので、次に書いても残る
+
+### 行を貯める節に × が付いたら
+
+進み具合の木 (`work`。`work` を知らない mod では子の進み具合 `flow` と一覧 `prs`・`tickets`) は、済んだ行も残して行を貯める節。
+ユーザーがこれに × を付けたら、次に書くときにほかの節と同じく外し、その後は:
+
+- 今の panel.json が記録になる。置いたはずの節 (進み具合の木と一覧は panel を初めて書くときから、子の進み具合は最初の子を立てた
+  ときから置く) が無ければ、× で外したものとみる (ほかに無くなるわけは無い)。印のファイルは記録にならない (外した節の印は、次の
+  読み直しで panel が消す)
+- 新しい行 (「チケット・進み具合・PR」の表で行を足すもの: 新しい子・子の PR・成果物の行・関連の行。`work` を知らない mod では
+  新しい子のチケットも) が来たときだけ、その行だけで節を置き直す。外した行は戻さない。id は印のファイルに無く、その会話でまだ
+  使っていないもの (`work` → `work-2` → `work-3`。mod は畳んだ節を id で覚えているので、使った id に戻さない) にし、title は同じにする
+- 進み具合の木を置き直すときは、新しい行を根の行にし、上の行 (ハブや子の行) は戻さない。PR の行なら、どの子の
+  PR かを `note` に書く (`子 E`。チケットがあれば `子 E · TKT-m`)。その後に来る、その行の下の行 (置き直した子の PR など) は、その行の `children` に足す
+- 状態が進んだだけ (段・CI・merge。チケットがあれば Status と、子のチケットの ID が分かったときも) では置き直さない。状態を進める
+  ときは、今の rows にある行だけを直す (無い行は足さない)
+- × は「今並んでいる行は、もう見なくてよい」と読む。新しい子・PR・チケットは、ユーザーがまだ見ていないので出す (進み具合の木を
+  いつも置くわけ)。外した行まで戻すと × を打ち消し、状態が進むたびに置き直すと × がすぐ効かなくなる
+
+## 段を押した印 (panel.steps.json)
+
+ユーザーが進み具合の木の answer のある段を押す (①) と、mod は段の下に「送る」「やめる」を出し、印のファイルに「押した」印を書く。
+「送る」(②) で送れたら印の `sent` を true にし、「やめる」で印を外す。① だけで ② を押さずに別の話へ移ると、`sent` が false の印が
+残る。ハブはそれを、× の消す印と同じく次に panel.json を書くときに読み、「ユーザーがその answer を送った」とみなして処理する
+(ユーザーの補足 2026-11-24: ① だけで ② を押さずに別の話へ移ったときも、× を押したときと同じく次の書き直しで
+処理する)。answer の書き方と、届いたときの処理は「チケット・進み具合・PR」の「段の answer (押して送る)」。
+
+- 印は panel (mod) が panel.json の隣の `panel.steps.json` (panel.json の名前の `.json` を `.steps.json` に替えた名前) に書く。印が
+  付くまでファイルは無い。形の正は `main.js` の頭のコメント。ハブが見るのは `pressed` の各要素の `section` (work の節の id)・`label`・
+  `answer`・`sent` で、`row` (行の id。id の無い行では mod が決める木の中の位置の字) は見ない
+- 印のファイルは panel だけが書き、ハブは読むだけ (書き換えず、消さない)。panel は、同じ段 (section・row・label) で answer の同じもの
+  が panel.json から無くなった印を外す (panel.json を読めた読み直しのたび)。ハブが段を done にして answer を外せば、印も消える。id の無い
+  行 (ハブの行・成果物の行など) の row は木の中の位置なので、前に行を足す・並べ替えると、その前に押された印も外れる (書く前に拾うわけの 1 つ)
+- `sent` が true の印は数えない (answer はもう端末に届いていて、届いた発言の方で処理する)。拾うのは `sent` が true でない印 (② で
+  送れなかったとき (ハブの端末が blocked で `hc send` が断った・hc が止まったなど) も、panel は `sent` を true にしないので、押しただけの印として拾う)
+- 拾うのは、今の panel.json の、印の `section` と同じ id の work の節の木 (深さを問わず) に、label と answer の同じ段がある印だけ。
+  段が無い・answer が違う印は、もう処理したか書き換えた段のもので、拾わない (panel が外す)。処理した段は answer を外して書くので、
+  panel が印を外す前にもう一度読んでも、二重に拾わない
+- 拾った段を、この往復でもう処理していれば (端末で「確かめた」と直に言われた・段から answer が届いた。② で送った直後で、panel が `sent` を
+  書く前に読んだときも)、印では二度処理しない (済にする手には入れる)。panel.json はまだ書いていないので、その段の answer は残っていて、
+  印が当たる
+- この往復の発言が、印の段について別のこと (うまくいかない・まだ確かめていない) を言っていれば、発言に従い、印は処理しない (段は発言の
+  とおりに進め、answer を外す。answer が無くなれば panel が印を外す)
+- 印で処理したら、返答に 1 行足す:「panel で押した段を受けた: <answer>」(ユーザーは ② を押していないので、届いたかを知らない。Q&A に
+  答えた往復でも、Q&A の 1 行とは別の行に足す。端末の発言で処理した段の印には足さない)
+- 印が付いただけでは書き直さない。拾うのは、ほかのわけで次に panel.json を書くとき (消す印と同じ)
+
+ハブは panel.json を書くたびに、その前に (消す印で節を外す前に):
+
+1. 下の「拾う」手で、拾う印の answer を出す (読むだけ。印のファイルが無ければ 0 件)
+2. 出た answer を 1 つずつ、端末に届いたときと同じに処理する (「段の answer (押して送る)」の「届いたら」)
+3. 書く中身で、処理した answer の段を done にして answer を外す (下の「済にする」手。Write で書くなら、その段を done にし、answer の欄を
+   書かない)。そのあと消す印を読んで節を外し (「節を消す印 (×)」)、書く
+
+```powershell
+# 拾う。埋めるもの: <panel.json の絶対パス>。読むだけ (panel.json も印のファイルも書かない)
+$file = '<panel.json の絶対パス>'
+$stepsFile = $file -replace '\.json$', '.steps.json'
+$panel = Get-Content -Raw $file | ConvertFrom-Json
+$pressed = @(); if (Test-Path $stepsFile) { $pressed = @((Get-Content -Raw $stepsFile | ConvertFrom-Json).pressed | Where-Object { $_ -and $_.sent -ne $true }) }
+# 送っていない印ごとに、同じ id の work の節の木 (深さを問わず) から、label と answer の同じ段を探す (row は見ない)
+$hits = @()
+foreach ($m in $pressed) {
+    $queue = [System.Collections.Generic.Queue[object]]::new()
+    foreach ($s in @($panel.sections | Where-Object { $_ -and $_.type -eq 'work' -and $_.id -ceq $m.section })) {
+        foreach ($r in @($s.rows)) { if ($r) { $queue.Enqueue($r) } }
+    }
+    $found = $false
+    while (-not $found -and $queue.Count -gt 0) {
+        $r = $queue.Dequeue()
+        $found = @(@($r.steps) | Where-Object { $_ -and $_.answer -and $_.label -ceq $m.label -and $_.answer -ceq $m.answer }).Count -gt 0
+        foreach ($c in @($r.children)) { if ($c) { $queue.Enqueue($c) } }
+    }
+    if ($found -and $hits -cnotcontains $m.answer) { $hits += $m.answer }
+}
+"押した印 (送っていない): $($hits.Count) 件"
+$hits | ForEach-Object { "  $_" }
+```
+
+```powershell
+# 済にする。書く手の中で、$panel (書く中身) を読んだ後・消す印で節を外す前に置く。埋めるもの: 処理した answer (1 つずつ一重引用符で)
+$done = @('<処理した answer>')
+# work の節の木 (深さを問わず) の段のうち、answer が $done にあるものを done にし、answer の欄を外す
+$n = 0
+$queue = [System.Collections.Generic.Queue[object]]::new()
+foreach ($s in @($panel.sections | Where-Object { $_ -and $_.type -eq 'work' })) { foreach ($r in @($s.rows)) { if ($r) { $queue.Enqueue($r) } } }
+while ($queue.Count -gt 0) {
+    $r = $queue.Dequeue()
+    foreach ($st in @($r.steps)) {
+        if ($st -and $st.answer -and $st.answer -cin $done) {
+            $st | Add-Member -NotePropertyName state -NotePropertyValue 'done' -Force
+            $st.PSObject.Properties.Remove('answer')
+            $n++
+        }
+    }
+    foreach ($c in @($r.children)) { if ($c) { $queue.Enqueue($c) } }
+}
+"済にした段: $n (渡した answer: $($done.Count))"
+# 段の見つからない answer があれば、ここで止めて書かない (字の写し違い・$panel を読んでいない call で流した)
+if ($n -ne $done.Count) { throw "済にする段が $($done.Count - $n) つ見つからない。answer の字を panel.json の段と見比べる" }
+```
+
+- 「済にする」手は、段から届いた answer・端末で直に言われたことを処理したときも同じに使う (届いた answer の字を `$done` に入れる。直に
+  言われたときは、その段の answer の字)
+- 処理できなかった印 (子に頼めなかったなど) の段は済にしない (answer が残り、印も残って、次に書くときにまた拾う)。わけは返答に書く
+- 止まったら (`済にする段が … 見つからない`)、`$done` の字を panel.json の段の answer と見比べて直す (全角と半角の括弧の違いなど)。同じ
+  往復でもう済にして書いた段の answer と、段がもう無い answer (前の書き込みで × の節ごと外した後など) は、`$done` に入れない
+- Q&A の「項目を足す」雛形のように panel.json を読み直して書く手では、`$panel` を読んだ直後に「済にする」手を足して流す
+
+## Q&A (ユーザーの問いへの答え)
+
+ユーザーの問い (知りたいこと・確かめたいこと) への答えは、まとめのペインの Q&A の節 (`qa`) に項目を 1 つ足して書く。端末の返答は
+「panel の Q&A に答えた: <問いの要旨>」の 1 行だけにする (ユーザーの指示 2026-11-23: herdr-app では、ユーザーの問いへの答えがほかの子の
+返答と重なり、どこで答えたかが分からなくなるため。答えは panel の Q&A の節の項目 1 つにトグルの形で書き、トグル 1 つごとに消す指示を
+出せるボタンを置く)。1 つの項目が、
+ユーザーの問い 1 つとハブの答え 1 つ。mod は項目ごとに開け閉め (▸・▾) と × を出し、節の題の後ろに出している項目の数を「(N)」で足す。
+
+- Q&A にしないもの: 頼みごと (作業の依頼)・承認・ハブの問いへの答え・子の報告の取り次ぎ。これらは今までどおり端末と問いのペイン
+- 1 つの発言に問いと頼みごとが混ざっていれば、問いの分だけを Q&A に書き、頼みごとは端末で受ける
+- 欄の意味と mod の出し方の正は、配った `main.js` の頭のコメントの `// Q&A (type "qa"):` の所 (ここには写さない)。qa を知らない mod
+  (「当てる順と、古い mod のとき」の 1 行が `qa: False`) では、下の「qa を知らない mod のとき」で書く
+
+### 置き場所と項目の書き方
+
+- 節はまとめのペインの一番上 (進み具合の木 `work` の上) に 1 つだけ置く。初めの id は `qa`、title は `Q&A`。ユーザーの問いに初めて
+  答えるときに置く (問いの無い会話では置かない)
+- 新しい問いの項目を `items` の頭に足して開き (`open: true`)、前の項目は畳む (`open: false`)
+- 項目の欄:
+  - `id`: `qa-<MMdd-HHmm>` (答えを書き始めた時刻。同じ分に 2 つ目なら `-2`、3 つ目なら `-3` を足す)。`MMdd` の 4 桁を挟むので、節の
+    id (`qa`・`qa-2`) とは重ならない。書き換えても変えない (mod は開け閉めと × を id で覚えている)
+  - `q`: 問いの要旨 (短ければユーザーの原文のまま)。mod が頭に「Q.」を付けるので、`q` には付けない
+  - `at`: `MM/dd HH:mm` (JST。`id` と同じ時刻)。PowerShell では書式の `/` を `\/` と書く (`ToString('MM\/dd HH:mm')`)。素の `/` は
+    culture の日付の区切りに替わり、ja-JP の pwsh では `11-23 10:42` になった (2026-11-23)
+  - `a`: 答えの markdown。markdown の節と同じに出る (リンク・ミニ絵・入れ子の箇条書き)。太字の見出しの項目を親にし、詳細を一段
+    下げた子の項目にする今の流儀 (「書き方」と `panel-figures.md` の「箇条書きの形」)。図が要れば、項目の下にミニ絵を付けるか
+    (「ミニ絵」)、図の節を Q&A の下に置いて `a` からその節の題を指す
+  - `open`: 初めに開くか。boolean でないと 1 つ目だけ開く。開け閉めは mod が id で覚えるので、ユーザーが開いた・畳んだ項目は、
+    ハブが `open` を書き換えてもそのままのことがある (正は `main.js` の頭のコメント)
+- 調べるのに時間がかかる問いは、先に `a` を `- **調べている**\n  - <何を調べているか 1 文>` にした項目を置き、端末にも 1 行
+  (「panel の Q&A で調べている: <問いの要旨>」) を返す。答えが出たら、同じ id の項目の `a` を書き換え (id・`q`・`at` は変えない)、
+  端末に「panel の Q&A に答えた: <問いの要旨>」を返す
+- 済んだ項目は消さずに残す。要らなくなればユーザーが × を付ける
+
+最小の例 (panel.json の `sections` の頭):
+
+```json
+{
+  "type": "qa", "id": "qa", "title": "Q&A",
+  "items": [
+    {
+      "id": "qa-1123-1042", "q": "子 B の PR はもう merge できる?", "at": "11/23 10:42",
+      "a": "- **まだ**\n  - [dotfiles#34](https://github.com/pollenjp/dotfiles/pull/34) の CI が走っている\n- **済んだら**\n  - panel の問いで merge してよいかを聞く",
+      "open": true
+    },
+    {
+      "id": "qa-1123-1015", "q": "panel の × はいつ消える?", "at": "11/23 10:15",
+      "a": "- **次に panel を書き直すとき**\n  - 印を付けただけでは消えない\n  - 戻すを押せば印が外れる",
+      "open": false
+    }
+  ]
+}
+```
+
+### 項目を足す (PowerShell の雛形)
+
+印を読んで節と項目を外し、Q&A の節を一番上に置き、新しい項目を頭に足して前の項目を畳み、書く前に JSON を確かめる。答えの markdown は
+here-string (`@'` と `'@` の行で挟む) に書く (改行をそのまま書ける)。
+
+```powershell
+# 埋めるもの: <panel.json の絶対パス>・<新しい節の id>・<問いの要旨>・答えの markdown
+# <新しい節の id>: Q&A の節が無いときに作る節の id。Q&A の節に × が付いていなければ qa、付いた後は qa-2・qa-3 と、印のファイルに無く
+#                  その会話でまだ使っていない id
+$file = '<panel.json の絶対パス>'
+$a = @'
+- **見出しの項目**
+  - 詳細 (1 文)
+'@
+$dismiss = $file -replace '\.json$', '.dismiss.json'
+$ids = @(); if (Test-Path $dismiss) { $ids = @((Get-Content -Raw $dismiss | ConvertFrom-Json).dismissed | ForEach-Object { $_.id }) }
+"印: $($ids -join ', ')"
+$panel = Get-Content -Raw $file | ConvertFrom-Json
+# 印の節を外し、残った Q&A の節から印の項目を外す
+$panel.sections = @($panel.sections | Where-Object { -not $_.id -or $_.id -cnotin $ids })
+foreach ($s in $panel.sections) {
+    if ($s.type -eq 'qa' -and $null -ne $s.items) { $s.items = @($s.items | Where-Object { -not $_.id -or $_.id -cnotin $ids }) }
+}
+$qa = @($panel.sections | Where-Object { $_.type -eq 'qa' })[0]
+if (-not $qa) { $qa = [pscustomobject][ordered]@{ type = 'qa'; id = '<新しい節の id>'; title = 'Q&A'; items = @() } }
+# items の欄が無い・null の節は空の配列にそろえる ($null を下の pipeline に流さない)
+if ($null -eq $qa.items) { $qa | Add-Member -NotePropertyName items -NotePropertyValue @() -Force }
+# 項目の id: 答えを書き始めた分。同じ分の項目 (印のものも) があれば -2・-3 を足す
+# at・updated の / は字のまま (\/) にする。.NET の書式の / は culture の日付の区切りで、ja-JP の pwsh では - になった (2026-11-23)
+$now = Get-Date
+$base = 'qa-' + $now.ToString('MMdd-HHmm')
+$used = @($qa.items | ForEach-Object { $_.id }) + $ids
+$id = $base; $n = 2; while ($id -cin $used) { $id = "$base-$n"; $n++ }
+# 前の項目を畳み、新しい項目を頭に足す
+foreach ($it in @($qa.items)) { $it | Add-Member -NotePropertyName open -NotePropertyValue $false -Force }
+$item = [pscustomobject][ordered]@{ id = $id; q = '<問いの要旨>'; at = $now.ToString('MM\/dd HH:mm'); a = $a.Trim(); open = $true }
+$qa.items = @($item) + @($qa.items)
+# Q&A の節を一番上に (その次に進み具合の木)
+$panel.sections = @($qa) + @($panel.sections | Where-Object { $_.type -ne 'qa' })
+$panel.updated = $now.ToString('MM\/dd HH:mm')
+$json = $panel | ConvertTo-Json -Depth 20
+[System.Text.Json.JsonDocument]::Parse($json).Dispose()   # 読めなければ例外が出て、下の書き込みまで進まない
+Set-Content -LiteralPath $file -Value $json -Encoding utf8NoBOM
+"足した: $id"
+```
+
+- 調べ終えて `a` を書き換えるときは、上の雛形の「前の項目を畳み」から「Q&A の節を一番上に」の前までを、次の 1 行に替えて流す
+  (`<項目の id>` は足したときに出た id): `@($qa.items | Where-Object { $_.id -ceq '<項目の id>' }) | ForEach-Object { $_.a = $a.Trim() }`。
+  項目に × が付いていて外れたなら、書き換えずに新しい項目として足す
+- 雛形は panel.json を読み直して書くので、ほかの節を直す書き込みと同じ回にまとめるなら、`$panel` を直してから同じ確かめで書く
+- 雛形は消す印だけを読む。流す前に「段を押した印 (panel.steps.json)」の「拾う」手を流し、拾った answer を処理したら、`$panel` を読んだ
+  直後に「済にする」手を足して流す
+- 書いたら `herdr-app status | Out-String` で errors が空かを見る (「書き方」)
+
+### 消す印
+
+- 項目の × の印は、`panel.dismiss.json` の `dismissed` に項目の id で書かれる (`section` に節の id も)。次に panel.json を書くときに、
+  その項目を `items` から外す (上の雛形と「節を消す印 (×)」の雛形が外す)。外した項目の id は使い直さない
+- Q&A の節そのものに × が付いたら、節ごと外す。次の問いでは、新しい id (`qa-2`・`qa-3`。印のファイルに無く、その会話でまだ使って
+  いないもの) の節を作り、その問いの項目だけを置く。外した項目は戻さない
+- 項目が全部外れて `items` が空になった節は、そのまま置いておく (次の問いで項目を足す)
+
+### qa を知らない mod のとき
+
+配った mod の頭のコメントに `// Q&A (type "qa"):` が無い (「当てる順と、古い mod のとき」の 1 行が `qa: False`) 間は、1 つの問いを
+1 つの markdown の節にする。節の畳み (▸・▾) と × がそのまま使える。
+
+- id は項目と同じ `qa-<MMdd-HHmm>`、title は `Q&A: <問いの要旨>`、text は答えの markdown
+- 新しい節を一番上 (進み具合の木の上) に置き、前の問いの節は `collapsed: true` にする。新しい mod (`済んだもの: True`) なら書いた時点で
+  畳まれる (ユーザーが手で開けた節は開いたまま)。古い mod では collapsed は panel を開いたときと version を替えたときしか効かない
+  (「書き方」) ので、もう出ている前の問いの節は、ユーザーが畳むまで開いたまま出る
+- 問いの節が並ぶ順は新しいものが上。印の付いた節は、ほかの節と同じく次に書くときに外す
+- mod が qa を知るようになったら (1 行が `qa: True` と出たら)、次に問いに答えるときに qa の節を作る。前の問いの markdown の節は
+  そのまま残す (× で消せる)。項目に移さない
+
+```json
+{ "type": "markdown", "id": "qa-1123-1042", "title": "Q&A: 子 B の PR はもう merge できる?", "text": "- **まだ**\n  - CI が走っている", "collapsed": false }
+```
+
+### 端末の 1 行
+
+- 答えたら、端末の返答は「panel の Q&A に答えた: <問いの要旨>」の 1 行だけにする (要旨は項目の `q` と同じ字)。答えの本文を端末に
+  書かない
+- 調べている間は「panel の Q&A で調べている: <問いの要旨>」
+- panel が使えないとき (mod の無いハブ・panel のペインを開けなかった・pwsh が 5.1 しか無い) は、今までどおり端末に答えを書く
+
+## チケット・進み具合・PR
+
+panel のまとめの一番上 (Q&A の節があればその下) に、進み具合の木の節 (`work`。title は「チケット・進み具合・PR」) をいつも 1 つ置く。根に
+この会話 (ハブ) の行を置き、その `children` に子の行を、子の行の下に子の進み具合の段 (`steps`) と、PR・成果物の行を入れ子にする
+(チケットがあれば、ハブと子の行はチケットの行にする。ユーザーの指示 2026-11-19:
+チケットの下にその進み具合を書き、この節を panel の一番上に置く。PR はたいていチケットに結ばれる。2026-11-18 の指示 (チケットと PR を
+埋め込みのリンクつきで並べる節を標準で置く) で置いた一覧と、子の進み具合を、この 1 つの節にまとめた)。Dev Tracker のチケットのあるハブで、行をチケットの行にする手 (チケットの ID・URL・Status を
+引いて書く・Status を進める) は、足し分の skill `pjp-hc-hub-private` (skill の一覧にあれば) の手。ユーザーが × で外した後は、新しい行が来るまで
+置かない (「節を消す印 (×)」の「行を貯める節に × が付いたら」)。配った mod がこの節を知らなければ (「当てる順と、古い mod の
+とき」)、下の「`work` を知らない mod のとき (3 つの節)」で書く。
+
+- panel は書いた行をそのまま出す (panel から gh も Notion も引かない)。ID か題を押すと url を開き、状態は色つきの札で出る。札の色・
+  字下げと線・畳み方・知らない値の出し方は `main.js` の頭のコメント
+- 節は type で探す (× の後に置き直すと、id が `work-2` などになる)。同じ type の節は 1 つだけ置く。title は `チケット・進み具合・PR`。
+  雛形は `assets/panel/sections.json` の `work` の節 (ハブ・子・PR・成果物の行と、ユーザーの番の段の answer。チケットの行の形で書いて
+  あるので、チケットが無ければ下の「行の種類」のとおりに直す)
+- 置く場所はまとめの一番上 (「いま」より上。Q&A の節 `qa` があればその下 (ユーザーの指示 2026-11-23)。`panel-figures.md` の「雛形」の節の並び)。行が無くても置く (「(行はありません)」と出る)
+- 行の種類: ハブと子の行は `kind` を書かない (mod はチケットの行として出す)。チケットが無ければ、子の行の `id` は子の英字 (`E`)、
+  ハブの行は `id` を書かず、どちらも `url` を書かない (空の字も書かない)。`status` は、チケットの無い子の行では済んだときだけ書く
+  (下の「行を足す・状態を進める」)。チケットがあれば `id` をチケットの ID にし、`url`・`status` を足す (足し分の手。子がチケットを
+  切る前はチケットの無い行のまま)。PR の行は `kind` を `"pr"`、チケットの無い成果物の行は `"item"` にする
+- 根の行は、ハブの行を先頭に、`related` の行 (子のものでない PR・関連のチケット) を最後に。`children` は、動いて
+  いるもの (済んでいない子・open か draft の PR・段の残る成果物) を上に、済んだものをその下に、それぞれ足した順に並べる
+- 済んだ行 (merge した PR・済んだ子) も消さずに残す。`status` が Done か Canceled で下に動いているものが無い子の行は、mod が
+  初めから 1 行に畳み、下の PR の数を添える。その行は字を一回り小さく・色を薄く・余白を詰めて出し、開いても小さいまま。steps が全部
+  done で下に動いているものが無い item の行・merged か closed の PR の行・done の段 (label の字を残した小さな札) も、mod が同じく小さく
+  出す (「済んだものを残す (小さく畳む)」。ユーザーの指示 2026-11-27)。ハブは済んだ行を外さず、状態 (`status`・`state`) を進めるだけ。
+  要らなくなればユーザーが × を付ける
+- title は短く言い換えてよい (全角 20 字ほど。PR の元の題は url の先で読める)。`who` は子の英字と端末 (`子 E · <machine>/t13`。ハブの
+  行は `ハブ`)、`note` は一言 (`merge を聞いている`・`前の会話`)
+- merge を聞く問いの body にも、その PR を `[dotfiles#12](<PR の URL>)` のリンクで書く (問いのペインから開ける)
+
+### 段 (steps)
+
+- 段は子の行と成果物の行に付け、子の仕事の流れで並べる (例 PR → Windows で確かめ → merge → 当てる (Windows で pull と
+  `dotfiles apply`) → 片付け。チケットのある子は頭に `チケット`)。ハブの行には付けない
+- 段は子に頼んだ仕事に要るものだけを 4〜6 つ選ぶ (段 `Windows で確かめ`・`当てる` は、Windows に当てる直しのときだけ)。子を立てた
+  ときに終わりまでの段を並べ、最初の段 (例 `PR`。チケットのある子は `チケット`) だけを `active`、ほかを `todo` にする
+- 子の報告が来るたびに state を進める。state は意味で選ぶ: `done` = 済んだ・`active` = いま (ユーザーの答えを待つ段も)・
+  `todo` = まだ・`blocked` = 止まった (失敗した・子が問いや確認の画面で止まっている)
+- ユーザーの番の段 (ユーザーが手で確かめる段など) は、`active` にするときに `answer` も書く。ユーザーはその段を
+  押して、済んだことをハブに送れる (下の「段の answer (押して送る)」)
+- merge した子・片付けた子の段も消さずに残す (その日の流れが一目で分かる)
+
+### 段の answer (押して送る)
+
+ユーザーの番の段は、panel の上で押して、済んだことをハブに伝えられる (ユーザーの指示 2026-11-23: 解説動画を見るなど、ユーザーに
+委ねた段は、ユーザーが panel のその段を押して済んだことを伝えられるようにする)。段 `{ label, state }` に `answer` (1 行の文字列) を書くと、mod はその段を押せる札にする。押す (①) と段の
+下に「<answer> を送る?」と「送る」「やめる」が出て、「送る」(②) で問いの「送信」と同じ手 (`hc send` でハブの端末に貼って Enter
+1 回。クリップボードは使わない) で answer が届く。送った後は、その段が無くなるか answer が無くなるまで、段の下に「送った」と出る。① だけで ② を押さなかった
+段は印のファイルに残り、ハブが次に panel.json を書くときに拾う (「段を押した印 (panel.steps.json)」)。
+
+answer を書く段と字:
+
+- ユーザーが手で確かめる段 (`Windows で確かめ` など、実機での確かめ): ユーザーに確かめを頼むとき (その段を active にする)。answer は
+  `<名札> <確かめること (短く)> -> 確かめた` (名札は、チケットが無ければ `子 <英字>`、チケットがあればチケットの ID)
+  - answer は済んだときの 1 つだけ。うまくいかなかったときはユーザーが端末で言うので、その段を blocked にして answer を外し、子に直しを
+    頼む (確かめの待ちの行と答えを待つ印は、済んだと言われたときと同じに外す。直しを待つ間は、ユーザーの番ではない)
+  - 確かめを頼んでターンを終えるときは、ほかの問いと同じく `pjp mark asking` も打つ (SKILL.md の 1.)
+- 解説動画の行の段 (`見る`) の answer は、解説動画を使うホストの足し分の skill `pjp-hc-hub-private` (skill の一覧にあれば) の手
+
+answer の決まり:
+
+- answer を書くのは work の節の段だけ (`work` を知らない mod の flow の段には書かない)
+- answer は「何を -> どうした」の形の、それだけで読める 1 行にする (問いの answer と同じ決まり。改行を入れない)
+- PowerShell の文字列に写して打つので、引用符 (`'` `"` と、PowerShell が引用符として読む `‘` `’` `‚` `‛` `“` `”` `„`)・`` ` ``・`$` を
+  書かない
+- answer は state が `active` の段にだけ書く。段が済んだ・ユーザーの番でなくなった (blocked や todo に戻した) ら、その書き込みで answer を
+  外す
+- 同じ answer を 2 つの段に書かない (押した印は、木の中の label と answer の同じ段に当てて拾う)。書いた answer は、見てもらうもの・確かめる
+  ことが替わったときのほかは書き換えない (書き換えると、押した印がその段に当たらなくなる)
+- 同じことをもう一度頼む (直した後に確かめ直すなど) ときは、`->` の前に ` 2 回目`・` 3 回目` (その段で頼んだ回数) を
+  足して、前の answer と分ける (例 `子 F ハブの hook を Windows で 2 回目 -> 確かめた`)。panel のペインを閉じている間は panel が印を外さないので、
+  前に押された印が残っていると、同じ answer の段に当たってしまう
+- 返答の文にも、段を押して送れることを短く書く (例「確かめたら panel の段「Windows で確かめ」を押して送ってください (端末で「確かめた」と言ってもよい)」)。
+  answer を知らない mod (「当てる順と、古い mod のとき」の 1 行が `段の answer: False`) では段を押せないので、端末で言ってもらう
+
+届いたら (段から届いた answer・拾った押した印・端末で直に言われたこと、どれも同じに処理する。同じ段は 1 往復に 1 回だけ):
+
+- 端末で直に言われたときと同じに扱う (次の段を進める。確かめを頼んで答えを待つ印 (`pjp mark asking`) を付けていれば、
+  「答えが届いたら」の 5. のとおり `pjp mark answered` か `asking`)
+- その往復で、その段を done にして answer を外して書く (「段を押した印 (panel.steps.json)」の「済にする」手。書かないと、段の
+  下に「送った」が出たまま残る)。問いの答えと違い、問いのペインは開け閉めしない (段はまとめのペインにある)
+
+### 行を足す・状態を進める
+
+| 起きたこと | 書くもの |
+| --- | --- |
+| panel を初めて書く (会話の始め・開き直しで前の panel.json が消えていたとき) | 節を一番上 (Q&A の節があればその下) に置き、根にこの会話の行 (`title` は会話の主題・`who` は `ハブ`) を置く。子がいれば子の行も |
+| 子を立てた | ハブの行の `children` に、`id` (子の英字)・`title` (頼んだことの一言)・`who`・`steps` (最初の段が `active`) の行を足す |
+| 子が PR を出した | 子の行の `children` に PR の行を足す (出した直後は、ふつう `state` が `open` か `draft`、`ci` が `pending`)。段を進める |
+| CI の結果が分かった (子の報告・merge を聞く前) | PR の行の `ci` を `pass` か `fail` にする |
+| merge した・merge せずに閉じた | PR の行の `state` を `merged` か `closed` にし、段を進める |
+| 子の報告で段が進んだ・子が止まった | 段の `state` を進める (止まったら `blocked`。answer のある段なら answer も外す) |
+| 子が済んだ (PR が merge され、merge の後にすることも済んで片付けた・PR を出さずにやめた) | チケットの無い子の行の `status` を `Done` (やめたなら `Canceled`) にする。mod が済んだ行として小さく畳む |
+| 子が PR の無い成果物を作り始めた (作る子を立てた・子が知らせてきた) | 成果物のもとの行 (説明する PR の子の行。2 つ以上の子にまたがればハブの行) の `children` に、`item` の行 (`title` は成果物の名前・`who`・`steps`) を足す |
+| ユーザーに手で確かめてもらう段になった (実機での確かめ) | その段を active にし、answer を書く (「段の answer (押して送る)」) |
+| 段の answer が届いた・送られていない押した印を拾った・ユーザーの番の段が済んだと端末で直に言われた | その段を done にして answer を外し、次の段を進める (処理は同じ所の「届いたら」) |
+| ユーザーの番の段がうまくいかなかったと言われた (確かめで直すものが見つかった) | その段を blocked にして answer を外す。直った後に確かめ直すときは active に戻し、` 2 回目` を足した answer を書く |
+| 子のものでない PR・関連のチケットを見せる (merge を聞くほかの PR・前の会話のもの) | 根の最後に `related: true` の行を足す (`note` にわけを一言) |
+
+チケットのあるハブで、子のチケットの ID が分かったとき・チケットの Status が変わったときに行を直す手と、解説動画の行の手は、足し分の
+skill `pjp-hc-hub-private` (skill の一覧にあれば) の手。
+
+- 値は元の言葉のまま写す: `state` は `open`・`draft`・`merged`・`closed`、`ci` は `pass`・`fail`・`pending` (CI の無い PR は空の字 `""`)。
+  チケットの無い子の行の `status` は、済んだときの `Done`・`Canceled` だけ
+- 状態と URL は覚えで書かず、次の手で引いてから書く。PR の URL は `https://github.com/<owner>/<repo>/pull/<番号>` (gh が出す
+  `url`)
+
+```powershell
+# PR の行 (埋めるもの: <owner>/<repo> (例 pollenjp/dotfiles)・<repo>・<番号>・<短い題>・<一言>)
+# <短い題> は $p.title (PR の題) を全角 20 字ほどに縮めたもの。言うことが無ければ note の項を消す
+$p = gh pr view <番号> --repo <owner>/<repo> --json url,state,isDraft,title | ConvertFrom-Json
+$b = @(gh pr checks <番号> --repo <owner>/<repo> --json bucket 2>$null | ConvertFrom-Json | ForEach-Object { $_.bucket })
+$ci = if ($b -contains 'fail' -or $b -contains 'cancel') { 'fail' } elseif ($b -contains 'pending') { 'pending' } elseif ($b -contains 'pass') { 'pass' } else { '' }
+# draft は開いている間だけ (閉じた draft の PR も isDraft は true のまま)
+[ordered]@{ kind = 'pr'; id = '<repo>#<番号>'; title = '<短い題>'; url = $p.url; state = $(if ($p.state -eq 'OPEN' -and $p.isDraft) { 'draft' } else { "$($p.state)".ToLower() }); ci = $ci; note = '<一言>' } | ConvertTo-Json -Compress
+```
+
+- 出た 1 行の JSON を、表の足す所 (根の `rows` か、上の行の `children`) に足す。状態を進めるときは、同じ id の行 (id の無い行は
+  同じ `who` の行) の欄だけを書き換え、`steps` と `children` は残す。進める行が節に無ければ × で外した行なので、足さない。足す行の
+  上の行が節に無いとき (× の後) は、「行を貯める節に × が付いたら」のとおり根に置く
+- 開き直しで前の panel.json を写したときは、進み具合の木も写したままにする (× で外した木を置き直さない)
+- CI の無い PR (dotfiles-private など) では `gh pr checks` が何も出さず (「no checks reported」は stderr へ出る)、`ci` は空の字になる
+
+### `work` を知らない mod のとき (3 つの節)
+
+配った mod が進み具合の木の節を知らない間は (「当てる順と、古い mod のとき」)、`work` の節を置かず、同じ中身を前の 3 つの節に
+分けて書く (一覧の節を知る dotfiles #256 の後の mod の書き方。それより前の mod は、同じ所のとおり PR とチケットを markdown の節に
+書く)。いつ行を足し、状態を進めるかは上の表と同じ (チケットのあるハブでは、子のチケットの ID が分かったら `tickets` に行を足す)。値は上の
+手で引き、`kind` と `who` を外して、子の英字を `note` に入れる。
+
+| 節 (type と id・title) | 行にするもの | 行の欄 |
+| --- | --- | --- |
+| `flow` (`kids`・子の進み具合) | 段を持つ行 (子・成果物) | `label` (`子 E <一言>`)・`sub` (PR。チケットがあればチケットも: `TKT-m · dotfiles #12`)・`steps` |
+| `prs` (`prs`・PR) | PR の行 (`related` のものも) | `id` (`<repo>#<番号>`)・`title`・`url`・`state`・`ci`・`note` (`子 E · TKT-m。merge を聞いている`) |
+| `tickets` (`tickets`・チケット。チケットのあるハブだけ) | チケットの行 (ハブ・子・`related`。id の無い行は除く) | `id`・`title`・`url`・`status`・`note` (`ハブ`・`子 E`・`関連。前の会話`) |
+
+- 並び: 「図に描けないこと」の後ろ (前の話の前) に `flow` → `prs` → `tickets` (`panel-figures.md` の「雛形」の節の並び)。`prs` は開いている
+  もの (open・draft) を上に、merge・close したものをその下に、それぞれ新しい順。`tickets` はハブのチケットを先頭に、子の
+  チケットを閉じていないもの・閉じたもの (Done・Canceled) の順に
+- `prs` (チケットのあるハブでは `tickets` も) は panel を初めて書くときから (行が無くても) 置き、`flow` は最初の子を立てたときから置く。状態を進めるときは、
+  rows にある同じ行 (`flow` は同じ子の行、`prs`・`tickets` は同じ id の行) を書き換える
+
+例 (前の書き方。進み具合の木と同じ中身を 3 つの節に分けたもの):
+
+```json
+{
+  "version": 1,
+  "title": "ハブ: panel の × を直す",
+  "updated": "11/17 15:20",
+  "sections": [
+    { "type": "markdown", "id": "now", "title": "いま", "text": "- **待っていること**\n  - 子 E の **#12** の merge" },
+    {
+      "type": "flow", "id": "kids", "title": "子の進み具合",
+      "rows": [
+        {
+          "label": "子 E panel の mod を直す", "sub": "dotfiles #12",
+          "steps": [
+            { "label": "PR", "state": "done" },
+            { "label": "merge", "state": "active" },
+            { "label": "当てる", "state": "todo" }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "prs", "id": "prs", "title": "PR",
+      "rows": [
+        { "id": "dotfiles#12", "title": "panel の mod を直す", "url": "https://github.com/pollenjp/dotfiles/pull/12", "state": "open", "ci": "pass", "note": "子 E。merge を聞いている" }
+      ]
+    }
+  ]
+}
+```
+
+### `work` を知る mod に切り替わったら
+
+`work` を知らない mod の 3 つの節で書いてきた会話で、「当てる順と、古い mod のとき」の 1 行が True と出たら、その書き込みで
+`work` の節に切り替える:
+
+1. 消す印を読み、印の節を外す (「節を消す印 (×)」)
+2. 残った節 (`flow`・`prs`。チケットのあるハブでは `tickets` も) の行から `work` の節を作る:
+   - チケットのあるハブでは、`tickets` のハブの行を根に、子の行をその `children` に、関連の行を `related` の根の行にする。`note` の `ハブ`・子の英字は
+     `who` へ移し (子の端末は `pjp child ls` で引いて足す。片付けた子で引けなければ英字だけ)、関連の行の頭の `関連。` は落として、
+     残りの一言だけを `note` に残す
+   - `prs` の行は `kind` を `"pr"` にして、その PR を出した子の行の `children` へ移す。`note` の頭の子の英字 (とチケット。
+     `子 E · TKT-m。`) は木の位置で分かるので落とし、残りの一言だけを残す。子のものでない PR は `related` の根の行にする
+   - `note` に何も残らない行は、`note` の項を消す
+   - `flow` の行の段は、その子のチケットの行の `steps` へ移す。チケットの行の無い `flow` の行 (チケットの無いハブでは全部) は、
+     `label` の子の英字を `id` と `who` に、一言を `title` にした、`steps` を持つ行にし、根に置いたこの会話の行 (`title` は会話の主題・
+     `who` は `ハブ`) の `children` に入れる
+   - × で外されて無い節の行は戻さない。上の行にできる行が無ければ、残った行を根に置く。節が全部無ければ `work` も
+     置かず、新しい行が来たときにその行だけで置く (「行を貯める節に × が付いたら」)
+3. `work` の節を一番上 (Q&A の節があればその下) に置き、前の節を外す
+
+## 図
+
+何を図にするか・1 枚の形・色・動きの置き方・雛形 (`assets/panel/` の SVG と、panel.json の節の `sections.json`) は
+`panel-figures.md`。ここは書く手の決まり。
+
+- SVG を先に書き、その後で panel.json に載せる (herdr-app は図をパスで覚えるので、無いうちに読ませない)
+- 図を変えるときは名前を変える (`x.svg` → `x-2.svg`)。同じ名前で書き換えた図は描き直らない
+- panel は図をペインの幅に合わせて縮め・大きくし (0.1〜2 倍)、ユーザーが図をクリックすると、図だけを大きく出す小窓 (marks も動く)
+  で開く。小窓があっても、まとめのペインのままで読める大きさに描く (`panel-figures.md` の「大きさと字」)
+- panel.json の width・height は SVG の width・height と同じにする。marks の座標もその px で書く
+- 動きは SVG の中でなく marks で重ねる (`panel-figures.md` の「動きの置き方」)
+- panel の image は静止画として描かれ、SVG の中の JS も SMIL も CSS の動きも動かない。場面を順に流す説明・押して案を見比べるものは
+  panel に出さず、scratchpad に 1 ファイルの HTML で作り (SKILL.md の 6. の表)、panel の「いま」にその場所を書く (Dev Tracker を使う
+  ホストで会話のチケットに埋め込む手は、足し分の skill `pjp-hc-hub-private` (skill の一覧にあれば) の手)
+- panel の外 (HTML・ほかの文書) で図を動かして見せたいときは、`pjp hub bake '<panel.json の絶対パス>' <節の id>… --out '<scratchpad>\baked'`
+  で、marks を SVG の中の CSS の動きに焼いた写しを作れる (flow は線の上を流れる点・pulse は点滅する枠・dot は行き来する点・label は焼いた
+  時点の字。動きを減らす設定では止まる)。ミニ絵の図のパス (`<会話の名前>/mini-<名前>.svg`) を渡すと、焼かずに写す。図は herdr-app の
+  home の図のフォルダから読み、panel の図は書き換えない。`--out` が panel.json のフォルダか herdr-app の home の中なら、何も書かずに
+  終了コード 2。`!!` の行 (焼けない mark・theme の名前で書いた色・節と SVG の大きさの違い) は panel の図のずれの合図なので、panel.json か
+  SVG を直す (`note:` の行は知らせだけ。`pjp hub --help`)。写しは panel に載せない (panel は SVG の中の動きを描かず、marks と二重になる)
+- font-family は名前を引用符で囲む。囲まないと、日本語を混ぜた行が別の字体に落ち、`~` と `\` が化ける (囲んでも Yu Gothic UI は
+  `\` を `¥` の形で描く (panel で確かめた 2026-11-18) ので、図のパスは `/` で区切る。`panel-figures.md` の「大きさと字」)
+- SVG の色は theme に従わないので、暗い theme 向きに描く (`panel-figures.md` の「色」)
+- 書いたら XML として読めるかを見る: `[xml](Get-Content -Raw '<SVG の絶対パス>') | Out-Null` (読めなければ例外が出る。文の中の
+  `<`・`&` は `&lt;`・`&amp;` にする)。marks が図の箱と線に合っているかは `panel-figures.md` の「確かめる」の script で見る
+
+## ミニ絵 (箇条書きの項目の下の小さな図)
+
+markdown の節の箇条書きの、複雑な項目にだけ、その下に小さな図 (ミニ絵) を出せる (ユーザーの承認 2026-11-19)。mod が markdown の
+節の `text` を絵だけの行で切り、前の文・ミニ絵・後ろの文の順に縦に並べる。描き方と雛形は `panel-figures.md` の「ミニ絵」。
+
+- 使えるのは、配った mod の頭のコメントに `ミニ絵:` がある間だけ (「当てる順と、古い mod のとき」の 1 行)。無ければ絵の行を書かない
+- 付けるのは複雑な項目 (流れ・前と後・分岐・3 つ以上がかかわる) だけ。文で足りる項目には付けない。1 回の書き直しで 3 枚まで
+  (取り決め 2026-11-19)
+- 絵を付ける項目の詳細の最後の行のすぐ後ろ (次の見出しの項目の前) に、絵だけの行を 1 行書く。前の空白は何個でもよく、後ろに字を
+  続けない。panel.json の text では `"- **畳み方**\n  - Done・Canceled で、…\n  ![畳む前と後](t-t53/mini-fold.svg)\n- **データ**\n  - …"`
+- ミニ絵は、すぐ上の行 (空の行は飛ばす) の字の頭にそろって出る。項目の詳細の後ろに置けば、詳細の字の頭から出る (絵の行の前の空白の
+  数は見ない)
+
+```markdown
+- **畳み方**
+  - Done・Canceled で、動くものが無いチケットは 1 行に畳む
+  ![畳む前と後](t-t53/mini-fold.svg)
+- **データ**
+  - 新しい節の type work
+```
+
+- 図のパスは image の節の `src` と同じ決まり (herdr-app の home の `pjp-hub-panel-media/` からの相対パス。`/` で区切る)。図は
+  `<home>\pjp-hub-panel-media\<会話の名前>\mini-<名前>.svg` に置き、描き直したら名前を替える (同じ名前で書き換えた図は描き直らない)。
+  SVG を先に書き、その後で panel.json に絵の行を書く
+- 絶対パス・`..`・URL・空のパスは決まりの外で、mod はその場所に薄い字で「ミニ絵を出せない: <わけ>」を出す (図が無い・読めないときも)
+- パスに空白と括弧を、説明に `]` を含めない。含むと絵の行とみなされず、ミニ絵にならずに文として出る
+- 絵の行の後ろの文は、別の文として出る。後ろの文が項目の行 (次の見出しの項目・字下げした詳細・番号付きの項目) で始まれば、mod が
+  元の段・記号・番号のまま続けて出す (後ろの文の頭に中身の無い項目の行を足し、TextView に続きとして読ませる)。項目でない行 (続きの
+  文) で始まると、左の端からの別の文として出る (4 つ以上の空白で始まるとコード)。これは mod では直さないので、絵の行の後ろに続きの文を
+  置かない (置く場所の決まりどおり、後ろは次の見出しの項目にする)
+- 説明 (`![<説明>]` の字) はミニ絵の下に出ない。押すと出る小窓 (image の節と同じ。説明は小窓の説明に出る) と、ポインタを載せたときの
+  ヒントにだけ出る。図の中の字だけで分かるように描き、説明は小窓で読む 1 行にする
+- 大きさは 1 つ (幅 200・高さ 80。panel の文字が 100% のとき 240×96 で出る)。panel の文字の倍率 (− % +) に合わせて変わり、ペインの
+  幅には合わせない (狭くて入らないときだけ縦横の比を保って縮む)。動き (marks) は付けない (取り決め 2026-11-19)
+- 問いの body と図の caption には書かない (ミニ絵になるのは markdown の節の `text` と Q&A の答えの `a` だけ)
+
+## 見た目を確かめる
+
+- `herdr-app shot` は、窓に今出ている space とタブしか撮らない。子を立てた直後 (herdr-app 0.1.15 までは、`pjp child new` が
+  子の space を窓に出す。0.1.16 からは space.new に `focus: false` を渡すので出さない) や、ユーザーが別の space・タブ
+  (ハブの space の別の会話のタブなど) を見ているときに撮ると、panel は写らず、ユーザーの別の会話が写る
+- ユーザーの画面は切り替えない (space や tab を替える command を打たない)。`herdr-app ls` で、この会話の端末
+  (`$env:HC_TERMINAL_ID`) が入っている space と tab の id を引き、`herdr-app status` の JSON の `space`・`tab` がそれと同じに
+  なるまで裏で待ってから撮る。PowerShell tool の run_in_background で次を流す (終わると知らせが来る)
+
+```powershell
+# <space>・<tab>: herdr-app ls で引いた、この会話の端末が入っている space と tab の id
+# <dir>: 撮る先の scratchpad の絶対パス (panel のフォルダの外)
+$deadline = (Get-Date).AddMinutes(40)
+$done = $false
+while (-not $done -and (Get-Date) -lt $deadline) {
+  $s = herdr-app status | ConvertFrom-Json
+  if ($s.space -eq '<space>' -and $s.tab -eq '<tab>') {
+    Start-Sleep -Milliseconds 1200
+    herdr-app shot '<dir>\panel-a.png' | Out-Null
+    Start-Sleep -Milliseconds 500
+    herdr-app shot '<dir>\panel-b.png' | Out-Null
+    $s = herdr-app status | ConvertFrom-Json
+    if ($s.space -eq '<space>' -and $s.tab -eq '<tab>') { $done = $true }
+    else { Remove-Item '<dir>\panel-a.png', '<dir>\panel-b.png' }   # 撮る間に窓が替わった。見ずに消して待ち直す
+  } else {
+    Start-Sleep -Seconds 2
+  }
+}
+if ($done) { '撮った: <dir>\panel-a.png・panel-b.png' } else { '40 分のうちに、この会話の space と tab が窓に出なかった' }
+```
+
+- `shot` も `| Out-Null` で流して待つ。`$null = herdr-app shot <png>` は待たず、撮ったファイルがすぐには無い (2026-11-18)
+- 終わったら、撮った 2 枚を Read で見る。撮る先は scratchpad の絶対パス (panel のフォルダの外) にする。パスを省くと今の cwd
+  (ハブの中) に `herdr-shot.png` を書く
+- 別の会話が写った絵は見ずに消す (上の例は、撮った後に space か tab が替わっていたら消して待ち直す)
+- 動きは、0.25〜0.7 秒あけて撮った 2 枚 (上の例の 2 枚) の同じ所を切り抜いて並べ、見比べる (PowerShell の System.Drawing)
+- 狭いペインで中身がはみ出したら、スクロールの操作 (ポインタ) はせず、確かめたい節を上に寄せた panel.json で撮り直す
+- ユーザーの画面で、ポインタやキーの自動操作は試さない (herdr-app の skill の決まり)
+- `herdr-app check` は mod を直したときのもの。panel.json を替えるだけなら要らない
+
+## mod を直したいとき
+
+- 配った写し (`<home>\mods\pjp-hub-panel\`) は直さない。runner の記録とずれ、次の `dotfiles apply` が衝突として出す
+- dotfiles の `win/herdr-app/mods/pjp-hub-panel/` を直す子を立てる (`pjp-hc-child`)。直した版は merge の後に pull と
+  `dotfiles apply` で届く (dotfiles の `win/README.md` の「herdr-app の mod」)
