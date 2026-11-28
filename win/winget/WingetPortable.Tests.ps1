@@ -189,6 +189,7 @@ Test-Case '取得だけを確かめる winget download の引数 (portable を�
 Test-Case 'InstallerType が無ければ download も名指ししない' "download --id $Id --exact --source winget --version $V --download-directory C:\tmp\dl --skip-dependencies --accept-package-agreements --accept-source-agreements --disable-interactivity" { (Get-WingetDownloadArguments -Tool (New-Tool @{ InstallerType = $null }) -Version $V -Directory 'C:\tmp\dl') -join ' ' }
 
 Test-Case '0x8A15007D には、昇格していない PowerShell で打ち直す行を添える' '昇格した会話から user スコープの portable を扱うのを winget が断った (0x8A15007D)。昇格していない PowerShell で Install-Tool を打ち直す' { Get-WingetFailureHint -Tool $T -ExitCode -1978335107 }
+Test-Case '0x8A150104 (依存を入れられない) には、依存を先に入れて打ち直す行を添える' 'winget が tool の依存のパッケージ (上の winget の行に出た VCRedist など) を入れられなかった (0x8A150104)。PowerShell で winget install --id <依存の ID> --exact を打って先に入れてから、Install-Tool を打ち直す (win/README.md の「tool の節」)' { Get-WingetFailureHint -Tool $T -ExitCode -1978334972 }
 Test-Case 'ほかの終了コードには添えない' '' { Get-WingetFailureHint -Tool $T -ExitCode 1 }
 
 # ---------------------------------------------------------------------------
@@ -609,6 +610,10 @@ Test-Case '取得が落ちたら、何も変えずに止まる' '1 [download] Tr
 Test-Case 'uninstall が落ちたら install せず、pin を足す (入っている版は残る)' '1 [download uninstall pin list pin add]' { $r = Invoke-Flow -States @($changeState, $changeState) -Fail @{ uninstall = 1 } -ExeExists; "$($r.Code) [$($r.Calls)]" }
 Test-Case 'uninstall の後に install が落ちたら、入れ直し方を出す' 'True True' { $r = Invoke-Flow -States @($changeState, (New-State $missing)) -Fail @{ install = 1 } -ExeExists; "$($r.Code -eq 1) $($r.Text -like '*Install-Tool を打ち直す (dotfiles apply でも入る)*')" }
 Test-Case '0x8A15007D で落ちたら、昇格していない PowerShell で打ち直す行を添える' 'True' { $r = Invoke-Flow -States @((New-State $missing), (New-State $missing)) -Fail @{ install = -1978335107 }; $r.Text -like '*0x8A15007D*昇格していない PowerShell で Install-Tool を打ち直す*' }
+Test-Case 'install が依存で落ちたら (0x8A150104)、依存を先に入れて打ち直す行と、入れ直し方を出す' '1 [install pin list] True' {
+    $r = Invoke-Flow -States @((New-State $missing), (New-State $missing)) -Fail @{ install = -1978334972 }
+    "$($r.Code) [$($r.Calls)] $($r.Text -like '*winget が失敗した (終了コード 0x8A150104)*winget install --id <依存の ID> --exact を打って先に入れてから*Install-Tool を打ち直す*')"
+}
 Test-Case '昇格した会話で pin を足すだけのとき、winget が断ったら (0x8A15007D) 打ち直す行を添える' '1 [pin list pin add] True' {
     $pinOnly = New-State ($elevated + @{ Pinned = $false })
     $r = Invoke-Flow -States @($pinOnly, $pinOnly) -ExeExists -Fail @{ 'pin add' = -1978335107 }

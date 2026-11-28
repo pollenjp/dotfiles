@@ -2089,8 +2089,8 @@ winget 1.30 は、昇格した会話 (UAC で昇格した PowerShell・管理者
 - `-Check` の表に「⚠ 昇格した PowerShell では winget が <道具> を入れない」と打ち直し方の ※ が出る。締めの行はその 1 行 (「→ ※ の手順で直す」) だけで、
   終了コードは入っていなくても 1 (runner が `-IfMissing` で入れにいかない)
 - runner (`dotfiles apply`) と WSL の setup は入れずに知らせる。昇格していない PowerShell (デスクトップの普通の端末) か、そこから開いた WSL で流し直す
-- pin を足す・外すだけなら止めない。UAC の分かれていない管理者 (Administrator・UAC が off) は昇格した会話に当たらない (winget も断らない)。見分けは
-  winget と同じ (`Runtime::IsRunningWithNonDefaultFullToken`)
+- pin を足す・外すだけなら止めない (winget 1.30.310 で、昇格した会話からの `winget pin add` が通ることを確かめた)。UAC の分かれていない管理者
+  (Administrator・UAC が off) は昇格した会話に当たらない (winget も断らない)。見分けは winget と同じ (`Runtime::IsRunningWithNonDefaultFullToken`)
 - winget の版が読めなければ、止めずに打ってみる。token を読めない (`Add-Type` が方針で止められたなど) ときも昇格していないとして打つ (管理者の
   ロールで代えると、UAC が off の管理者を昇格したと見誤って入れられなくなる)。`0x8A15007D` で落ちたら (pin を足す・外すのを断られたときも)、昇格して
   いない PowerShell で打ち直す行を添える
@@ -2098,7 +2098,7 @@ winget 1.30 は、昇格した会話 (UAC で昇格した PowerShell・管理者
 ### PATH の形
 
 winget は portable を入れると、`WinGet\Links` に symlink を置く (開発者モードが on のときなど) か、symlink を作れなければ置き場所 (exe のディレクトリ) を
-ユーザーの PATH に足す。`-Check` の「PATH の <コマンド>」は、どちらも winget の portable のものとして読み、どちらの形かを括弧で添える
+ユーザーの PATH に足す。manifest に `ArchiveBinariesDependOnPath: true` がある道具 (herdr) は、開発者モードでも symlink を作らず、置き場所を PATH に足す。`-Check` の「PATH の <コマンド>」は、どちらも winget の portable のものとして読み、どちらの形かを括弧で添える
 (`(WinGet\Links の symlink)`・`(置き場所)`)。ほかのものが先に引かれる・入っているのに見つからないときは ⚠ と直し方の ※ を出す (揃える手順では直らない)。
 PATH は `.exe` のほか `.cmd`・`.bat`・`.ps1` も、PowerShell と同じくディレクトリの順に見る。
 
@@ -2113,9 +2113,13 @@ PATH は `.exe` のほか `.cmd`・`.bat`・`.ps1` も、PowerShell と同じく
    `$packageId` の行・道具の表 (`Get-<道具>Tool`)。枠を探す頭の数行と、末尾の入口の数行はそのまま写す
 2. `[string]$Version = '<版>'` と `$packageId = '<ID>'` の 2 行は、版の知らせ (runner の `pin-updates`・WSL の `check-winget-version.sh`) と依存の更新の
    skill が読むので、この形のまま置く
-3. 試験 `Install-<道具>.Tests.ps1` は、表の値 (版の拾い方・exe の置き場所・見出しと締めの行の字) と custom の関数を確かめる。流れ・見張り・終了コードの
+3. winget の manifest (`microsoft/winget-pkgs` の `manifests/<頭の字>/<発行元>/<名前>/<版>/<ID>.installer.yaml`) に依存 (`Dependencies`) があり、それを
+   入れる道具は、表の `InstallerType` を `$null` にする。winget は `--installer-type` を依存の解決にも効かせ、burn しか無い `Microsoft.VCRedist.2015+.x64`
+   などに合うインストーラーが無くなって `0x8A150104` で落ちる (herdr の manifest がこの形)。依存を入れない道具 (`InstallArguments` に `--skip-dependencies`。codex) は名指ししてよい。
+   MSI のある道具 (fzf・starship) は portable を名指しし、表の `Msi` で MSI を見張る
+4. 試験 `Install-<道具>.Tests.ps1` は、表の値 (版の拾い方・exe の置き場所・見出しと締めの行の字) と custom の関数を確かめる。流れ・見張り・終了コードの
    決まりは枠の試験が見る
-4. `manifest.toml` に入口を足し (枠は足してある)、`powershell/dotfiles.ps1` に `Install-<道具>` を、runner の `runner/src/steps/ps1.rs` に手順を足す
+5. `manifest.toml` に入口を足し (枠は足してある)、`powershell/dotfiles.ps1` に `Install-<道具>` を、runner の `runner/src/steps/ps1.rs` に手順を足す
    (`output_fixes` に `elevated_fix!`。runner の試験が、入口と枠の字を突き合わせる)。依存の更新の拡張 (`.claude/skills/pjp-dotfiles-deps/`) にも足す
 
 ### WingetPortable.ps1 を書くときの注意

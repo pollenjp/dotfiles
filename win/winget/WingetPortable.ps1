@@ -41,7 +41,9 @@ BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無
   ExeSearch        ExePath に無ければ、置き場所の下を深さ 3 まで ExeName で探す (zip の中の形が変わっても読む)。既定 $false
   ExeName          exe の名前。既定は ExePath の 1 つ目の名前
   VersionLabel     版が読めないときの「不明 (… が読めない)」に出す字。既定 '<ExeName> --version'
-  InstallerType    winget install・download の --installer-type。既定 'portable' (MSI が足されても winget に選ばせない)
+  InstallerType    winget install・download の --installer-type。既定 'portable' (MSI が足されても winget に選ばせない)。manifest に依存
+                   (Dependencies) があり、それを入れる道具は $null にする (winget は --installer-type を依存の解決にも効かせ、burn しか無い
+                   VCRedist などに合うインストーラーが無くなって 0x8A150104 で落ちる。--skip-dependencies で依存を入れない道具は名指ししてよい)
   InstallArguments winget install に足す引数。既定 @()
   Msi              machine スコープの MSI の exe (%ProgramFiles% と %ProgramFiles(x86)% からの相対パス)。あれば何も入れずに外し方を出す。既定 $null
   BusyName         「… が N 個動いている」の主語。既定 ExeName
@@ -266,13 +268,18 @@ function Get-WingetDownloadArguments {
         '--accept-source-agreements', '--disable-interactivity')
 }
 
-# winget の失敗の終了コードに添える行。無ければ $null。0x8A15007D (APPINSTALLER_CLI_ERROR_ADMIN_CONTEXT_ACTION_PROHIBITED) は、昇格した会話から
-# user スコープの portable を扱うのを winget が断ったとき (会話の昇格を見誤ったとき・pin を足す・外すのも断ったとき。入れる・入れ替えるのは
-# 見張り (Get-PortableHold) が先に止める)
+# winget の失敗の終了コードに添える行。無ければ $null。
+#   0x8A15007D (APPINSTALLER_CLI_ERROR_ADMIN_CONTEXT_ACTION_PROHIBITED): 昇格した会話から user スコープの portable を扱うのを winget が断った
+#     (会話の昇格を見誤ったとき・pin を足す・外すのも断ったとき。入れる・入れ替えるのは見張り (Get-PortableHold) が先に止める)
+#   0x8A150104 (APPINSTALLER_CLI_ERROR_INSTALL_MISSING_DEPENDENCY): manifest の依存 (VCRedist など) を入れられなかった。依存を先に入れておけば
+#     winget は依存を入れにいかない (表の InstallerType が依存の解決にも効いて落ちたときも、これで入る)
 function Get-WingetFailureHint {
     param($Tool, [int]$ExitCode)
     if ($ExitCode -eq -1978335107) {
         return "昇格した会話から user スコープの portable を扱うのを winget が断った (0x8A15007D)。昇格していない PowerShell で $($Tool.Command) を打ち直す"
+    }
+    if ($ExitCode -eq -1978334972) {
+        return "winget が $($Tool.Name) の依存のパッケージ (上の winget の行に出た VCRedist など) を入れられなかった (0x8A150104)。PowerShell で winget install --id <依存の ID> --exact を打って先に入れてから、$($Tool.Command) を打ち直す (win/README.md の「$($Tool.Readme)」)"
     }
     $null
 }
@@ -295,7 +302,8 @@ function Resolve-PortableOnPath {
 }
 
 # PATH で引かれるものがどこのものか。links (winget が symlink を置く WinGet\Links。開発者モードが on のときなど) / package (置き場所の exe の
-# ディレクトリ。winget が symlink を作れずに、置き場所を PATH に足した形) / $Custom (道具の custom の種類。Hooks.PathKind) / other / none。
+# ディレクトリ。winget が symlink を作れずに、置き場所を PATH に足した形。manifest に ArchiveBinariesDependOnPath: true がある道具 (herdr) は、
+# 開発者モードでも symlink を作らずにこの形になる) / $Custom (道具の custom の種類。Hooks.PathKind) / other / none。
 # WinGet\Links のものでも、symlink の指す先 ($LinkTarget) がこの道具の置き場所 ($PackageDir) の外なら links にしない (ほかのパッケージの同じ名前の
 # symlink。herdr の Herdr.Herdr.Preview など)。指す先が読めなければ links のまま。-eq は大文字小文字を区別しない (Windows のパスと同じ)
 function Get-PortablePathKind {

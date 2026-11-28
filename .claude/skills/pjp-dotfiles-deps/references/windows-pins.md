@@ -48,6 +48,10 @@ Google 日本語入力・ntn・Claude Code・Tailscale・ghq・fzf・starship・
 | `git`・`gh`・`pwsh`・`vs-buildtools`・`rustup` | `win/bootstrap/Install-Bootstrap.ps1` の名前ごとの param (`-GitVersion`・`-GhVersion`・`-PwshVersion`・`-VsBuildToolsVersion`・`-RustupVersion`) の既定値 | 「bootstrap (新しい Windows で最初に流す)」の道具の表の版 | 「bootstrap の固定した版の新しい版が出たとき」(Build Tools はワークロードと部品の ID が残っているか、rustup は `--default-host x86_64-pc-windows-msvc --default-toolchain none` と自己更新の止めが効くかも見る。pwsh は 7.6 の線 (MSI がある。普段のアカウントが管理者でない PC には MSI で入れる) の版だけが候補に出る。線を移すなら、MSIX の package の名前と MSI があるかを確かめて `check-winget-version.sh` の `series_re` と runner の `series` も直す) |
 
 - テスト (名前ごとの ps1 のテストと herdr-core の build) は `deps.toml` の `[[checks]]` にあり、依存の更新の skill が PR の前に流す
+- winget の portable の道具で共通の枠 (`win/winget/WingetPortable.ps1`) を使うものは、上げる版の manifest (`microsoft/winget-pkgs` の
+  `<ID>.installer.yaml`) の依存 (`Dependencies`) が変わっていないかも見る。依存を入れる道具 (`--skip-dependencies` を付けない道具) に依存が増えたら、
+  道具の表の `InstallerType` を `$null` にする (名指ししたままだと winget が `--installer-type` を依存の解決にも効かせ、burn しか無い VCRedist などで
+  `0x8A150104` で落ちる。`win/README.md` の「道具を足す」の 3)
 - 上げる前に、その節のとおり release notes (CHANGELOG) を読み、設定・置き場所・更新の仕組みに触る変更が無いかを見る。気になる
   変更があれば、PR を出す前にユーザーに伝える (定期実行なら PR の本文に書く)
 - herdr-app (app) を上げるときは、既定のキーが増えた・変わったかも見る。dotfiles (Windows の runner の `herdr-app-keys`) がキーを書き足した
