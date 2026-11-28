@@ -5,18 +5,21 @@ name: pjp-tools
 #
 # - Windows: MSVC (windows-latest の既定の host。bootstrap が入れるのと同じ) で、Windows のパス・プロセス (Job Object)・junction と、
 #   hc・herdr-app の Windows の形の口を確かめる。toolchain は workspace の rust-toolchain.toml (runner の手順 pjp-tools が手元で作るときと同じ)
-# - pjp-hc-hub の試験は skill の図の雛形 (nix/files/claude/skills/pjp-hc-hub/assets/panel) も読むので、それを変えた PR でも流す
+# - pjp-hc-hub の試験は skill の図の雛形 (nix/files/claude/skills/pjp-hc-hub/assets/panel) と、雛形の細かさの倍率を書いた panel-figures.md も
+#   読むので、それを変えた PR でも流す
 on:
   push:
     branches: [main]
     paths:
       - "nix/pkgs/pjp-tools/**"
       - "nix/files/claude/skills/pjp-hc-hub/assets/panel/**"
+      - "nix/files/claude/skills/pjp-hc-hub/references/panel-figures.md"
       - ".github/workflows/pjp-tools.yml"
   pull_request:
     paths:
       - "nix/pkgs/pjp-tools/**"
       - "nix/files/claude/skills/pjp-hc-hub/assets/panel/**"
+      - "nix/files/claude/skills/pjp-hc-hub/references/panel-figures.md"
       - ".github/workflows/pjp-tools.yml"
   workflow_dispatch:
 
