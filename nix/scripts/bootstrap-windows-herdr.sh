@@ -34,10 +34,14 @@
 # 2. pwsh.exe で Install-Herdr.ps1 -Check を流す (何も変えない)。
 #    WSL の interop を通るので、落ちていたら手で打つコマンドを出して飛ばす (exit 0)
 # 3. 終了コード 0 なら 1 行だけ出す。1 なら ⚠ で囲んだ注意と状態の表と直し方を出す。直し方は -Check の
-#    締めの行 (Install-Herdr.ps1 の Format-HerdrVerdict) で決める: 版・pin・PATH の差なら揃えるコマンド、
-#    Herdr.Herdr.Preview が残っていれば外す手順。
+#    締めの行 (winget の portable の道具の共通の枠 win/winget/WingetPortable.ps1 の Format-PortableVerdict) で決める: 版・pin の差なら
+#    揃えるコマンド、PATH のずれ (herdr update の herdr が先に引かれるなど。揃える手順では直らない) なら ※ の手順、
+#    Herdr.Herdr.Preview が残っていれば外す手順。昇格した会話 (winget 1.30 以降は、昇格した会話からの user スコープの portable を断る) で
+#    ps1 が winget を打たずに止まった (締めの行「昇格した PowerShell では winget が herdr を入れない」。入っていなくても 1) なら、
+#    昇格していない端末で流し直す手。
 #    3 (入っていない) なら Install-Herdr.ps1 -IfMissing で入れる (Herdr.Herdr の置き場所の herdr は
-#    動いていないので、何も巻き込まない)。Preview が残っていても並べて入れ、入ったら Preview を外す手順を出す。
+#    動いていないので、何も巻き込まない)。Preview が残っていても並べて入れ、入ったら Preview を外す手順を出す
+#    (残ったのが PATH のずれなら、その直し方を出す)。
 #    どれも exit 0 (setup を止めない)。⚠ の見出しと直し方は、setup の最後の「警告のまとめ」にも残す (summary_warn)
 #
 # --apply を付けて手で流すと、-Check を付けずに流して揃える。入れ替えが要るときに herdr が動いて
@@ -157,7 +161,7 @@ clean() {
   tr -d '\r' | sed "s/${esc}\[[0-9;]*[A-Za-z]//g"
 }
 
-# 直し方。版・pin・PATH の差を揃えるコマンド
+# 直し方。版・pin の差を揃えるコマンド
 fix_sync=(
   "揃えるには次のどちらかを打つ (入れ替えるときは、先に herdr の外の PowerShell で hsvstop):"
   "  WSL:        ${script_dir}/bootstrap-windows-herdr.sh --apply"
@@ -175,6 +179,16 @@ fix_preview=(
   "  4. 新しい PowerShell から herdr を起動し直す"
 )
 preview_title="Windows に前の herdr (Herdr.Herdr.Preview) が残っています"
+# 直し方。PATH のずれ (herdr update で入った herdr が先に引かれるなど。揃える手順では直らない)
+fix_path=(
+  "PATH のずれは揃える手順では直らない。上の ※ の行の手順で直す (win/README.md の「herdr を入れる」)"
+)
+path_title="Windows の herdr の PATH で引かれる herdr が winget のものではありません"
+# 直し方。昇格した会話 (winget 1.30 以降は、昇格した会話から user スコープの portable を入れる・外すのを断る)
+fix_elevated=(
+  "winget 1.30 は、昇格した会話 (管理者として実行した端末から開いた WSL も) から user スコープの portable を入れる・外すのを断る。"
+  "昇格していない端末から開いた WSL で setup --update を流し直すか、昇格していない PowerShell で Install-Herdr を打つ (win/README.md の「winget の portable の道具」)"
+)
 
 # ⚠ で囲んだ注意を出す。$1: 見出し、$2: 枠に入れる出力 (状態の表など。空なら何も入れない)、
 # 残り: 直し方の行 (1 つが 1 行)
@@ -199,17 +213,27 @@ warn_frame() {
   summary_warn "${title}" "$@"
 }
 
-# Install-Herdr.ps1 の締めの行 (Format-HerdrVerdict) から、直すことを読む。$1: pwsh.exe の出力
-#   needs_sync:    版・pin・PATH の差がある・入っていない (Install-Herdr で揃える・入れる)
-#   needs_preview: Herdr.Herdr.Preview が残っている (人が外す)
+# Install-Herdr.ps1 の締めの行 (共通の枠の Format-PortableVerdict) から、直すことを読む。$1: pwsh.exe の出力
+#   needs_sync:     版・pin の差がある・入っていない (Install-Herdr で揃える・入れる)
+#   needs_preview:  Herdr.Herdr.Preview が残っている (人が外す)
+#   needs_path:     PATH のずれがある (揃える手順では直らない)
+#   needs_elevated: 昇格した会話なので、ps1 が winget を打たずに止まった (締めの行は「→ ※ の手順で直す」だけ)
 read_verdict() {
   needs_sync=0
   needs_preview=0
+  needs_path=0
+  needs_elevated=0
   if grep -qE '^⚠️ .*→ Install-Herdr で(揃える|入れる)' <<<"$1"; then
     needs_sync=1
   fi
   if grep -qF '⚠️ Herdr.Herdr.Preview が残っている' <<<"$1"; then
     needs_preview=1
+  fi
+  if grep -qF '⚠️ PATH の herdr が' <<<"$1"; then
+    needs_path=1
+  fi
+  if grep -qF '昇格した PowerShell では winget が herdr を入れない' <<<"$1"; then
+    needs_elevated=1
   fi
 }
 
@@ -250,15 +274,31 @@ if ((rc == 0)); then
 fi
 if ((rc == 1 && header)); then
   read_verdict "${captured}"
-  # 残っているのが Herdr.Herdr.Preview だけなら、見出しも直し方も Preview を外すことにする (Install-Herdr では直らない)。
-  # 差もあれば Preview を外す手順を先に出す (Install-Herdr は Preview が残っている間は入れ替えない)
-  if ((needs_preview && ! needs_sync)); then
-    warn_frame "${preview_title}" "${captured}" "${fix_preview[@]}"
-  elif ((needs_preview)); then
-    warn_frame "Windows の herdr が、dotfiles で固定した版と揃っていません" "${captured}" "${fix_preview[@]}" "${fix_sync[@]}"
-  else
-    warn_frame "Windows の herdr が、dotfiles で固定した版と揃っていません" "${captured}" "${fix_sync[@]}"
+  # 昇格した会話では、ps1 は入れも揃えもしない (入っていなくても 1)。流し直す端末を知らせる
+  if ((needs_elevated)); then
+    warn_frame "Windows の herdr を winget で入れ・揃えられません (昇格した会話)" "${captured}" "${fix_elevated[@]}"
+    exit 0
   fi
+  # 直し方は、Preview を外す手順 → 揃えるコマンド → PATH のずれの手順の順に並べる (Install-Herdr は Preview が残っている間は
+  # 入れ替えない)。見出しは、版・pin の差があれば「揃っていない」、無ければ Preview か PATH のずれ (どちらも Install-Herdr では直らない)
+  fixes=()
+  if ((needs_preview)); then
+    fixes+=("${fix_preview[@]}")
+  fi
+  if ((needs_sync || ! (needs_preview || needs_path))); then
+    fixes+=("${fix_sync[@]}")
+  fi
+  if ((needs_path)); then
+    fixes+=("${fix_path[@]}")
+  fi
+  if ((needs_sync || ! (needs_preview || needs_path))); then
+    title="Windows の herdr が、dotfiles で固定した版と揃っていません"
+  elif ((needs_preview)); then
+    title=${preview_title}
+  else
+    title=${path_title}
+  fi
+  warn_frame "${title}" "${captured}" "${fixes[@]}"
   exit 0
 fi
 if ((rc == 3 && header)); then
@@ -268,13 +308,16 @@ if ((rc == 3 && header)); then
   captured=$(timeout 600 pwsh.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "$(pwsh_command " -IfMissing")" </dev/null 2>&1) || rc=$?
   captured=$(printf '%s\n' "${captured}" | clean)
   read_verdict "${captured}"
-  # Herdr.Herdr.Preview が残っていると -IfMissing は 1 を返す。締めの行が Preview のことだけなら、
-  # Herdr.Herdr は入って揃っているので、入れた扱いにして Preview を外す手順を出す
-  if ((rc == 0 || (rc == 1 && needs_preview && ! needs_sync))); then
+  # Herdr.Herdr.Preview が残っている・PATH で別の herdr が先に引かれると -IfMissing は 1 を返す。締めの行がそれだけ (揃える・入れるが
+  # 無い) なら、Herdr.Herdr は入って揃っているので、入れた扱いにして Preview を外す手順・PATH の直し方を出す
+  if ((rc == 0 || (rc == 1 && ! needs_sync && ! needs_elevated && (needs_preview || needs_path)))); then
     printf '%s\n' "${captured}" | grep -v '^⚠️ ' | sed 's/^/  /' || true
     echo "Windows に herdr を入れました。"
     if ((needs_preview)); then
       warn_frame "${preview_title}" "" "${fix_preview[@]}"
+    fi
+    if ((needs_path)); then
+      warn_frame "${path_title}" "" "${fix_path[@]}"
     fi
     exit 0
   fi

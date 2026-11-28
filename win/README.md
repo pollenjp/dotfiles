@@ -2063,8 +2063,11 @@ winget の portable (zip の中の portable か、portable の exe。管理者�
 | ghq | `ghq/Install-Ghq.ps1` | (なし) |
 | starship | `starship/Install-Starship.ps1` | MSI の starship を見る (表の `Msi`) |
 | ntn | `ntn/Install-Ntn.ps1` | (なし) |
+| Claude Code | `claude-code/Install-ClaudeCode.ps1` | 自動更新の変数 (`CLAUDE_CODE_PACKAGE_MANAGER_AUTO_UPDATE`) を見て ※ で知らせる (`ReadState`・`Notes`) |
+| herdr | `herdr/Install-Herdr.ps1` | 前の `Herdr.Herdr.Preview` (残っていれば知らせ、入れ替えを止め、外す手順を出す。`ReadState`・`PathKind`・`Manual`・`Blocker`・`RowsAfterPath`・`Notes`・`Verdict`)。依存の VCRedist を winget に入れさせるので、`--installer-type` を名指ししない (表の `InstallerType = $null`) |
+| Codex CLI | `codex/Install-Codex.ps1` | `codex` と打てる形 (symlink・hardlink)・同梱の rg の PATH・化けた `codex-path` の行・1.29 以前の winget (`ReadState`・`Reinstall`・`Holds`・`Drift`・`BeforeWinget`・`AfterWinget`・`RowsBeforePath`・`RowsAfterPath`・`Verdict`) |
 
-Claude Code・herdr・Codex CLI は、まだ枠に移していない (同じ形の写しを入口に持つ)。winget 自身 (`winget/Install-WinGet.ps1`) は msixbundle で、枠に入れない。
+winget 自身 (`winget/Install-WinGet.ps1`) は msixbundle で、枠に入れない。
 
 流れ (`Invoke-WingetPortable`)。() の中は道具が足せる custom の口で、表の `Hooks` に関数の名前を書く:
 
@@ -2838,20 +2841,23 @@ Windows の herdr は winget の `Herdr.Herdr` (安定版。portable の zip。�
 
 | 打つもの | すること |
 | --- | --- |
-| `Install-Herdr -Check` (PowerShell) | 差を出すだけ。揃っていれば終了コード 0、差があれば 1 (`Herdr.Herdr.Preview` が残っているときも)、入っていなければ 3 |
+| `Install-Herdr -Check` (PowerShell) | 差を出すだけ。揃っていれば終了コード 0、差があれば 1 (`Herdr.Herdr.Preview` が残っている・昇格した PowerShell で winget を打てないときも)、入っていなければ 3 |
 | `Install-Herdr` (PowerShell) | 揃える (入れる・入れ替える・pin を足す)。`Herdr.Herdr.Preview` は外さない |
 | `nix/scripts/bootstrap-windows-herdr.sh` (WSL) | `setup --update` でも毎回走る。入っていなければ入れ、差があれば ⚠ で囲んで知らせる (入れ替えはしない)。`Herdr.Herdr.Preview` が残っていれば、外す手順を ⚠ で囲んで知らせる |
 | `nix/scripts/bootstrap-windows-herdr.sh --apply` (WSL) | WSL から揃える |
 | `nix/scripts/check-winget-version.sh herdr` (WSL・CI) | 固定した版を winget の版の一覧と比べる。GitHub Actions の `winget-versions` が週 1 回流し、新しい安定版が GitHub に出て 30 日たつと落ちて知らせる ([後述](#herdr-の新しい版が出たとき)) |
 
-揃えるときにすること:
+揃えるときにすること ([winget の portable の道具](#winget-の-portable-の道具) の共通の枠。昇格した PowerShell では入れない):
 
 1. 入っている版 (winget の置き場所の `herdr.exe --version`) と固定した版を比べる。違えば、先に
    `winget download` で固定した版の取得とハッシュを確かめ (落ちたら何も変えずに止まる)、
    `winget uninstall` してから `winget install --version` で入れる。portable の置き場所は版によらず
    同じで、`%APPDATA%\herdr` の設定やセッションは消えない
 2. 入れ替えの前に pin を外し、入れた後に `winget pin add` で `winget upgrade --all` から外す
-3. 読み直して、版・pin・PATH で引かれる herdr を確かめる
+3. 読み直して、版・pin・PATH で引かれる herdr を確かめる。PATH で引かれる herdr は、置き場所のもの (winget が置き場所をユーザーの PATH に足した形。
+   `Herdr.Herdr` の manifest は `ArchiveBinariesDependOnPath: true` で、winget は開発者モードでも `WinGet\Links` に symlink を作らずにこの形にする) と、
+   `%LOCALAPPDATA%\Microsoft\WinGet\Links\herdr.exe` (前に symlink ができた PC・手で置いたもの。指す先が `Herdr.Herdr` の置き場所のとき) のどちらも
+   winget のものとして読む
 
 - 入れ替えるときに herdr が動いていると (server・`herdr --remote`・conpty の OpenConsole.exe)、
   herdr.exe を置き換えられないので、何も変えずに止まる。herdr の外の PowerShell
@@ -2862,15 +2868,16 @@ Windows の herdr は winget の `Herdr.Herdr` (安定版。portable の zip。�
   `%USERPROFILE%\.herdr\packages\standalone\releases\<版>-<target>` に別に入れ、そのディレクトリを
   ユーザーの PATH の先頭に足すので、winget の herdr が引かれなくなる。新しい版の通知は
   `herdr/config.toml` の `[update] version_check = false` で止めてある。打ってしまったら
-  (`-Check` の「PATH の herdr」が ⚠ になり、外すディレクトリが ※ の行に出る)、そのディレクトリを
-  ユーザーの PATH から外し、`%USERPROFILE%\.herdr\packages` と `%LOCALAPPDATA%\Programs\Herdr` を消す。
+  (`-Check` の「PATH の herdr」が ⚠ になり、外すディレクトリが ※ の行に出る。締めの行は「→ ※ の手順で直す」で、setup も runner も
+  揃えずに知らせる)、そのディレクトリをユーザーの PATH から外し、`%USERPROFILE%\.herdr\packages` と `%LOCALAPPDATA%\Programs\Herdr` を消す。
   `Install-Herdr` は PATH を直さない
 - 入れ替えの途中で `winget install` が落ちると、herdr が入っていない状態で止まることがある
-  (取得は先に確かめてあるので稀)。そのときは `Install-Herdr` を打ち直す (`setup --update` でも入る)
+  (取得は先に確かめてあるので稀)。そのときは `Install-Herdr` を打ち直す (`dotfiles apply`・`setup --update` でも入る)
 - 版を変える・新しい版を見送るときは、次の「herdr の新しい版が出たとき」の手順で。新しい安定版が出たかは、
   `winget-versions` の notice か、`-Check` の ※ の行で分かる
 - 新しいマシンでは `setup --update` が入れる。依存の VCRedist が無いマシンでは、winget が入れるときに
-  Windows に UAC が出る
+  Windows に UAC が出る。`Install-Herdr` は `--installer-type` を名指ししない (manifest の依存 `Microsoft.VCRedist.2015+.x64` のインストーラーは burn
+  しか無く、winget は `--installer-type` を依存の解決にも効かせるので、名指しすると VCRedist の無い PC で `0x8A150104` で落ちる)
 - setup が入れて揃えるのは `dotfiles.wsl.windowsFiles.herdr.enable = true` のマシン (herdr-app と herdr-core も同じ値)。既定は設定
   グループで決まり、グループ all の win/ を配るマシンで true (minimum では使うホストが書く。[`nix/README.md` の「設定グループ」](../nix/README.md#設定グループ))。
   false のマシンでは `bootstrap-windows-herdr.sh`・`bootstrap-windows-herdr-app.sh` を飛ばし (setup の結果に `↷`)、新しい版の知らせ
@@ -2887,6 +2894,9 @@ portable の置き場所は ID ごとに分かれる (`%LOCALAPPDATA%\Microsoft\
 - どちらのパッケージも置き場所をユーザーの PATH に足すので、両方ある間は PATH で先の方の herdr が引かれる。
   後から入れた `Herdr.Herdr` は後ろに足されるので、Preview の herdr が引かれる (`-Check` の「PATH の herdr」が ⚠ になり、
   「Preview を外せば直る」と ※ の行に出る。2026-11-09 にこの PC で確かめた)
+- `WinGet\Links\herdr.exe` が Preview を指す symlink のままの PC (前に symlink ができた・手で置いた) では、`-Check` は symlink の
+  指す先を読み、「PATH の herdr」に `<Links のパス> → <Preview の herdr.exe> (Herdr.Herdr.Preview のもの)` と出して、同じく「Preview を外せば直る」と
+  添える (winget の portable のもの (`WinGet\Links` の symlink) とは読まない)
 - `Herdr.Herdr` を並べて入れると、winget は Preview を `Herdr.Herdr` として数える (`winget list` の Preview の行の Id が
   `Herdr.Herdr` になり、`winget list --id Herdr.Herdr.Preview --exact` では見つからない。winget v1.29.380)。
   そこで Preview は、winget が Preview の「アプリ」の項目 (ARP) に書いた product code で外す
@@ -2955,7 +2965,9 @@ portable の置き場所は ID ごとに分かれる (`%LOCALAPPDATA%\Microsoft\
 ### Install-Herdr.ps1 を書くときの注意
 
 - `dotfiles.ps1` と同じく **BOM 付きの UTF-8** で保存する
-- 副作用の無い関数 (版の読み方・並び・plan・winget の引数・PATH の解決・状態の表) は
+- 入口は道具の表 (`Get-HerdrTool`) と、前の `Herdr.Herdr.Preview` を見る custom の関数を持ち、流れは共通の枠
+  ([WingetPortable.ps1 を書くときの注意](#wingetportableps1-を書くときの注意))
+- 表の値・custom の関数 (Preview の置き場所・PATH の Preview の見分け・止める理由・表と締めの行に足す行) と、表を渡した流れは
   `herdr/Install-Herdr.Tests.ps1` で確かめる。Linux の pwsh で流すので Windows には触らない
   (このファイルは manifest に無いので配られない):
 
@@ -2963,6 +2975,8 @@ portable の置き場所は ID ごとに分かれる (`%LOCALAPPDATA%\Microsoft\
   nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/herdr/Install-Herdr.Tests.ps1
   ```
 
+- 締めの行の文言 (`→ Install-Herdr で入れる`・`→ Install-Herdr で揃える`・`→ ※ の手順で直す`・`Herdr.Herdr.Preview が残っている`・
+  `昇格した PowerShell では winget が herdr を入れない`) は `bootstrap-windows-herdr.sh` と runner が読む。変えるときは向こうも直す
 - winget やプロセスに触る部分は、実機で `-Check` と本番を打って確かめる
 
 ## herdr-app
@@ -3332,9 +3346,9 @@ WSL の setup は Nix の `wsl.windowsFiles.openssh.enable = true`)。グルー�
   ([winget の pin](#winget-の-pin)。試験が確かめる)
 - `Invoke-Winget` は、コンソールの文字コードが UTF-8 でなければ、winget を打つ間だけ UTF-8 にして読む (winget は管へ UTF-8 で書く)。UAC で昇格し直した
   子 (`-LogPath`) の窓と手で打った窓は CP932 で、そのまま読むと進み具合の帯 (█▒) が「笆遺毎」に化けて除けず、昇格した側の行 (`[管理者]`) に残った。
-  runner と WSL の wrapper は UTF-8 にしてから流すので替えない。winget を打つほかの ps1 (`Install-Sshd.ps1`・`Install-Herdr.ps1` と、winget の portable の
-  道具の共通の枠 `win/winget/WingetPortable.ps1` など 11 本) の `Invoke-Winget` も同じ本文にそろえてあり、`Install-OpenSSH.Tests.ps1` が突き合わせ、持つ
-  ps1 の数 (bootstrap と合わせて 12 本) も数える (直すときは全部を直す。winget を打つ ps1 を足したら、この本文を写して試験の数を直す。winget の
+  runner と WSL の wrapper は UTF-8 にしてから流すので替えない。winget を打つほかの ps1 (`Install-Sshd.ps1`・`Install-Tailscale.ps1` と、winget の portable の
+  道具の共通の枠 `win/winget/WingetPortable.ps1` など 8 本) の `Invoke-Winget` も同じ本文にそろえてあり、`Install-OpenSSH.Tests.ps1` が突き合わせ、持つ
+  ps1 の数 (bootstrap と合わせて 9 本) も数える (直すときは全部を直す。winget を打つ ps1 を足したら、この本文を写して試験の数を直す。winget の
   portable の道具は写さずに枠を使う)。昇格した側で winget が見つからないときの `Format-WingetMissingNote` も、
   bootstrap・`Install-OpenSSH.ps1`・`Install-Sshd.ps1` で同じ本文にそろえてあり、同じ試験が突き合わせる
 - `-Check` の終了コードと締めの文 (`Get-OpenSshExitCode`・`Get-OpenSshCheckMessage`) は、96 が読む。変えるときは
@@ -4710,13 +4724,14 @@ x64 と arm64) で入れ、版を `-Version` の既定値 (今は `2.1.330`) の
 
 | 打つもの | すること |
 | --- | --- |
-| `Install-ClaudeCode -Check` (PowerShell) | 差を出すだけ。揃っていれば終了コード 0、差があれば 1、入っていなければ 3 |
+| `Install-ClaudeCode -Check` (PowerShell) | 差を出すだけ。揃っていれば終了コード 0、差があれば 1、入っていなければ 3 (昇格した PowerShell で winget を打てなければ 1) |
 | `Install-ClaudeCode` (PowerShell) | 揃える (入れる・入れ替える (上げる・下げる)・pin を足す) |
 | `nix/scripts/bootstrap-windows-claude-code.sh` (WSL) | `setup --update` でも毎回走る (order 97)。入っていなければ入れ、版か pin がずれていれば揃える。揃わなければ ⚠ で囲んで知らせる (setup は止めない) |
 | `nix/scripts/bootstrap-windows-claude-code.sh --apply` (WSL) | WSL から揃える (確かめずに流す) |
 | `nix/scripts/check-winget-version.sh claude-code` (WSL・CI) | 固定した版を winget の版の一覧と比べる。GitHub Actions の `winget-versions` が週 1 回流し、新しい版が GitHub に出て 30 日たつと落ちて知らせる ([後述](#claude-code-の新しい版が出たとき)) |
 
-揃えるときにすることは [ntn](#ntn) と同じ (取得を確かめてから外して入れ、pin を足し、読み直す)。違うところ:
+揃えるときにすることは [ntn](#ntn) と同じ ([winget の portable の道具](#winget-の-portable-の道具) の共通の枠。取得を確かめてから外して入れ、
+pin を足し、読み直す。昇格した PowerShell では入れない)。違うところ:
 
 - 入れ替えるときに置き場所の `claude.exe` が動いている (Windows で Claude Code の会話を開いている) と、Windows が exe を lock するので、
   何も変えずに止まって PID とコマンドラインを出す (setup は ⚠ で知らせる)。会話を閉じてから `Install-ClaudeCode` か
@@ -4750,13 +4765,16 @@ setup が下げる。
 ### Install-ClaudeCode.ps1 を書くときの注意
 
 - `dotfiles.ps1` と同じく **BOM 付きの UTF-8** で保存する
-- 副作用の無い関数と、winget とプロセスを偽物に差し替えた流れは `claude-code/Install-ClaudeCode.Tests.ps1` で確かめる (Linux の pwsh):
+- 入口は道具の表 (`Get-ClaudeCodeTool`) と、自動更新の変数を見る custom の関数 (`Read-ClaudeCodeState`・`Format-ClaudeCodeNotes`) を持ち、流れは
+  共通の枠 ([WingetPortable.ps1 を書くときの注意](#wingetportableps1-を書くときの注意))
+- 表の値・custom の関数と、表を渡した流れは `claude-code/Install-ClaudeCode.Tests.ps1` で確かめる (Linux の pwsh):
 
   ```sh
   nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/claude-code/Install-ClaudeCode.Tests.ps1
   ```
 
-- 締めの行の文言は `bootstrap-windows-claude-code.sh` が読む。変えるときは向こうも直す
+- 締めの行の文言 (`→ Install-ClaudeCode で入れる`・`→ Install-ClaudeCode で揃える`・`→ ※ の手順で直す`・`昇格した PowerShell では winget が Claude Code を入れない`)
+  は `bootstrap-windows-claude-code.sh` と runner が読む。字は共通の枠が組む。変えるときは向こうも直す
 - winget やプロセスに触る本物の部分は、実機で `-Check` と本番を打って確かめる
 
 ## ghq・fzf
@@ -5158,8 +5176,8 @@ Windows の版とは揃えない)。
 | `dotfiles apply --steps codex` (PowerShell) | runner の手順で揃える (`windowsCodex` が on のホストだけ。入っていなければ入れ、版か pin か `codex` と打てる形か同梱の rg の PATH がずれていれば揃える。PATH のずれは知らせるだけ) |
 | `nix/scripts/check-winget-version.sh codex` (WSL・CI) | 固定した版を winget の版の一覧と比べる。GitHub Actions の `winget-versions` が週 1 回流し、新しい版が winget に載って 30 日たつと落ちて知らせる ([後述](#codex-cli-の新しい版が出たとき)) |
 
-揃えるときにすることは [ghq・fzf](#ghqfzf) と同じ (取得を確かめてから外して入れ、pin を足し、読み直す)。違うのは、`codex` と打てる形と同梱の rg を
-見ること (次の節)。
+揃えるときにすることは [ghq・fzf](#ghqfzf) と同じ ([winget の portable の道具](#winget-の-portable-の道具) の共通の枠。取得を確かめてから外して入れ、
+pin を足し、読み直す。昇格した PowerShell では入れない)。違うのは、`codex` と打てる形と同梱の rg を見ること (次の節)。
 
 ### codex と打てる形 (winget の symlink か hardlink)
 
@@ -5226,17 +5244,20 @@ winget-pkgs に載った日 (GitHub の release には winget に載らない版
 ### Install-Codex.ps1 を書くときの注意
 
 - `dotfiles.ps1` と同じく **BOM 付きの UTF-8** で保存する
-- 副作用の無い関数 (版の読み方・winget の版の読み方・symlink と hardlink の見分け・winget を打てるかの決め方・plan・winget の引数・同梱の rg の PATH・
-  状態の表・締めの行) と、winget・PATH・プロセスを偽物に差し替えた流れは `codex/Install-Codex.Tests.ps1` で確かめる。昇格して winget を打つ道を
-  足さない (試験が `RunAs` の無いことを確かめる)。Linux の pwsh で流す:
+- 入口は道具の表 (`Get-CodexTool`。置き場所の exe は CPU の名前で並べる) と、custom の関数 (`codex` と打てる形・同梱の rg・化けた `codex-path` の行・
+  1.29 以前の winget の見張り・winget の前後で `codex-path` の行を外す・足す) を持ち、流れは共通の枠
+  ([WingetPortable.ps1 を書くときの注意](#wingetportableps1-を書くときの注意))
+- 表の値・custom の関数 (symlink と hardlink の見分け・入れ直すかの決め方・古い winget の見張り・同梱の rg の PATH・化けた行・表と締めの行に足す行) と、
+  winget・PATH・プロセスを偽物に差し替えた流れは `codex/Install-Codex.Tests.ps1` で確かめる。昇格して winget を打つ道を足さない (試験が `RunAs` の
+  無いことを確かめる)。Linux の pwsh で流す:
 
   ```sh
   nix shell nixpkgs#powershell -c pwsh -NoProfile -File win/codex/Install-Codex.Tests.ps1
   ```
 
 - runner の `runner/src/steps/ps1.rs` は、終了コードと、状態の表の見出し (`Codex CLI (winget の OpenAI.Codex`) と、締めの行の文言
-  (`→ Install-Codex で入れる`・`→ Install-Codex で揃える`・`→ ※ の手順で直す`) と印 (`昇格した PowerShell では winget が codex を入れない`・`winget が古く、codex と打てる形を作れない`) で分かれる。変えるときは
-  向こうも直す (runner の試験が ps1 の字と突き合わせる)
+  (`→ Install-Codex で入れる`・`→ Install-Codex で揃える`・`→ ※ の手順で直す`) と印 (`昇格した PowerShell では winget が Codex CLI を入れない`・`winget が古く、codex と打てる形を作れない`) で分かれる。変えるときは
+  向こうも直す (runner の試験が、入口と共通の枠の字を突き合わせる)
 - winget・token (昇格の見分け)・PATH・プロセスに触る本物の部分は、実機で `-Check` と本番を打って確かめる
 
 ## sshd

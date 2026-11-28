@@ -15,10 +15,12 @@
 #   - pwsh.exe が無い・失敗する・こちらの出力を返さないときは、手で打つコマンドを出して exit 0
 #   - -Check が 0 なら 1 行だけ。1 なら ⚠ で囲んだ注意・状態・揃えるコマンドを出す
 #   - -Check が 1 で、締めの行が Herdr.Herdr.Preview が残っていることだけなら、⚠ の枠の見出しと直し方を
-#     Preview を外す手順にする (揃えるコマンドは出さない)。版・pin・PATH の差もあれば両方を出す
+#     Preview を外す手順にする (揃えるコマンドは出さない)。版・pin の差もあれば両方を出す
+#   - -Check が 1 で、締めの行が PATH のずれ (「→ ※ の手順で直す」) だけなら、⚠ の枠の見出しと直し方を PATH のずれにする (揃える
+#     コマンドは出さない)。昇格した会話で ps1 が winget を打たずに止まった (締めの行が昇格の 1 行) なら、昇格していない端末で流し直す手
 #   - -Check が 3 (入っていない) なら -IfMissing で入れる。入れられなければ ⚠ で囲んで知らせる。
 #     Preview が残っていても並べて入れ、入ったら Preview を外す手順を ⚠ で囲んで出す。入れられなかったときは
-#     Preview を外す手順を出さない (外すと herdr が無くなる)
+#     Preview を外す手順を出さない (外すと herdr が無くなる)。入れた後に残ったのが PATH のずれだけなら、入れた扱いにして直し方を出す
 #   - どれも exit 0。--apply は -Check を付けずに流し、失敗なら exit 1。端末でなければ色を付けない
 #   - setup から走るとき (DOTFILES_SETUP_WARNINGS がある) は、⚠ の見出しと揃えるコマンド・Preview を外す手順
 #     (確かめられないときは手で打つコマンド) を setup の最後のまとめ用のファイルにも残す
@@ -63,7 +65,7 @@ check_out="herdr (winget の Herdr.Herdr、${pkg})
   固定した版      : ${v} → そのまま
   winget の最新版 : ${v}
 ⚠ winget pin      : 無し → 足す
-  PATH の herdr   : winget のもの
+  PATH の herdr   : winget の portable のもの (置き場所)
 ⚠️ 固定した版と揃っていない → Install-Herdr で揃える ⚠️"
 
 # Install-Herdr.ps1 -Check の出力 (入っていないとき)
@@ -85,10 +87,10 @@ herdr (winget の Herdr.Herdr、${pkg})
   固定した版      : ${v} → そのまま
   winget の最新版 : ${v}
   winget pin      : あり
-  PATH の herdr   : winget のもの
+  PATH の herdr   : winget の portable のもの (置き場所)
 揃った"
 
-# Install-Herdr.ps1 の締めの行のうち、Herdr.Herdr.Preview を外す手順 (Format-HerdrVerdict)。$1 は見出しの「→ 」の後ろ
+# Install-Herdr.ps1 の締めの行のうち、Herdr.Herdr.Preview を外す手順 (Format-HerdrPreviewVerdict)。$1 は見出しの「→ 」の後ろ
 preview_verdict() {
   printf '%s\n' \
     "⚠️ Herdr.Herdr.Preview が残っている → $1次の手順で外す (Install-Herdr は外さない) ⚠️" \
@@ -106,19 +108,49 @@ preview_out="herdr (winget の Herdr.Herdr、${pkg})
   winget pin      : あり
 ⚠ PATH の herdr   : ${preview_pkg}\\herdr.exe (Herdr.Herdr.Preview のもの)
 ⚠ 前の Preview    : Herdr.Herdr.Preview が残っている → 外す
-※ PATH で先に引かれる herdr は Herdr.Herdr.Preview のもの。Preview を外せば直る (外すと置き場所が消え、ユーザーの PATH に残る行は飛ばされる)
+※ PATH で先に引かれる herdr は Herdr.Herdr.Preview のもの。Preview を外せば直る (外すと置き場所と、WinGet\\Links の Preview の symlink (あれば) が消え、ユーザーの PATH に残る行は飛ばされる)
 $(preview_verdict '')"
 
-# Install-Herdr.ps1 -Check の出力 (pin が無く、Herdr.Herdr.Preview も残っている。締めの行は Preview を先に出す)
+# Install-Herdr.ps1 -Check の出力 (pin が無く、Herdr.Herdr.Preview も残っている。締めの行は揃える行の後に Preview を外す手順)
 preview_drift_out="herdr (winget の Herdr.Herdr、${pkg})
   入っている版    : ${v}
   固定した版      : ${v} → そのまま
   winget の最新版 : ${v}
 ⚠ winget pin      : 無し → 足す
-  PATH の herdr   : winget のもの
+  PATH の herdr   : winget の portable のもの (置き場所)
 ⚠ 前の Preview    : Herdr.Herdr.Preview が残っている → 外す
-$(preview_verdict '')
-⚠️ 固定した版と揃っていない → Install-Herdr で揃える ⚠️"
+⚠️ 固定した版と揃っていない → Install-Herdr で揃える ⚠️
+$(preview_verdict '')"
+
+# Install-Herdr.ps1 -Check の出力 (版と pin は揃っていて、PATH で herdr update の herdr が先に引かれる。揃える手順では直らない)
+path_out="herdr (winget の Herdr.Herdr、${pkg})
+  入っている版    : ${v}
+  固定した版      : ${v} → そのまま
+  winget の最新版 : ${v}
+  winget pin      : あり
+⚠ PATH の herdr   : C:\\Users\\u\\.herdr\\bin\\herdr.exe (winget の portable のものではない)
+※ PATH のずれは Install-Herdr では直らない。C:\\Users\\u\\.herdr\\bin をユーザーの PATH から外す (herdr update で入ったもの。外し方は win/README.md の「herdr を入れる」)
+⚠️ PATH の herdr が winget の portable のものではない → ※ の手順で直す ⚠️"
+
+# Install-Herdr.ps1 -Check の出力 (昇格した会話で、入っていない。共通の枠は winget を打たずに止まり、入っていなくても 1 を返す)
+elevated_out="herdr (winget の Herdr.Herdr、${pkg})
+  入っている版    : 入っていない
+⚠ 固定した版      : ${v} → 入れる
+  winget の最新版 : ${v}
+⚠ winget pin      : 無し → 足す
+  PATH の herdr   : 見つからない
+⚠ 昇格した PowerShell では winget が herdr を入れない (winget 1.30.310 は、昇格した会話から user スコープの portable を入れる・外すのを断る)。Install-Herdr は winget を打たない
+※ 昇格していない PowerShell (デスクトップの普通の端末) で Install-Herdr を打ち直す (win/README.md の「winget の portable の道具」)
+⚠️ 昇格した PowerShell では winget が herdr を入れない (winget 1.30 から) → ※ の手順で直す ⚠️"
+
+# Install-Herdr.ps1 -IfMissing が入れ終えたが、PATH で herdr update の herdr が先に引かれるときの出力 (終了コード 1)
+installed_path_out="winget install --id Herdr.Herdr --exact --source winget --silent --accept-source-agreements --disable-interactivity --version ${v} --accept-package-agreements
+  Successfully installed
+winget pin を足した (winget upgrade --all から外れる)
+
+$(sed -n '1,7p' <<<"${path_out}")
+Herdr.Herdr は揃った
+⚠️ PATH の herdr が winget の portable のものではない → ※ の手順で直す ⚠️"
 
 # Install-Herdr.ps1 -Check の出力 (Herdr.Herdr が入っておらず、Herdr.Herdr.Preview だけがある。Preview から移る前の PC)。
 # 入る前は、PATH で Preview の herdr が引かれても ⚠ にせず、「Preview を外せば直る」とも出さない
@@ -489,7 +521,7 @@ else
   ng "Preview だけが残っている" "rc=$(rc "${h}") calls=$(calls "${h}") $(outerr "${h}")"
 fi
 
-# 22. 版・pin・PATH の差もあり、Preview も残っている (-Check が 1): 見出しは揃っていないことにし、Preview を外す手順と
+# 22. 版・pin の差もあり、Preview も残っている (-Check が 1): 見出しは揃っていないことにし、Preview を外す手順と
 #     揃えるコマンドを両方出す。Preview を先に出す (Install-Herdr は Preview が残っている間は入れ替えない)
 h=$(new_home t22 "${state_on}" 1)
 FAKE_PWSH_RC=1 FAKE_PWSH_OUT="${preview_drift_out}" run "${h}" 0
@@ -548,6 +580,44 @@ if [[ $(rc "${h}") == 0 ]] && seen "${h}" '入れられませんでした' && se
   ok "Herdr.Herdr を入れられなければ、入れられなかったと知らせ、Preview を外す手順も外せと読める行も出さない"
 else
   ng "入れられず Preview が残る" "rc=$(rc "${h}") $(outerr "${h}")"
+fi
+
+# 26. PATH で herdr update の herdr が先に引かれるだけ (-Check が 1、締めの行が「※ の手順で直す」): 見出しと直し方を PATH のずれにし、
+#     揃えるコマンドは出さない (Install-Herdr では直らない)
+h=$(new_home t26 "${state_on}" 1)
+DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_PWSH_RC=1 FAKE_PWSH_OUT="${path_out}" run "${h}" 0
+if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 1 ]] && seen "${h}" -F '⚠️  Windows の herdr の PATH で引かれる herdr が winget のものではありません' \
+  && seen "${h}" -F '揃える手順では直らない' && seen "${h}" -F 'herdr update で入ったもの' \
+  && ! seen "${h}" -F -- 'bootstrap-windows-herdr.sh --apply' && ! seen "${h}" '揃っていません' \
+  && [[ $(head -n 1 "${h}/warnings" 2>/dev/null) == 'Windows の herdr の PATH で引かれる herdr が winget のものではありません' ]]; then
+  ok "PATH のずれだけなら、見出しと直し方を PATH のずれにし、揃えるコマンドは出さない"
+else
+  ng "PATH のずれだけ" "rc=$(rc "${h}") calls=$(calls "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null) $(outerr "${h}")"
+fi
+
+# 27. 昇格した会話 (-Check が 1、締めの行が昇格の 1 行): 入れも揃えもせず、昇格していない端末で流し直す手を ⚠ で知らせる
+h=$(new_home t27 "${state_on}" 1)
+DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_PWSH_RC=1 FAKE_PWSH_OUT="${elevated_out}" run "${h}" 0
+if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 1 ]] && seen "${h}" -F '昇格していない端末から開いた WSL で setup --update を流し直す' \
+  && ! seen "${h}" -F -- 'bootstrap-windows-herdr.sh --apply' && ! seen "${h}" '揃っていません' \
+  && [[ $(head -n 1 "${h}/warnings" 2>/dev/null) == *'(昇格した会話)' ]]; then
+  ok "昇格した会話なら入れも揃えもせず、昇格していない端末で流し直す手を ⚠ で知らせる"
+else
+  ng "昇格した会話" "rc=$(rc "${h}") calls=$(calls "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null) $(outerr "${h}")"
+fi
+
+# 28. 入っていない (-Check が 3) ので入れたが、PATH で herdr update の herdr が先に引かれる (-IfMissing が 1): 入れた扱いにし、
+#     PATH のずれの直し方を ⚠ で囲んで出す
+h=$(new_home t28 "${state_on}" 1)
+DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_PWSH_RC=3 FAKE_PWSH_OUT="${missing_out}" \
+  FAKE_PWSH_RC2=1 FAKE_PWSH_OUT2="${installed_path_out}" run "${h}" 0
+if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 2 ]] && called_last "${h}" -- '-IfMissing' && seen "${h}" '入れました' \
+  && seen "${h}" -F '⚠️  Windows の herdr の PATH で引かれる herdr が winget のものではありません' \
+  && ! seen "${h}" '入れられませんでした' \
+  && [[ $(head -n 1 "${h}/warnings" 2>/dev/null) == 'Windows の herdr の PATH で引かれる herdr が winget のものではありません' ]]; then
+  ok "入れた後に残ったのが PATH のずれだけなら、入れた扱いにして PATH の直し方を ⚠ で囲んで出す"
+else
+  ng "入れた後の PATH のずれ" "rc=$(rc "${h}") calls=$(calls "${h}") $(outerr "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null)"
 fi
 
 # 16. 知らない引数: exit 2

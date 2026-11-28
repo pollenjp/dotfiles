@@ -49,7 +49,7 @@ BOM 付きの UTF-8 で保存すること (Windows PowerShell 5.1 は BOM の無
   BusyName         「… が N 個動いている」の主語。既定 ExeName
   BusyFix          「入れ替えるには、…」の続き。既定 '動いている <CommandName> を終わらせる'
   PathOtherFix     PATH でほかのものが先に引かれるときの直し方 ({0} はそのディレクトリ、{1} はファイルの名前)
-  PathNoneFix      入っているのに PATH で見つからないときの直し方
+  PathNoneFix      入っているのに PATH で見つからないときの直し方 ({0} は置き場所)
   PathTexts        PATH の行の字 (links・package と、PathKind の custom の種類。{0} は PATH で引かれるもの)。既定に重ねる
   Synced           揃えた後に「… は揃った」と言う主語。既定 '版と pin'
   Retry            install が落ちたときの「(… でも入る)」。既定 'dotfiles apply'
@@ -483,7 +483,7 @@ function Format-PortableState {
             $fix = if ($State.PathLinkTarget) { "$dir の $leaf は $($State.PathLinkTarget) を指す (ほかのパッケージの symlink)。指す先を入れたパッケージを winget uninstall で外すか、その symlink を消す (win/README.md の「$($Tool.Readme)」)" } else { $Tool.PathOtherFix -f $dir, $leaf }
             [pscustomobject]@{ Text = "※ PATH のずれは $($Tool.Command) では直らない。$fix"; Warn = $false }
         } elseif (($State.PathKind -eq 'none') -and ($State.Plan -notin @('install', 'relink'))) {
-            [pscustomobject]@{ Text = "※ $($Tool.PathNoneFix)"; Warn = $false }
+            [pscustomobject]@{ Text = "※ $($Tool.PathNoneFix -f $Tool.PackageDir)"; Warn = $false }
         }
     }
     if (($State.Plan -in @('change', 'relink')) -and ($State.BusyCount -gt 0)) {
