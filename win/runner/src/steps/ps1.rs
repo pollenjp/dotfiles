@@ -18,7 +18,8 @@
 //! 写し (`sshd_allow`。ホストの値の `[sshd] allowUsers`・`allowFrom`) を置く。
 //!
 //! Windows にしか無い手順 (winget・t3-code・claude-desktop・ghq・fzf・starship・codex。`windows_only`) は WSL の wrapper を持たないので、判断は同じ型の Policy で
-//! 決め、ps1 の締めの行の文言と出力の印は試験が ps1 の字と突き合わせる。winget の portable の道具 (ntn・ghq・fzf・starship) の ps1 は、締めの行と見張りの行を
+//! 決め、ps1 の締めの行の文言と出力の印は試験が ps1 の字と突き合わせる。winget の portable の道具 (claude-code・herdr・ntn・ghq・fzf・starship・codex) の ps1 は、
+//! 締めの行と見張りの行を
 //! 共通の枠 (`win/winget/WingetPortable.ps1`) が組むので、試験は枠の字に道具の表の値を入れてから突き合わせる。枠は、昇格した会話 (winget 1.30 以降) では
 //! winget を打たずに止まり、入っていなくても 1 を返す (締めの行は「→ ※ の手順で直す」だけ)。その印 ([`elevated_fix!`]) で直し方を出す
 //! (dotfiles-private の docs/adr/122_win_winget_portable_frame_*)。
@@ -492,7 +493,7 @@ pub const SPECS: &[Ps1Spec] = &[
         sshd_keys: false,
         one_password: false,
         missing_blocked: None,
-        output_fixes: &[],
+        output_fixes: &[elevated_fix!("Claude Code", "claude-code")],
         install_notice: None,
         sync_notice: None,
         check_hang: None,
@@ -564,7 +565,7 @@ pub const SPECS: &[Ps1Spec] = &[
         sshd_keys: false,
         one_password: false,
         missing_blocked: None,
-        output_fixes: &[],
+        output_fixes: &[elevated_fix!("herdr", "herdr")],
         install_notice: None,
         sync_notice: None,
         check_hang: None,
@@ -1030,10 +1031,7 @@ pub const SPECS: &[Ps1Spec] = &[
         one_password: false,
         missing_blocked: None,
         output_fixes: &[
-            (
-                "昇格した PowerShell では winget が codex を入れない",
-                "winget 1.30 は、昇格した会話 (UAC で昇格した PowerShell・管理者として実行した端末) から user スコープの portable を入れる・外すのを断る。昇格していない PowerShell (デスクトップの普通の端末) で dotfiles apply --steps codex を流し直す (win/README.md の「Codex CLI」)",
-            ),
+            elevated_fix!("Codex CLI", "codex"),
             (
                 "winget が古く、codex と打てる形を作れない",
                 "winget が 1.29 以前で開発者モードも off なので、入れても codex と打てない (winget は symlink を作れず、1.30 からの codex.exe の hardlink も作らない)。dotfiles apply --steps winget,codex を流して winget を固定した版 (1.30 以降) に上げるか、開発者モードを on にして (設定 > システム > 開発者向け。管理者が要る)、dotfiles apply --steps codex を流し直す (win/README.md の「winget」「Codex CLI」)",
@@ -1056,6 +1054,9 @@ const HERDR_PREVIEW_FIX: &[&str] = &[
     "  3. 続けて winget pin remove --id Herdr.Herdr.Preview --exact を打つ (Preview の pin を外す)",
     "  4. 新しい PowerShell から herdr を起動し直す",
 ];
+
+/// herdr の PATH のずれ (herdr update で入った herdr が先に引かれるなど) の直し方。Install-Herdr でも runner でも直らない
+const HERDR_PATH_FIX: &str = "PATH のずれは揃える手順では直らない。上の ※ の行の手順で直す (win/README.md の「herdr を入れる」)";
 
 /// ps1 の締めの行から読んだ、直すこと。
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -1683,19 +1684,19 @@ impl Ps1Step {
     /// 知らせるだけの行
     fn warn(&self, host: &HostValues, plan: Plan, v: Verdict, lines: &[String]) -> Vec<Outcome> {
         let s = self.0;
+        // 出力の印 (fzf の「MSI の fzf (machine スコープ) が入っている」・winget の portable の道具の「昇格した PowerShell では winget が … を
+        // 入れない」) に当たれば、その印を見出しにして直し方を出す
+        let marker = s
+            .output_fixes
+            .iter()
+            .find(|(m, _)| lines.iter().any(|l| l.contains(m)))
+            .map(|(m, _)| *m);
+        let marked = |m: &str| format!("{m} ({} -Check の ※ の行。runner は直さない)", s.command);
         match plan {
             Plan::PathOnly => {
-                // 出力の印 (fzf の「MSI の fzf (machine スコープ) が入っている」) に当たれば、その印を見出しにして直し方を出す。
-                // 無ければ PATH のずれの見出しと manual_fix
-                let text = match s
-                    .output_fixes
-                    .iter()
-                    .find(|(m, _)| lines.iter().any(|l| l.contains(m)))
-                {
-                    Some((marker, _)) => format!(
-                        "{marker} ({} -Check の ※ の行。runner は直さない)",
-                        s.command
-                    ),
+                // 印が無ければ PATH のずれの見出しと manual_fix
+                let text = match marker {
+                    Some(m) => marked(m),
                     None => format!(
                         "PATH で引かれるものが winget のものではない ({} -Check の ※ の行)",
                         s.command
@@ -1707,13 +1708,32 @@ impl Ps1Step {
                 }
                 vec![o]
             }
-            Plan::HerdrWarn if v.preview && !v.sync => {
-                let mut o = Outcome::new(
-                    Kind::Manual,
-                    "前の herdr (Herdr.Herdr.Preview) が残っている",
-                );
-                for n in HERDR_PREVIEW_FIX {
-                    o = o.note(*n);
+            // herdr で、締めの行に「→ Install-Herdr で揃える・入れる」が無い: 見張り (昇格した会話)・前の Preview・PATH のずれ。どれも
+            // Install-Herdr でも runner でも直らない (人が ※ の手順で直す)
+            Plan::HerdrWarn if !v.sync && (marker.is_some() || v.preview || v.path) => {
+                if let Some(m) = marker {
+                    let mut o = Outcome::new(Kind::Manual, marked(m));
+                    for n in self.fixes(host, lines, &[]) {
+                        o = o.note(n);
+                    }
+                    return vec![o];
+                }
+                let text = if v.preview {
+                    "前の herdr (Herdr.Herdr.Preview) が残っている".to_string()
+                } else {
+                    format!(
+                        "PATH で引かれるものが winget のものではない ({} -Check の ※ の行)",
+                        s.command
+                    )
+                };
+                let mut o = Outcome::new(Kind::Manual, text);
+                if v.preview {
+                    for n in HERDR_PREVIEW_FIX {
+                        o = o.note(*n);
+                    }
+                }
+                if v.path {
+                    o = o.note(HERDR_PATH_FIX);
                 }
                 vec![o]
             }
@@ -1729,6 +1749,9 @@ impl Ps1Step {
                 }
                 for n in self.fixes(host, lines, s.manual_fix) {
                     o = o.note(n);
+                }
+                if plan == Plan::HerdrWarn && v.path {
+                    o = o.note(HERDR_PATH_FIX);
                 }
                 vec![o]
             }
@@ -1791,12 +1814,13 @@ impl Ps1Step {
             return vec![o];
         }
         let code = r.code();
-        // herdr: Preview が残っていると -IfMissing は 1 を返す。締めの行が Preview のことだけなら入った扱い
-        let herdr_preview_only =
-            s.policy == Policy::Herdr && code == Some(1) && v.preview && !v.sync;
+        // herdr: Preview が残っている・PATH で別の herdr が先に引かれると -IfMissing は 1 を返す。締めの行がそれだけ (「→ Install-Herdr で
+        // 揃える・入れる」が無い) なら入った扱いにして、残りを知らせる
+        let herdr_rest_only =
+            s.policy == Policy::Herdr && code == Some(1) && !v.sync && (v.preview || v.path);
         // 1 のわけが人の切り替える設定 (`alerts`) だけなら入った扱い (claude-desktop の、まだ開いていない Claude のシステムトレイは既定で on)
         let alerts_only = code == Some(1) && self.alerts_only(&r.output);
-        if code == Some(0) || herdr_preview_only || alerts_only {
+        if code == Some(0) || herdr_rest_only || alerts_only {
             if relay_only {
                 ctx.say(RELAY_SYNCED);
             } else {
@@ -1809,7 +1833,7 @@ impl Ps1Step {
                 }
             }
             let mut out = vec![Outcome::new(Kind::Ok, format!("{did}た"))];
-            if herdr_preview_only {
+            if herdr_rest_only && v.preview {
                 let mut o = Outcome::new(
                     Kind::Manual,
                     "前の herdr (Herdr.Herdr.Preview) が残っている",
@@ -1818,6 +1842,18 @@ impl Ps1Step {
                     o = o.note(*n);
                 }
                 out.push(o);
+            }
+            if herdr_rest_only && v.path {
+                out.push(
+                    Outcome::new(
+                        Kind::Manual,
+                        format!(
+                            "PATH で引かれるものが winget のものではない ({} -Check の ※ の行)",
+                            s.command
+                        ),
+                    )
+                    .note(HERDR_PATH_FIX),
+                );
             }
             out.extend(self.alert_outcomes(&r.output));
             return out;
@@ -2283,10 +2319,13 @@ mod tests {
     #[test]
     fn portable_tools_report_an_elevated_session_without_installing() {
         for (id, name, command) in [
+            ("claude-code", "Claude Code", "Install-ClaudeCode"),
+            ("herdr", "herdr", "Install-Herdr"),
             ("ntn", "ntn", "Install-Ntn"),
             ("ghq", "ghq", "Install-Ghq"),
             ("fzf", "fzf", "Install-Fzf"),
             ("starship", "starship", "Install-Starship"),
+            ("codex", "Codex CLI", "Install-Codex"),
         ] {
             let s = spec(id);
             let elevated = (
@@ -2419,10 +2458,10 @@ mod tests {
             (
                 vec![
                     header_line(s),
-                    "⚠ 昇格した PowerShell では winget が codex を入れない (winget 1.30.310 は、昇格した会話から user スコープの portable を入れる・外すのを断る)。Install-Codex は winget を打たない".into(),
-                    "⚠️ 昇格した PowerShell では winget が codex を入れない (winget 1.30 から) → ※ の手順で直す ⚠️".into(),
+                    "⚠ 昇格した PowerShell では winget が Codex CLI を入れない (winget 1.30.310 は、昇格した会話から user スコープの portable を入れる・外すのを断る)。Install-Codex は winget を打たない".into(),
+                    "⚠️ 昇格した PowerShell では winget が Codex CLI を入れない (winget 1.30 から) → ※ の手順で直す ⚠️".into(),
                 ],
-                "昇格した PowerShell では winget が codex を入れない (Install-Codex -Check の ※ の行。runner は直さない)",
+                "昇格した PowerShell では winget が Codex CLI を入れない (Install-Codex -Check の ※ の行。runner は直さない)",
                 "昇格していない PowerShell",
             ),
             (
@@ -2645,7 +2684,18 @@ mod tests {
             .filter(|s| script_text(&repo, s.script).1)
             .map(|s| s.id)
             .collect();
-        assert_eq!(framed, vec!["ntn", "ghq", "fzf", "starship"]);
+        assert_eq!(
+            framed,
+            vec![
+                "claude-code",
+                "herdr",
+                "ntn",
+                "ghq",
+                "fzf",
+                "starship",
+                "codex"
+            ]
+        );
         for s in SPECS
             .iter()
             .filter(|s| s.windows_only || framed.contains(&s.id))
@@ -3846,11 +3896,68 @@ mod tests {
         assert_eq!(ends(&calls), vec!["-Check", "-IfMissing"]);
         assert!(out.contains("Windows に herdr を入れました。"));
         // 3 → -IfMissing が差で 1 なら入れられなかった (Preview を外す手順は出さない)
-        let sys4 = sys((3, vec![header_line(s)]), (1, vec![sync]));
+        let sys4 = sys((3, vec![header_line(s)]), (1, vec![sync.clone()]));
         let (o, _, _) = run("herdr", &sys4, APPLY);
         assert_eq!(o.len(), 1);
         assert_eq!(o[0].kind, Kind::Failed);
         assert!(!o[0].notes.iter().any(|n| n.contains("Preview")));
+    }
+
+    /// herdr: PATH で別の herdr (herdr update で入ったもの) が先に引かれるのは、Install-Herdr でも runner でも直らない (締めの行は
+    /// 「→ ※ の手順で直す」)。PATH のずれとして知らせ、「固定した版と揃っていない」とは言わない。入れた後に残ったのが PATH のずれだけなら入った扱い。
+    /// 開発者モードが on の PC (WinGet\Links の symlink) は ps1 が揃っていると読む (0)
+    #[test]
+    fn herdr_reports_path_drift_apart_from_version_drift() {
+        let s = spec("herdr");
+        let path =
+            "⚠️ PATH の herdr が winget の portable のものではない → ※ の手順で直す ⚠️".to_string();
+        let preview = "⚠️ Herdr.Herdr.Preview が残っている → 外す ⚠️".to_string();
+        let sync = "⚠️ 固定した版と揃っていない → Install-Herdr で揃える ⚠️".to_string();
+        for mode in [Mode::Check, APPLY] {
+            let sys1 = sys((1, vec![header_line(s), path.clone()]), (0, vec![]));
+            let (o, _, calls) = run("herdr", &sys1, mode);
+            assert_eq!(o.len(), 1);
+            assert_eq!(o[0].kind, Kind::Manual);
+            assert_eq!(
+                o[0].text,
+                "PATH で引かれるものが winget のものではない (Install-Herdr -Check の ※ の行)"
+            );
+            assert_eq!(o[0].notes, vec![HERDR_PATH_FIX.to_string()]);
+            assert_eq!(ends(&calls), vec!["-Check"]);
+        }
+        // Preview と PATH のずれ: Preview の見出しで、両方の直し方
+        let sys2 = sys(
+            (1, vec![header_line(s), preview.clone(), path.clone()]),
+            (0, vec![]),
+        );
+        let (o, _, _) = run("herdr", &sys2, APPLY);
+        assert_eq!(o[0].text, "前の herdr (Herdr.Herdr.Preview) が残っている");
+        assert!(
+            o[0].notes
+                .iter()
+                .any(|n| n.contains("Herdr.Herdr.Preview を外すには"))
+        );
+        assert_eq!(o[0].notes.last().map(String::as_str), Some(HERDR_PATH_FIX));
+        // 版の差と PATH のずれ: 「固定した版と揃っていない」に PATH の直し方を添える
+        let sys3 = sys(
+            (1, vec![header_line(s), sync.clone(), path.clone()]),
+            (0, vec![]),
+        );
+        let (o, _, _) = run("herdr", &sys3, APPLY);
+        assert!(o[0].text.contains("固定した版と揃っていない"));
+        assert_eq!(o[0].notes.last().map(String::as_str), Some(HERDR_PATH_FIX));
+        // 3 → -IfMissing が PATH のずれだけで 1 なら入った扱いにし、PATH のずれを知らせる
+        let sys4 = sys((3, vec![header_line(s)]), (1, vec![path]));
+        let (o, out, calls) = run("herdr", &sys4, APPLY);
+        assert_eq!(o[0], Outcome::new(Kind::Ok, "入れた"));
+        assert_eq!(o.len(), 2);
+        assert_eq!(o[1].kind, Kind::Manual);
+        assert!(
+            o[1].text
+                .contains("PATH で引かれるものが winget のものではない")
+        );
+        assert_eq!(ends(&calls), vec!["-Check", "-IfMissing"]);
+        assert!(out.contains("Windows に herdr を入れました。"));
     }
 
     /// openssh: 1Password の SSH agent を使わないホスト (道具の switch onePassword が off。minimum の既定) では、-Check にも入れる流れにも

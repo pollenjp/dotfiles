@@ -27,9 +27,11 @@
 # 2. pwsh.exe で Install-ClaudeCode.ps1 -Check を流す (何も変えない)。WSL の interop を通るので、落ちていたら手で打つ
 #    コマンドを出して飛ばす (exit 0)
 # 3. 終了コード 0 なら 1 行だけ出す。3 (入っていない) なら Install-ClaudeCode.ps1 -IfMissing で入れる。1 で -Check の締めの行
-#    (Install-ClaudeCode.ps1 の Format-ClaudeCodeVerdict) が「→ Install-ClaudeCode で揃える」なら、引数なしで流して揃える (入れ替えが要るのに
-#    Windows の Claude Code が動いていれば、ps1 が何も変えずに止まる)。締めの行が「→ ※ の手順で直す」だけ (PATH のずれ) なら、揃えずに
-#    ⚠ で囲んで知らせる。揃わなければ ⚠ で囲んだ注意と出力と直し方を出す。どれも exit 0 (setup を止めない)。
+#    (winget の portable の道具の共通の枠 win/winget/WingetPortable.ps1 の Format-PortableVerdict) が「→ Install-ClaudeCode で揃える」なら、
+#    引数なしで流して揃える (入れ替えが要るのに Windows の Claude Code が動いていれば、ps1 が何も変えずに止まる)。締めの行が「→ ※ の手順で直す」
+#    だけ (PATH のずれ) なら、揃えずに ⚠ で囲んで知らせる。昇格した会話 (winget 1.30 以降は、昇格した会話からの user スコープの portable を
+#    断る) で ps1 が winget を打たずに止まった (締めの行「昇格した PowerShell では winget が Claude Code を入れない」。入っていなくても 1) なら、
+#    昇格していない端末で流し直す手を ⚠ で知らせる。揃わなければ ⚠ で囲んだ注意と出力と直し方を出す。どれも exit 0 (setup を止めない)。
 #    ⚠ の見出しと直し方は、setup の最後の「警告のまとめ」にも残す (summary_warn)
 #
 # --apply を付けて手で流すと、-Check を付けずに流して揃える。
@@ -162,6 +164,11 @@ fix_sync=(
 fix_path=(
   "PATH のずれは揃える手順では直らない。上の ※ の行の手順で直す (win/README.md の「Claude Code」)"
 )
+# 直し方。昇格した会話 (winget 1.30 以降は、昇格した会話から user スコープの portable を入れる・外すのを断る)
+fix_elevated=(
+  "winget 1.30 は、昇格した会話 (管理者として実行した端末から開いた WSL も) から user スコープの portable を入れる・外すのを断る。"
+  "昇格していない端末から開いた WSL で setup --update を流し直すか、昇格していない PowerShell で Install-ClaudeCode を打つ (win/README.md の「winget の portable の道具」)"
+)
 
 # ⚠ で囲んだ注意を出す。$1: 見出し、$2: 枠に入れる出力 (状態の表など。空なら何も入れない)、
 # 残り: 直し方の行 (1 つが 1 行)
@@ -186,14 +193,16 @@ warn_frame() {
   summary_warn "${title}" "$@"
 }
 
-# Install-ClaudeCode.ps1 の締めの行 (Format-ClaudeCodeVerdict) から、直すことを読む。$1: pwsh.exe の出力
-#   needs_install: 入っていない (Install-ClaudeCode で入れる)
-#   needs_sync:    版か pin の差がある (Install-ClaudeCode で揃える)
-#   needs_path:    PATH のずれがある (揃える手順では直らない)
+# Install-ClaudeCode.ps1 の締めの行 (共通の枠の Format-PortableVerdict) から、直すことを読む。$1: pwsh.exe の出力
+#   needs_install:  入っていない (Install-ClaudeCode で入れる)
+#   needs_sync:     版か pin の差がある (Install-ClaudeCode で揃える)
+#   needs_path:     PATH のずれがある (揃える手順では直らない)
+#   needs_elevated: 昇格した会話なので、ps1 が winget を打たずに止まった (締めの行は「→ ※ の手順で直す」だけ)
 read_verdict() {
   needs_install=0
   needs_sync=0
   needs_path=0
+  needs_elevated=0
   if grep -qF '→ Install-ClaudeCode で入れる' <<<"$1"; then
     needs_install=1
   fi
@@ -202,6 +211,9 @@ read_verdict() {
   fi
   if grep -qF '→ ※ の手順で直す' <<<"$1"; then
     needs_path=1
+  fi
+  if grep -qF '昇格した PowerShell では winget が Claude Code を入れない' <<<"$1"; then
+    needs_elevated=1
   fi
 }
 
@@ -274,6 +286,11 @@ if ((rc == 3 && header)); then
 fi
 if ((rc == 1 && header)); then
   read_verdict "${captured}"
+  # 昇格した会話では、ps1 は入れも揃えもしない (入っていなくても 1)。流し直す端末を知らせる
+  if ((needs_elevated)); then
+    warn_frame "Windows の Claude Code を winget で入れ・揃えられません (昇格した会話)" "${captured}" "${fix_elevated[@]}"
+    exit 0
+  fi
   if ((needs_sync)); then
     echo "Windows の Claude Code が固定した版と揃っていないので、揃えます (Install-ClaudeCode.ps1。${apply_timeout} 秒まで待ちます)。"
     rc=0

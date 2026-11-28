@@ -21,8 +21,9 @@ dst = "%USERPROFILE%/.config/powershell/dotfiles.ps1"
 hint = "開いている PowerShell は . $PROFILE で読み直す ($PROFILE への読み込みの 1 行は、WSL の setup の bootstrap-windows-powershell-profile.sh か、受け持ちを切り替えたホストでは runner の powershell-profile が足す)"
 runnerHint = "開いている PowerShell は . $PROFILE で読み直す ($PROFILE への読み込みの 1 行は、同じ dotfiles apply の手順 powershell-profile が足す)"
 
-# winget の portable の道具 (下の Install-Fzf.ps1・Install-Ghq.ps1・Install-Starship.ps1・Install-Ntn.ps1) の共通の枠。配った入口は隣のこの ps1 を
-# dot-source する (clone の入口は win/winget/ のもの。README.md の「winget の portable の道具」)。入口と同じ所へ配る
+# winget の portable の道具 (下の Install-Herdr.ps1・Install-Ntn.ps1・Install-ClaudeCode.ps1・Install-Ghq.ps1・Install-Fzf.ps1・Install-Starship.ps1・
+# Install-Codex.ps1) の共通の枠。配った入口は隣のこの ps1 を dot-source する (clone の入口は win/winget/ のもの。README.md の「winget の portable の
+# 道具」)。入口と同じ所へ配る
 [[files]]
 src = "winget/WingetPortable.ps1"
 dst = "%USERPROFILE%/.config/powershell/WingetPortable.ps1"
@@ -168,4 +169,4 @@ hint = "PowerShell で Install-WinGet -Check を打つと、winget が固定し�
 [[files]]
 src = "codex/Install-Codex.ps1"
 dst = "%USERPROFILE%/.config/powershell/Install-Codex.ps1"
-hint = "PowerShell で Install-Codex -Check を打つと、固定した版との差と、codex と打てるか (WinGet\\Links の symlink) が分かる (runner の dotfiles apply が入れるのはホストの値の [tools] windowsCodex が on のマシンだけ。開発者モードが off なら winget を UAC で昇格して打つ)"
+hint = "PowerShell で Install-Codex -Check を打つと、固定した版との差と、codex と打てるか (WinGet\\Links の symlink か、置き場所の codex.exe の hardlink) が分かる (runner の dotfiles apply が入れるのはホストの値の [tools] windowsCodex が on のマシンだけ。UAC は出さない。昇格していない PowerShell で打つ)"

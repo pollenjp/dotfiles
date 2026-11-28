@@ -15,7 +15,8 @@
 #   - pwsh.exe が無い・失敗する・こちらの出力を返さないときは、手で打つコマンドを出して exit 0
 #   - -Check が 0 なら 1 行だけ (※ の行は添える)。3 なら -IfMissing で入れ、入れられなければ ⚠ で囲んで知らせる
 #   - -Check が 1 で締めの行が「揃える」なら、引数なしで流して揃える。揃わなければ (動いている、など) ⚠ で囲み、
-#     出力と揃えるコマンドを出す。締めの行が「※ の手順で直す」だけ (PATH のずれ) なら、揃えずに ⚠ で知らせる
+#     出力と揃えるコマンドを出す。締めの行が「※ の手順で直す」だけ (PATH のずれ) なら、揃えずに ⚠ で知らせる。
+#     昇格した会話で ps1 が winget を打たずに止まった (締めの行が昇格の 1 行) なら、昇格していない端末で流し直す手を ⚠ で知らせる
 #   - どれも exit 0。--apply は -Check を付けずに流し、失敗なら exit 1。端末でなければ色を付けない
 #   - setup から走るとき (DOTFILES_SETUP_WARNINGS がある) は、⚠ の見出しと直し方 (確かめられないときは手で
 #     打つコマンド) を setup の最後のまとめ用のファイルにも残す。揃った・入れたときは何も残さない
@@ -59,7 +60,7 @@ drift_out="Claude Code (winget の Anthropic.ClaudeCode、${pkg})
 ⚠ 固定した版      : ${v} → 入れ替える (上げる)
   winget の最新版 : 2.1.321
 ⚠ winget pin      : 無し → 足す
-  PATH の claude  : winget のもの
+  PATH の claude  : winget の portable のもの (置き場所)
 ※ winget に固定した版より新しい 2.1.321 がある。上げるなら Install-ClaudeCode.ps1 の -Version の既定値を変える
 ⚠️ 固定した版と揃っていない → Install-ClaudeCode で揃える ⚠️"
 
@@ -69,7 +70,7 @@ synced_out="Claude Code (winget の Anthropic.ClaudeCode、${pkg})
   固定した版      : ${v} → そのまま
   winget の最新版 : 2.1.321
   winget pin      : あり
-  PATH の claude  : winget のもの
+  PATH の claude  : winget の portable のもの (置き場所)
 ※ winget に固定した版より新しい 2.1.321 がある。上げるなら Install-ClaudeCode.ps1 の -Version の既定値を変える
 揃っている"
 
@@ -88,9 +89,9 @@ path_out="Claude Code (winget の Anthropic.ClaudeCode、${pkg})
   固定した版      : ${v} → そのまま
   winget の最新版 : ${v}
   winget pin      : あり
-⚠ PATH の claude  : C:\\Users\\u\\.local\\bin\\claude.exe (winget のものではない)
+⚠ PATH の claude  : C:\\Users\\u\\.local\\bin\\claude.exe (winget の portable のものではない)
 ※ PATH のずれは Install-ClaudeCode では直らない。C:\\Users\\u\\.local\\bin の claude.exe を外す (native の installer・claude install・npm で入れたものの外し方は win/README.md の「Claude Code」)
-⚠️ PATH の claude が winget のものではない → ※ の手順で直す ⚠️"
+⚠️ PATH の claude が winget の portable のものではない → ※ の手順で直す ⚠️"
 
 # 揃えた・入れた後の出力 (Install-ClaudeCode.ps1 が最後に読み直した表)
 done_out="winget download --id Anthropic.ClaudeCode --exact --source winget --version ${v}
@@ -101,7 +102,7 @@ Claude Code (winget の Anthropic.ClaudeCode、${pkg})
   固定した版      : ${v} → そのまま
   winget の最新版 : 2.1.321
   winget pin      : あり
-  PATH の claude  : winget のもの
+  PATH の claude  : winget の portable のもの (置き場所)
 揃った"
 
 # 入れ替えが要るのに claude.exe が動いていて止まったときの出力
@@ -109,17 +110,28 @@ busy_out="Claude Code (winget の Anthropic.ClaudeCode、${pkg})
   入っている版    : 2.1.321
 ⚠ 固定した版      : ${v} → 入れ替える (上げる)
 ※ claude.exe が 1 個動いている。入れ替えるには、Windows で開いている Claude Code の会話を閉じる (WSL の claude は別のもの)
-claude.exe が動いていて置き換えられない。Windows で開いている Claude Code の会話を閉じてから打ち直す:
+claude.exe が動いていて置き換えられない。上の ※ の行のとおり止めてから打ち直す:
   1001  claude.exe --dangerously-skip-permissions"
+
+# Install-ClaudeCode.ps1 -Check の出力 (昇格した会話で、入っていない。共通の枠は winget を打たずに止まり、入っていなくても 1 を返す)
+elevated_out="Claude Code (winget の Anthropic.ClaudeCode、${pkg})
+  入っている版    : 入っていない
+⚠ 固定した版      : ${v} → 入れる
+  winget の最新版 : ${v}
+⚠ winget pin      : 無し → 足す
+  PATH の claude  : 見つからない
+⚠ 昇格した PowerShell では winget が Claude Code を入れない (winget 1.30.310 は、昇格した会話から user スコープの portable を入れる・外すのを断る)。Install-ClaudeCode は winget を打たない
+※ 昇格していない PowerShell (デスクトップの普通の端末) で Install-ClaudeCode を打ち直す (win/README.md の「winget の portable の道具」)
+⚠️ 昇格した PowerShell では winget が Claude Code を入れない (winget 1.30 から) → ※ の手順で直す ⚠️"
 
 # 揃えた後も PATH のずれが残ったときの出力
 after_path_out="Claude Code (winget の Anthropic.ClaudeCode、${pkg})
   入っている版    : ${v}
   固定した版      : ${v} → そのまま
   winget pin      : あり
-⚠ PATH の claude  : C:\\Users\\u\\.local\\bin\\claude.exe (winget のものではない)
+⚠ PATH の claude  : C:\\Users\\u\\.local\\bin\\claude.exe (winget の portable のものではない)
 版と pin は揃った
-⚠️ PATH の claude が winget のものではない → ※ の手順で直す ⚠️"
+⚠️ PATH の claude が winget の portable のものではない → ※ の手順で直す ⚠️"
 
 # 要るコマンドだけを並べた PATH (pwsh.exe と wslpath は入れない)
 sys_bin="${work}/sys-bin"
@@ -353,6 +365,17 @@ if [[ $(rc "${h}") == 0 && $(warn_lines "${h}") -ge 2 && $(ncalls "${h}") == 1 ]
   ok "PATH のずれだけなら揃えずに ⚠ で知らせ、揃えるコマンドは出さない"
 else
   ng "PATH のずれだけ" "rc=$(rc "${h}") calls=$(calls "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null) $(outerr "${h}")"
+fi
+
+# 9b. 昇格した会話 (-Check が 1、締めの行が昇格の 1 行): 入れも揃えもせず、昇格していない端末で流し直す手を ⚠ で知らせる
+h=$(new_home t9b "${state_on}" 1)
+DOTFILES_SETUP_WARNINGS="${h}/warnings" FAKE_PWSH_RC=1 FAKE_PWSH_OUT="${elevated_out}" run "${h}" 0
+if [[ $(rc "${h}") == 0 && $(ncalls "${h}") == 1 ]] && seen "${h}" -F '昇格していない端末から開いた WSL で setup --update を流し直す' \
+  && ! seen "${h}" -F -- 'bootstrap-windows-claude-code.sh --apply' && ! seen "${h}" -F 'winget のものではありません' \
+  && [[ $(head -n 1 "${h}/warnings" 2>/dev/null) == *'(昇格した会話)' ]]; then
+  ok "昇格した会話なら入れも揃えもせず、昇格していない端末で流し直す手を ⚠ で知らせる (PATH のずれとは言わない)"
+else
+  ng "昇格した会話" "rc=$(rc "${h}") calls=$(calls "${h}") warnings=$(cat "${h}/warnings" 2>/dev/null) $(outerr "${h}")"
 fi
 
 # 10. 揃えた後も PATH のずれが残った: 版と pin は揃ったと言い、PATH の直し方だけを出す
