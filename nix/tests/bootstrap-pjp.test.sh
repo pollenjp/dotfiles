@@ -20,8 +20,10 @@
 #     cargo は $CARGO_HOME/bin の cargo を PATH の cargo より先に使う。clone は、claude-skills-dir より PJP_SKILLS_DIR を、それより
 #     --dir を先に見て、相対パスは今の dir から読む (cargo と nix は clone の中で打つ)
 #   - clone の shim の crate の bin の形 (前の pjp だけ・pjp と pjp-skills・pjp-skills だけ) によらず、<CARGO_HOME>/bin/pjp-skills だけを置く
-#   - 前の手順が入れた shim (<CARGO_HOME>/bin/pjp で、cargo の記録 .crates.toml に pjp-shim の bin pjp がある) は、cargo uninstall --root
-#     <CARGO_HOME> pjp-shim で外してから入れる。記録に無い <CARGO_HOME>/bin/pjp (ほかのもの) は外さずに警告する
+#   - 前の手順が入れた shim (<CARGO_HOME>/bin/pjp で、cargo の記録 .crates.toml に pjp-shim の bin pjp がある) は、PATH にほかの pjp
+#     (公開の入口) があるときだけ、新しい shim を作れてから cargo uninstall --root <CARGO_HOME> pjp-shim で外して置く (記録に pjp-skills も
+#     あれば、外すと消えるので版が同じでも作り直す)。作るのが落ちたら外さない。PATH にほかの pjp が無ければ外さずに警告する (pjp-skills は
+#     入れる)。記録に無い <CARGO_HOME>/bin/pjp (ほかのもの) は外さずに警告する
 #   - 入れてある pjp-skills の版 (pjp-skills --version の「pjp <版>」) が clone の crates/pjp-shim の版と同じなら入れ直さず「のまま」と出し、
 #     pjp-skills --build は打つ。版が違う・shim が起きない (終了コードが 0 でない) なら入れ直す
 #   - cargo はあるが Linux でリンカの cc が無いとき、cargo が無いときは、nix develop --profile ~/.local/state/dotfiles/pjp-shim-devshell
@@ -248,6 +250,13 @@ place_shim() {
   fi
   chmod +x "${f}"
 }
+# 公開の入口 pjp (home-manager の pjp-tools の代わり) を <HOME>/pathbin に置く。PATH に入れるのは CASE_PATH (public_path)
+place_public_pjp() {
+  printf '#!%s\necho public\n' "${BASH}" >"$1/pathbin/pjp"
+  chmod +x "$1/pathbin/pjp"
+}
+# 公開の pjp を置いた PATH の頭 ($1: HOME)
+public_path() { printf '%s' "$1/pathbin:${fakes}:${ccdir}"; }
 # 前の手順が cargo install で入れた shim (bin pjp と、cargo の記録)。$2: 記録の bin の並び (省けば "pjp")
 place_old_shim() {
   place_shim "$1" 0.1.0 pjp
@@ -370,22 +379,56 @@ for bins in "pjp" "pjp pjp-skills" "pjp-skills"; do
   fi
 done
 
-# 3c. 前の手順が入れた shim (cargo の記録に pjp-shim の bin pjp) は外してから入れる。前の dotfiles が bin を 2 つとも入れた形も同じ
+# 3c. 前の手順が入れた shim (cargo の記録に pjp-shim の bin pjp) は、公開の pjp が PATH にあれば、新しい shim を作ってから外して置く。
+# 前の dotfiles が bin を 2 つとも入れた形は、外すと pjp-skills も消えるので、版が同じでも作り直す
 for recorded in '"pjp"' '"pjp", "pjp-skills"'; do
   h=$(new_home "old-shim-${#recorded}")
   place_cargo_in_home "${h}"
   place_old_shim "${h}" "${recorded}"
+  place_public_pjp "${h}"
   if [[ ${recorded} == *pjp-skills* ]]; then
     place_shim "${h}" 0.1.0
   fi
-  run "${h}"
-  want="$(uninstall_line "${h}")"$'\n'"$(install_line "${h}")"$'\n'"$(build_line "${h}")"
+  CASE_PATH=$(public_path "${h}") run "${h}"
+  want="$(install_line "${h}")"$'\n'"$(uninstall_line "${h}")"$'\n'"$(build_line "${h}")"
   if rc0 "${h}" && [[ $(cat "${h}/calls") == "${want}" ]] && only_skills "${h}" && no_warning "${h}"; then
-    ok "前の手順が入れた shim (記録の bin が ${recorded}) は cargo uninstall --root <CARGO_HOME> pjp-shim で外してから pjp-skills を入れる"
+    ok "前の手順が入れた shim (記録の bin が ${recorded}) は、公開の pjp が PATH にあれば、新しい shim を作ってから cargo uninstall --root <CARGO_HOME> pjp-shim で外して pjp-skills を置く"
   else
     ng "前の shim (${recorded})" "want=${want}"$'\n'"$(detail "${h}")"
   fi
 done
+
+# 3c'. PATH に公開の pjp が無ければ、前の shim は外さずに警告する (外すと pjp が無くなる)。pjp-skills は入れる (版が同じなら入れ直さない)
+for recorded in '"pjp"' '"pjp", "pjp-skills"'; do
+  h=$(new_home "old-shim-kept-${#recorded}")
+  place_cargo_in_home "${h}"
+  place_old_shim "${h}" "${recorded}"
+  want="$(install_line "${h}")"$'\n'"$(build_line "${h}")"
+  if [[ ${recorded} == *pjp-skills* ]]; then
+    place_shim "${h}" 0.1.0
+    want="$(build_line "${h}")"
+  fi
+  run "${h}"
+  if rc0 "${h}" && [[ $(cat "${h}/calls") == "${want}" && -x ${h}/cargo-home/bin/pjp && -x ${h}/cargo-home/bin/pjp-skills ]] \
+    && warned "${h}" '公開の入口 pjp' && warned "${h}" '残します'; then
+    ok "PATH に公開の pjp が無ければ、前の shim (記録の bin が ${recorded}) を外さずに警告し、pjp-skills は用意する"
+  else
+    ng "公開の pjp が無いときの前の shim (${recorded})" "want=${want}"$'\n'"$(detail "${h}")"
+  fi
+done
+
+# 3c''. 新しい shim を作るのが落ちたら、前の shim は外さない (private な道具を無くさない)
+h=$(new_home old-shim-install-fails)
+place_cargo_in_home "${h}"
+place_old_shim "${h}"
+place_public_pjp "${h}"
+FAKE_CARGO_FAIL=install CASE_PATH=$(public_path "${h}") run "${h}"
+if rc0 "${h}" && [[ $(cat "${h}/calls") == "$(install_line "${h}")" && -x ${h}/cargo-home/bin/pjp ]] \
+  && warned "${h}" '入れられませんでした'; then
+  ok "新しい shim を作るのが落ちたら、前の shim を外さずに警告して 0 で終わる"
+else
+  ng "新しい shim を作るのが落ちたときの前の shim" "$(detail "${h}")"
+fi
 
 # 3d. 記録に無い <CARGO_HOME>/bin/pjp (ほかのもの) は外さずに警告する
 h=$(new_home foreign-pjp)
@@ -491,7 +534,8 @@ done
 h=$(new_home dry-run)
 place_cargo_in_home "${h}"
 place_old_shim "${h}"
-run "${h}" --dry-run
+place_public_pjp "${h}"
+CASE_PATH=$(public_path "${h}") run "${h}" --dry-run
 if rc0 "${h}" && [[ ! -s ${h}/calls ]] && [[ ! -e ${h}/cargo-home/bin/pjp-skills && -e ${h}/cargo-home/bin/pjp ]] \
   && grep -Fq "+ env RUSTUP_TOOLCHAIN=1.99.1 ${h}/cargo-home/bin/cargo uninstall --root ${h}/cargo-home pjp-shim" "${h}/out" \
   && grep -Fq "+ env RUSTUP_TOOLCHAIN=1.99.1 ${h}/cargo-home/bin/cargo install --locked --root <使い捨ての dir>/root --target-dir <使い捨ての dir>/target --path ${h}/clone/crates/pjp-shim" "${h}/out" \

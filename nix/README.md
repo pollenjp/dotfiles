@@ -6045,7 +6045,10 @@ minimum のホストは使うときに足す) に 3 つ置く。
   覆うため。dotfiles-private の ADR 124)。clone の shim の crate の bin の形 (前の `pjp` だけ・`pjp` と `pjp-skills`・`pjp-skills` だけ) によらず、
   出来た bin (`pjp-skills` があればそれ、無ければ `pjp`) を `pjp-skills` の名前で置く (shim は argv[0] を読まない)
 - 前の手順が `cargo install` で入れた `~/.cargo/bin/pjp` (cargo の記録 `~/.cargo/.crates.toml` に `pjp-shim` の bin `pjp` がある) は、
-  `cargo uninstall --root ${CARGO_HOME:-~/.cargo} pjp-shim` で外す。記録に無い `~/.cargo/bin/pjp` (ほかのもの) は外さずに警告する
+  `cargo uninstall --root ${CARGO_HOME:-~/.cargo} pjp-shim` で外す。外すのは、PATH にほかの `pjp` (公開の入口。home-manager の pjp-tools) があり、
+  新しい shim を作れてから (作った bin を `pjp-skills.new` に写し、外してから `pjp-skills` に置く)。公開の `pjp` が PATH に無い (switch の前に
+  この script だけを流したなど) ときと、作るのが落ちたときは、外さずに警告する (外すと `pjp` や private な道具が無くなる)。記録に `pjp-skills` も
+  ある前の形は、外すと一緒に消えるので、版が同じでも作り直す。記録に無い `~/.cargo/bin/pjp` (ほかのもの) は外さずに警告する
 - shim は、無い・起きない・版 (`pjp-skills --version`。shim は bin の名前によらず `pjp <版>` と出す) が clone の `crates/pjp-shim` の版と違う
   ときだけ入れ直す (shim は動きを変えたら版を上げる決まり)。cargo は clone の中で、clone の `rust-toolchain.toml` の channel を
   `RUSTUP_TOOLCHAIN` にして打つ (shim と同じ。mise の `RUSTUP_TOOLCHAIN` や cwd に引きずられない)。入れ先は使い捨ての `--root` (`~/.cargo` に

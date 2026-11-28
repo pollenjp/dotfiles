@@ -21,9 +21,12 @@
 #   1. clone を決める (--dir → PJP_SKILLS_DIR → bootstrap-claude-skills.sh が書いた claude-skills-dir。相対パスは今の dir から
 #      読んで絶対パスにする)。決まらない・clone に Rust の道具が無い (crates/pjp-shim が無い。claude-skills の W0-1 より前) なら、
 #      何もしない
-#   2. 前の shim を外す: 前の手順が cargo install で入れた ${CARGO_HOME:-~/.cargo}/bin/pjp (cargo の記録 .crates.toml に pjp-shim の
+#   2. 前の shim を見る: 前の手順が cargo install で入れた ${CARGO_HOME:-~/.cargo}/bin/pjp (cargo の記録 .crates.toml に pjp-shim の
 #      bin pjp がある) は、公開の入口 pjp を覆うので `cargo uninstall --root ${CARGO_HOME:-~/.cargo} pjp-shim` で外す (前の dotfiles が
-#      bin を 2 つとも入れた形も、記録ごと外れる)。記録に無い bin/pjp (ほかのもの) は外さずに警告する
+#      bin を 2 つとも入れた形も、記録ごと外れる。そのときは pjp-skills も消えるので、3. で版が同じでも作り直す)。外すのは、PATH に
+#      ほかの pjp (公開の入口。home-manager の pjp-tools) があり、3. の新しい shim を作れてから (外した後に pjp が無い・private な道具が
+#      無い形を作らない。home-manager の switch より先にこの script を流したときなど)。外せないときは残して警告する。記録に無い bin/pjp
+#      (ほかのもの) は外さずに警告する
 #   3. shim を入れる: ${CARGO_HOME:-~/.cargo}/bin/pjp-skills が無い・起きない・`pjp-skills --version` の版 (shim はどの bin の名前でも
 #      「pjp <版>」と出す) が clone の crates/pjp-shim の Cargo.toml の版と違うときだけ、`cargo install --locked --root <使い捨ての
 #      dir>/root --target-dir <使い捨ての dir>/target --path <clone>/crates/pjp-shim` を打ち、出来た bin (pjp-skills があればそれ、無ければ
@@ -31,7 +34,7 @@
 #      argv[0] を読まないので、名前を替えても動く。shim の Cargo.toml の決まり: shim の動きを変えたら版を上げる)。使い捨ての root に
 #      入れるのは、<CARGO_HOME>/bin/pjp も cargo の記録も <CARGO_HOME> に残さないため。使い捨ての target dir は、workspace の target/ に
 #      残った古い exe (GC root の無い devShell で作ったもの) を link し直さずに写すのを避け、いつも今の環境で作り直して link するため。
-#      置いた後に shim が起きなければ警告して止まる
+#      前の shim を外すときは、作った bin を pjp-skills.new に写してから外し、pjp-skills に置く。置いた後に shim が起きなければ警告して止まる
 #   4. 道具を作る: `pjp-skills --build` (clone の `cargo build --release --locked --bins`)。会話の途中で道具を初めて打ったときに、
 #      作り直しを待たせない。clone が変わっていなければ cargo の確かめだけで終わるので、毎回流す
 #
@@ -77,7 +80,8 @@ clone の決まり方 (上から順に):
   3. ~/.local/state/dotfiles/claude-skills-dir (bootstrap-claude-skills.sh が書く)
 
 shim は ${CARGO_HOME:-~/.cargo}/bin/pjp-skills に入る。clone の crates/pjp-shim の版と違う・無い・起きないときだけ入れ直す。
-前の手順が入れた ${CARGO_HOME:-~/.cargo}/bin/pjp (cargo の記録で pjp-shim のもの) は、公開の入口 pjp を覆うので外す。
+前の手順が入れた ${CARGO_HOME:-~/.cargo}/bin/pjp (cargo の記録で pjp-shim のもの) は、公開の入口 pjp を覆うので外す
+(PATH に公開の pjp があり、新しい shim を作れたときだけ)。
 どこで落ちても警告して正常終了する (claude-skills の skill は、shim が無くても scripts/ のまま動く)。
 EOS
 }
@@ -265,30 +269,58 @@ old_shim_recorded() {
   grep -Eq '^"pjp-shim [^"]*" = \[[^]]*"pjp"' "${f}"
 }
 
+# 前の shim の記録に pjp-skills の bin もあるか (前の dotfiles が、bin を 2 つ持つ shim の crate を <CARGO_HOME> に入れた形)。外すと
+# pjp-skills も消える
+old_shim_has_skills() {
+  grep -Eq '^"pjp-shim [^"]*" = \[[^]]*"pjp-skills"' "${cargo_root}/.crates.toml" 2>/dev/null
+}
+
+# PATH に、前の shim のほかの pjp (公開の入口。home-manager の pjp-tools) があるか
+public_pjp_on_path() {
+  local p
+  while IFS= read -r p; do
+    [[ -n ${p} && ! ${p} -ef ${old_shim} ]] && return 0
+  done < <(type -aP pjp 2>/dev/null)
+  return 1
+}
+
+# 前の shim を外すなら 1 (外すのは、新しい shim を作れてから)
+remove_old=0
 echo "==> 前の shim (${old_shim})"
 if [[ ! -e ${old_shim} && ! -L ${old_shim} ]]; then
   note "ありません"
 elif ! old_shim_recorded; then
   warn "${old_shim} は claude-skills の shim と確かめられないので外しません (cargo の記録 ${cargo_root}/.crates.toml に pjp-shim の bin pjp が無い)。" \
     "PATH で公開の入口 pjp (Nix の profile) より前に来ると覆うので、要らなければ消してください。"
+elif ! public_pjp_on_path; then
+  warn "公開の入口 pjp (home-manager の pjp-tools) が PATH に見つからないので、前の shim ${old_shim} は残します (外すと pjp が無くなる)。" \
+    "home-manager の switch で公開の pjp が入ってから流し直すと外れます: $0"
 elif ! can_cargo; then
   warn "${in_nix}。nix (か claude-skills の nix/flake.nix) も無いので、前の shim ${old_shim} を外せません。" \
     "公開の入口 pjp を覆うので、cargo uninstall --root ${cargo_root} pjp-shim で外してください。"
 else
-  note "前の手順が cargo install で入れた claude-skills の shim です。公開の入口 pjp を覆わないよう外します"
-  [[ -z ${in_nix} ]] || note "${in_nix}。claude-skills の nix の devShell (path:${clone}/nix) の中で外します"
+  remove_old=1
+  note "前の手順が cargo install で入れた claude-skills の shim です。公開の入口 pjp を覆わないよう、新しい shim を用意してから外します"
+fi
+
+# 前の shim を外す (落ちても止めない。残った前の shim でも claude-skills の道具は動く)
+remove_old_shim() {
+  [[ -z ${in_nix} ]] || note "${in_nix}。claude-skills の nix の devShell (path:${clone}/nix) の中で前の shim を外します"
   if ! run_cargo uninstall --root "${cargo_root}" pjp-shim; then
     warn "前の shim を外せませんでした (上の cargo のエラー): ${old_shim}" \
       "公開の入口 pjp を覆うので、cargo uninstall --root ${cargo_root} pjp-shim で外してください。"
   fi
-fi
+}
 
 echo "==> claude-skills の shim (${shim})"
 have=$(installed_version) || have=""
-if [[ ${have} == "${want}" ]]; then
+if [[ ${have} == "${want}" ]] && ! { [[ ${remove_old} == 1 ]] && old_shim_has_skills; }; then
   note "${shim} は ${want} のまま"
+  [[ ${remove_old} == 0 ]] || remove_old_shim
 else
-  if [[ -n ${have} ]]; then
+  if [[ ${have} == "${want}" ]]; then
+    note "${shim} は前の shim と同じ cargo の記録にあり、前の shim を外すと一緒に消えるので、作り直して置きます"
+  elif [[ -n ${have} ]]; then
     note "${shim} は ${have}。clone の ${want} に入れ直します"
   elif [[ -e ${shim} ]]; then
     note "${shim} が起きません (devShell で作った shim の glibc が nix の GC で消えたなど)。入れ直します"
@@ -313,13 +345,16 @@ else
     trap 'rm -rf -- "${work_dir}"' EXIT
   fi
   [[ -z ${in_nix} ]] || note "${in_nix}。claude-skills の nix の devShell (path:${clone}/nix) の中で入れます"
+  # 作れなかったときに前の shim を残したと言い添える文
+  kept=""
+  [[ ${remove_old} == 0 ]] || kept="前の shim ${old_shim} は外さずに残します。"
   if ! run_cargo install --locked --root "${work_dir}/root" --target-dir "${work_dir}/target" --path "${clone}/crates/pjp-shim"; then
     if [[ -n ${in_nix} ]]; then
       warn "claude-skills の shim を nix の devShell で入れられませんでした (上の nix・cargo のエラー): ${clone}/crates/pjp-shim" \
-        "道具も作りません。直してから流し直してください: $0"
+        "${kept}道具も作りません。直してから流し直してください: $0"
     else
       warn "claude-skills の shim を入れられませんでした (上の cargo のエラー): ${clone}/crates/pjp-shim" \
-        "道具も作りません。直してから流し直してください: $0"
+        "${kept}道具も作りません。直してから流し直してください: $0"
     fi
     exit 0
   fi
@@ -335,10 +370,16 @@ else
     built="${work_dir}/root/bin/pjp"
   fi
   if [[ ${dry_run} == 0 && ! -e ${built} ]]; then
-    warn "入れたはずの shim が見つかりません: ${work_dir}/root/bin (pjp-skills も pjp も無い)" "道具は作りません。"
+    warn "入れたはずの shim が見つかりません: ${work_dir}/root/bin (pjp-skills も pjp も無い)" "${kept}道具は作りません。"
     exit 0
   fi
-  if ! run mkdir -p "${cargo_root}/bin" || ! run cp -f "${built}" "${shim}.new" || ! run mv -f "${shim}.new" "${shim}"; then
+  if ! run mkdir -p "${cargo_root}/bin" || ! run cp -f "${built}" "${shim}.new"; then
+    warn "claude-skills の shim を置けませんでした: ${shim}" "${kept}道具は作りません。"
+    exit 0
+  fi
+  # 前の shim は、新しい shim を写せてから外す (pjp-skills.new は cargo の記録に無いので、外しても消えない)
+  [[ ${remove_old} == 0 ]] || remove_old_shim
+  if ! run mv -f "${shim}.new" "${shim}"; then
     warn "claude-skills の shim を置けませんでした: ${shim}" "道具は作りません。"
     exit 0
   fi
