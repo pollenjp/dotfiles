@@ -22,8 +22,8 @@
 #   - clone の shim の crate の bin の形 (前の pjp だけ・pjp と pjp-skills・pjp-skills だけ) によらず、<CARGO_HOME>/bin/pjp-skills だけを置く
 #   - 前の手順が入れた shim (<CARGO_HOME>/bin/pjp で、cargo の記録 .crates.toml に pjp-shim の bin pjp がある) は、PATH にほかの pjp
 #     (公開の入口) があるときだけ、新しい shim を作れてから cargo uninstall --root <CARGO_HOME> pjp-shim で外して置く (記録に pjp-skills も
-#     あれば、外すと消えるので版が同じでも作り直す)。作るのが落ちたら外さない。PATH にほかの pjp が無ければ外さずに警告する (pjp-skills は
-#     入れる)。記録に無い <CARGO_HOME>/bin/pjp (ほかのもの) は外さずに警告する
+#     あれば、外すと消えるので版が同じでも作り直す。pjp-skills が今の版で記録が pjp だけなら、作らずに外すだけ)。作るのが落ちたら外さない。
+#     PATH にほかの pjp が無ければ外さずに警告する (pjp-skills は入れる)。記録に無い <CARGO_HOME>/bin/pjp (ほかのもの) は外さずに警告する
 #   - 入れてある pjp-skills の版 (pjp-skills --version の「pjp <版>」) が clone の crates/pjp-shim の版と同じなら入れ直さず「のまま」と出し、
 #     pjp-skills --build は打つ。版が違う・shim が起きない (終了コードが 0 でない) なら入れ直す
 #   - cargo はあるが Linux でリンカの cc が無いとき、cargo が無いときは、nix develop --profile ~/.local/state/dotfiles/pjp-shim-devshell
@@ -32,14 +32,15 @@
 #   - cargo も nix も無いとき、cargo install・nix・pjp --build が落ちたとき、cargo install が通っても shim が入っていないとき、
 #     rust-toolchain.toml の channel か crates/pjp-shim の version を読めないときは、警告して (setup の最後のまとめにも残し) 0 で終わる。
 #     落ちた後の手順 (pjp --build) は打たない
-#   - --dry-run では、cargo・nix・shim を打たずに、打つコマンド (外す前の shim の cargo uninstall も) を「+ 」の行で出す
+#   - --dry-run では、cargo・nix・shim を打たずに、打つコマンド (外す前の shim の cargo uninstall も) を「+ 」の行で出す (作る → 写す (.new) →
+#     前の shim を外す → 置く → 道具を作る の順)
 #   - setup の手順の並び (setup.sh --list) で、bootstrap-mise・bootstrap-claude-skills の後、bootstrap-herdr-hub の前に来る
 #
 # 偽の cargo は「cwd|RUSTUP_TOOLCHAIN|引数」を、偽の nix は「nix|引数」を、偽の nix-env は「nix-env|引数」を、偽の pjp は
 # 「pjp|PJP_SKILLS_DIR|引数」を $HOME/calls に 1 行ずつ残す (install の --root・--target-dir の値は使い捨ての dir で毎回変わるので
 # TMP と書き、--target-dir の値は $HOME/target-dirs に、その dir があったかを $HOME/target-dir-seen に残す)。偽の cargo の install は
 # --root の下の bin に、FAKE_SHIM_BINS (既定 pjp) の名前ごとに偽の shim (FAKE_SHIM_VERSION の版。既定 0.1.0) を書き、FAKE_CARGO_FAIL=install
-# なら落ち、FAKE_CARGO_NOINSTALL=1 なら何も書かずに 0 で終わる。uninstall は --root の bin の pjp と pjp-skills と記録を消す。偽の nix は --profile の先に profile の link を作ってから、devShell と同じく偽の cargo を PATH に足して
+# なら落ち、FAKE_CARGO_NOINSTALL=1 なら何も書かずに 0 で終わる。uninstall は記録 (.crates.toml) にある bin (pjp・pjp-skills) と記録を消す。偽の nix は --profile の先に profile の link を作ってから、devShell と同じく偽の cargo を PATH に足して
 # --command の後ろを打つ (FAKE_NIX_FAIL=1 なら落ちる)。偽の pjp の --build は FAKE_BUILD_RC で終わる。サンドボックスの stdenv の cc を
 # 拾わないよう、PATH は使うコマンドだけを並べた dir (farm) と偽物の dir で作る。偽物の shebang は $BASH から作る。
 
@@ -143,7 +144,11 @@ if [[ ${sub} == install ]]; then
     chmod +x "${root}/bin/${b}"
   done
 elif [[ ${sub} == uninstall ]]; then
-  rm -f "${root}/bin/pjp" "${root}/bin/pjp-skills" "${root}/.crates.toml"
+  # 本物の cargo と同じく、記録 (.crates.toml) にある bin だけを消す
+  for b in pjp pjp-skills; do
+    if grep -q "\"${b}\"" "${root}/.crates.toml" 2>/dev/null; then rm -f "${root}/bin/${b}"; fi
+  done
+  rm -f "${root}/.crates.toml"
 fi
 exit 0
 EOF
@@ -417,6 +422,21 @@ for recorded in '"pjp"' '"pjp", "pjp-skills"'; do
   fi
 done
 
+# 3c'''. pjp-skills が今の版で、記録の bin が前の shim (pjp) だけなら、作り直さずに前の shim を外すだけ (pjp-skills は消えない)
+h=$(new_home old-shim-remove-only)
+place_cargo_in_home "${h}"
+place_old_shim "${h}"
+place_shim "${h}" 0.1.0
+place_public_pjp "${h}"
+CASE_PATH=$(public_path "${h}") run "${h}"
+want="$(uninstall_line "${h}")"$'\n'"$(build_line "${h}")"
+if rc0 "${h}" && [[ $(cat "${h}/calls") == "${want}" ]] && only_skills "${h}" && no_warning "${h}" \
+  && [[ ! -e ${h}/cargo-home/.crates.toml ]]; then
+  ok "pjp-skills が今の版で記録の bin が pjp だけなら、作り直さずに前の shim を外すだけ"
+else
+  ng "前の shim を外すだけ" "want=${want}"$'\n'"$(detail "${h}")"
+fi
+
 # 3c''. 新しい shim を作るのが落ちたら、前の shim は外さない (private な道具を無くさない)
 h=$(new_home old-shim-install-fails)
 place_cargo_in_home "${h}"
@@ -544,6 +564,13 @@ if rc0 "${h}" && [[ ! -s ${h}/calls ]] && [[ ! -e ${h}/cargo-home/bin/pjp-skills
   ok "--dry-run では何も打たず、打つコマンド (前の shim の cargo uninstall も) を「+ 」の行で出す"
 else
   ng "--dry-run" "$(detail "${h}")"
+fi
+# 出す順は、作る → 写す (.new) → 前の shim を外す → 置く (mv) → 道具を作る
+order=$(grep -nE '^\+ .*(cargo install|cp -f|cargo uninstall|mv -f|--build)' "${h}/out" | sed -E 's/^([0-9]+):\+ .*(cargo install|cp -f|cargo uninstall|mv -f|--build).*/\2/')
+if [[ ${order} == $'cargo install\ncp -f\ncargo uninstall\nmv -f\n--build' ]]; then
+  ok "--dry-run の行は、作る → 写す (.new) → 前の shim を外す → 置く → 道具を作る の順"
+else
+  ng "--dry-run の順" "order=${order}"$'\n'"$(detail "${h}")"
 fi
 
 # 7. setup の手順の並び: bootstrap-mise・bootstrap-claude-skills の後、bootstrap-herdr-hub の前。使い捨ての checkout に setup.sh と
