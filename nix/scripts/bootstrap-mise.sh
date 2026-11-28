@@ -297,7 +297,7 @@ echo "==> rust (rustup。claude-skills の Rust の道具のため。dotfiles.cl
 # mise の rust は、効いている間 RUSTUP_TOOLCHAIN を入れる。rustup はそれを repo の rust-toolchain.toml より上に置くので、全体の
 # rust だけを足すと、repo が固定した toolchain (claude-skills の rust-toolchain.toml。CI と同じ版) が mise の効いたシェルで効かなく
 # なる。mise の文書 (lang/rust) が勧めるとおり idiomatic_version_file_enable_tools に rust を足し、rust-toolchain.toml の channel を
-# mise に読ませる (mise がその版を入れていなければ RUSTUP_TOOLCHAIN を入れず、rustup が file を読む)。shim の pjp は mise に頼らず、
+# mise に読ませる (mise がその版を入れていなければ RUSTUP_TOOLCHAIN を入れず、rustup が file を読む)。claude-skills の shim (pjp-skills) は mise に頼らず、
 # clone の rust-toolchain.toml の channel を RUSTUP_TOOLCHAIN にして ~/.cargo/bin の cargo を打つ。
 #
 # 入れるのは Rust の道具を使うホスト (claude-skills の clone を持つ dotfiles.claude.privateSkills.enable。値は group.json の
@@ -305,7 +305,7 @@ echo "==> rust (rustup。claude-skills の Rust の道具のため。dotfiles.cl
 # (claude と同じ。ADR 057)。idiomatic の設定は off でも外さない (mise の rust を使わないなら効かない)。
 #
 # 入れられなくても止めない (警告して続ける)。止めると後ろの bootstrap が走らない。rustup が無いマシンでも、bootstrap-pjp.sh と
-# shim の pjp は claude-skills の nix の devShell の rustup で作れる。
+# claude-skills の shim (pjp-skills) は claude-skills の nix の devShell の rustup で作れる。
 if tool_wanted claudePrivateSkills; then
   if [[ $(mise settings get idiomatic_version_file_enable_tools 2>/dev/null) =~ \"rust\" ]]; then
     echo "  idiomatic_version_file_enable_tools に rust はもうある (repo の rust-toolchain.toml を mise が読む)"

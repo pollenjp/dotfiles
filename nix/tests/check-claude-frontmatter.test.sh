@@ -795,8 +795,8 @@ if [[ $(rc "${c}") == 1 && $(lines_of "${c}") == 15 ]] \
   && seen_err "${c}" -F "   nix/files/claude/skills/pjp-seq/SKILL.md: metadata は key: value の map にしてください (!!seq)" \
   && seen_err "${c}" -F "   nix/files/claude/skills/pjp-num/SKILL.md: metadata の pjp-pack が文字列ではありません (!!seq)。複数の pack は列にせず" \
   && seen_err "${c}" -F "   nix/files/claude/skills/pjp-block-seq/SKILL.md: metadata の pjp-pack が文字列ではありません (!!seq)。複数の pack は列にせず" \
-  && seen_err "${c}" -F "   nix/files/claude/skills/pjp-unknown/SKILL.md: metadata の pjp-pack 'diagrams' は pack の名前ではありません (diagram video notion machine repo browser lang docs のどれか。" \
-  && seen_err "${c}" -F "   nix/files/claude/skills/pjp-unknown-multi/SKILL.md: metadata の pjp-pack 'notion diagrams foo' のうち 'diagrams', 'foo' は pack の名前ではありません (diagram video notion machine repo browser lang docs のどれか。" \
+  && seen_err "${c}" -F "   nix/files/claude/skills/pjp-unknown/SKILL.md: metadata の pjp-pack 'diagrams' は pack の名前ではありません (diagram video notion machine repo browser lang docs hc のどれか。" \
+  && seen_err "${c}" -F "   nix/files/claude/skills/pjp-unknown-multi/SKILL.md: metadata の pjp-pack 'notion diagrams foo' のうち 'diagrams', 'foo' は pack の名前ではありません (diagram video notion machine repo browser lang docs hc のどれか。" \
   && seen_err "${c}" -F "   nix/files/claude/skills/pjp-dup/SKILL.md: metadata の pjp-pack に同じ pack が 2 度あります (notion)" \
   && seen_err "${c}" -F "   nix/files/claude/skills/pjp-blank/SKILL.md: metadata の pjp-pack が空です" \
   && seen_err "${c}" -F "   nix/files/claude/skills/pjp-flow/SKILL.md: metadata の pjp-pack は「metadata:」の下に字下げして" \

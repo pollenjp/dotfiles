@@ -1,0 +1,8 @@
+# 子の claude の起動の引数 (spec §7.4 の 6)。pjp child new・restart が読む (bin に埋め込むので、直したら次の pjp の呼び出しで
+# 作り直される)。
+#
+# ユーザーが自分で claude を立てるときの c (dotfiles の nix/home/modules/fish.nix の abbr と、Windows の dotfiles.ps1) から、
+# --remote-control と --effort を除いたもの。herdr・hc の子は Remote Control を off で立てる (ユーザーの指示 2026-10-20)。
+# --effort (子ごとに選ぶ)・--no-chrome か --chrome・--settings (pack の JSON)・--continue か --resume・依頼は、pjp child が足す。
+# c が変わったら、ここも合わせる。
+args = ["--dangerously-skip-permissions", "--model", "claude-opus-5-5"]

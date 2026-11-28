@@ -1,0 +1,20 @@
+[package]
+name = "pjp-core"
+version = "0.1.0"
+description = "claude-skills の Rust の道具の土台 (OS の違い・終了コード・置き場所・外のコマンド・時刻)"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+toml.workspace = true
+
+# 時間切れの外のコマンドを、孫ごと止める (Unix は process group、Windows は Job Object)。Ctrl+C を子に任せる
+[target.'cfg(unix)'.dependencies]
+libc.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows-sys.workspace = true
+
+[lints]
+workspace = true

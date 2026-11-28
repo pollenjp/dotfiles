@@ -1,0 +1,204 @@
+name: pjp-tools-release
+
+# ハブと子の道具 (nix/pkgs/pjp-tools。Rust の workspace) の Windows の exe を作り、key ごとの GitHub の Release に置く (win/README.md の
+# 「ハブと子の道具 (pjp-tools)」。dotfiles-private の docs/adr/124_*)。Windows の runner の手順 pjp-tools が、clone の HEAD の nix/pkgs/pjp-tools
+# に合う key の zip を落として %LOCALAPPDATA%\dotfiles\bin\ に置くので、cargo の無い PC (Build Tools と rustup を入れない minimum の PC) でも入る。
+# 決まり (公開の gate・actions の固定・古い Release の消し方) は runner の exe の win-runner-release.yml (dotfiles-private の
+# docs/adr/117_win_runner_exe_release_*) と同じ。
+#
+# - key は nix/pkgs/pjp-tools の git の tree の hash (git rev-parse HEAD:nix/pkgs/pjp-tools)。Release は pjp-tools-<key の頭 12 字> (prerelease)、
+#   asset は pjp-tools-windows-x86_64.zip (5 つの exe を root に。C ランタイムを静的にリンクし、pjp.exe に key を埋める) と
+#   pjp-tools-windows-x86_64.zip.sha256
+# - build の job (書けない token) が作って確かめ (Visual C++ の runtime の DLL を読まない・zip を解いた pjp.exe の --version の key・pjp-hub.exe
+#   --help)、artifact に上げる。公開の job (書ける token) は artifact を落として Release に置き、attestation を作り、古い Release を消す
+#   (.github/scripts/pjp-tools-publish.sh)。PR では公開せず、公開の script を --dry-run で流す
+# - 公開の job が動くのは、repo の変数 PJP_TOOLS_PUBLISH が true の main の push か、main での手動の実行 (input publish) のときだけ。最初の
+#   Release は手動の実行で作り、PC で確かめてから変数を入れる
+# - 同じ key の Release があれば作らない (workflow・script だけを変えた push・revert で同じ中身に戻った push)。公開してある zip と .sha256 が
+#   合うかだけを見る (今回の build とはバイトで比べない。同じ key でも build は再現しない)
+on:
+  push:
+    branches: [main]
+    paths:
+      - "nix/pkgs/pjp-tools/**"
+      - ".github/workflows/pjp-tools-release.yml"
+      - ".github/scripts/pjp-tools-*"
+  pull_request:
+    paths:
+      - "nix/pkgs/pjp-tools/**"
+      - ".github/workflows/pjp-tools-release.yml"
+      - ".github/scripts/pjp-tools-*"
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: "Release を公開する (main でだけ効く。最初の公開・打ち直し)"
+        type: boolean
+        default: false
+
+# PR は同じ branch の前の run を止める。main は止めない (key ごとの Release なので、後の push が前の push の Release を要らなくしない。待たせると、
+# 待っている前の run が後の run に取り消されるので、commit ごとに別の組にする)
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    outputs:
+      key: ${{ steps.key.outputs.key }}
+    steps:
+      # PR は merge の結果でなく PR の head を build する (key を PR の branch の nix/pkgs/pjp-tools と同じにし、artifact の zip を、PR の branch を
+      # checkout した PC で試せるように。merge の結果の確かめは pjp-tools.yml)
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+
+      - name: key (nix/pkgs/pjp-tools の git の tree の hash)
+        id: key
+        shell: bash
+        run: |
+          key=$(git rev-parse HEAD:nix/pkgs/pjp-tools)
+          echo "key=${key}" >>"${GITHUB_OUTPUT}"
+          echo "key: ${key}"
+
+      # 版と components は rust-toolchain.toml から rustup が入れる
+      - name: toolchain (rust-toolchain.toml)
+        working-directory: nix/pkgs/pjp-tools
+        run: rustup toolchain install
+
+      # C ランタイムを静的にリンクするのは nix/pkgs/pjp-tools/.cargo/config.toml (環境変数 RUSTFLAGS を置くと無視されるので、ここでは置かない)
+      - name: build (pjp.exe に key を埋める)
+        working-directory: nix/pkgs/pjp-tools
+        env:
+          PJP_TOOLS_KEY: ${{ steps.key.outputs.key }}
+        run: cargo build --release --locked
+
+      # Visual C++ の再頒布可能パッケージの無い Windows (Build Tools を入れない minimum の PC) でも起きること
+      - name: Visual C++ の runtime の DLL を読まない (5 つの exe)
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Select-Object -First 1
+          foreach ($name in @('pjp', 'pjp-hub', 'pjp-child', 'pjp-mark', 'pjp-pack')) {
+            $imports = & $dumpbin.FullName /nologo /dependents "nix/pkgs/pjp-tools/target/release/$name.exe"
+            $imports
+            if ($imports -match 'vcruntime|msvcp|api-ms-win-crt') { throw "$name.exe が Visual C++ の runtime の DLL を読む" }
+          }
+
+      # zip は 5 つの exe を root に入れる (runner の手順 pjp-tools が Expand-Archive で写しの dir に解く)。.sha256 は sha256sum の形 (改行は LF。
+      # 公開の job が sha256sum --check で読む)
+      - name: dist (zip と .sha256)
+        shell: pwsh
+        run: |
+          $dist = Join-Path $PWD 'dist'
+          $null = New-Item -ItemType Directory -Force -Path $dist
+          $exes = @('pjp', 'pjp-hub', 'pjp-child', 'pjp-mark', 'pjp-pack' | ForEach-Object { Join-Path $PWD "nix/pkgs/pjp-tools/target/release/$_.exe" })
+          $zip = Join-Path $dist 'pjp-tools-windows-x86_64.zip'
+          Compress-Archive -LiteralPath $exes -DestinationPath $zip
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLowerInvariant()
+          [IO.File]::WriteAllText((Join-Path $dist 'pjp-tools-windows-x86_64.zip.sha256'), "$hash  pjp-tools-windows-x86_64.zip`n")
+          Get-Content -LiteralPath (Join-Path $dist 'pjp-tools-windows-x86_64.zip.sha256')
+
+      # 解いた写しで確かめる (runner の手順と同じく、zip の root に 5 つの exe があり、pjp.exe が key を名乗る)
+      - name: 煙試験 (zip を解き、pjp --version の key と pjp-hub --help)
+        shell: pwsh
+        env:
+          KEY: ${{ steps.key.outputs.key }}
+        run: |
+          $unzipped = Join-Path $env:RUNNER_TEMP 'pjp-tools-unzipped'
+          Expand-Archive -LiteralPath dist/pjp-tools-windows-x86_64.zip -DestinationPath $unzipped -Force
+          foreach ($name in @('pjp', 'pjp-hub', 'pjp-child', 'pjp-mark', 'pjp-pack')) {
+            if (-not (Test-Path -LiteralPath (Join-Path $unzipped "$name.exe") -PathType Leaf)) { throw "zip の root に $name.exe が無い" }
+          }
+          $lines = @(& (Join-Path $unzipped 'pjp.exe') --version)
+          $lines
+          if ($LASTEXITCODE -ne 0) { throw "pjp --version が終了コード $LASTEXITCODE で終わった" }
+          if (-not ($lines -ccontains "key=$env:KEY")) { throw "pjp --version の key が $env:KEY でない" }
+          & (Join-Path $unzipped 'pjp-hub.exe') --help
+          if ($LASTEXITCODE -ne 0) { throw "pjp-hub --help が終了コード $LASTEXITCODE で終わった" }
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: pjp-tools-${{ steps.key.outputs.key }}
+          path: dist/*
+          if-no-files-found: error
+
+  # PR では公開しない。公開の script を読むだけの token で流し、作るもの・消すものを出す
+  publish-dry-run:
+    name: publish (dry-run)
+    if: github.event_name == 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: pjp-tools-publish.sh --dry-run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          KEY: ${{ needs.build.outputs.key }}
+          COMMIT: ${{ github.sha }}
+        run: ./.github/scripts/pjp-tools-publish.sh --dry-run --key "${KEY}" --commit "${COMMIT}" --dist dist
+
+  publish:
+    name: publish
+    needs: build
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      ((github.event_name == 'push' && vars.PJP_TOOLS_PUBLISH == 'true') ||
+      (github.event_name == 'workflow_dispatch' && inputs.publish))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # 同じ key の公開を並べない (draft を消し合う・作るのがぶつかる)。待っている同じ key の公開は、後から来たものに取り消されてよい (同じ中身)
+    concurrency:
+      group: pjp-tools-publish-${{ needs.build.outputs.key }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: pjp-tools-${{ needs.build.outputs.key }}
+          path: dist
+
+      - name: 同じ key の Release があるか
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          KEY: ${{ needs.build.outputs.key }}
+        run: |
+          state=$(./.github/scripts/pjp-tools-publish.sh --state --key "${KEY}")
+          echo "state=${state}" >>"${GITHUB_OUTPUT}"
+          echo "Release: ${state}"
+
+      # 来歴 (どの workflow がどの commit から作ったか)。gh のある PC で gh attestation verify pjp-tools-windows-x86_64.zip -R pollenjp/dotfiles。
+      # 同じ key の Release があれば、置くのは前の zip なので作らない
+      - name: attestation
+        if: steps.state.outputs.state != 'published'
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4.2.2
+        with:
+          subject-path: dist/pjp-tools-windows-x86_64.zip
+
+      - name: pjp-tools-publish.sh --publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          KEY: ${{ needs.build.outputs.key }}
+          COMMIT: ${{ github.sha }}
+        run: ./.github/scripts/pjp-tools-publish.sh --publish --key "${KEY}" --commit "${COMMIT}" --dist dist

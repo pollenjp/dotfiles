@@ -1,0 +1,104 @@
+{
+  "sections": [
+    {
+      "type": "qa",
+      "id": "qa",
+      "title": "Q&A",
+      "items": [
+        { "id": "qa-1123-1042", "q": "問いの要旨 (短ければユーザーの原文のまま)", "at": "11/23 10:42", "a": "- **答えの見出しの項目**\n  - 詳細 (1 文)\n- **次にすること**\n  - 1 文", "open": true },
+        { "id": "qa-1123-1015", "q": "前の問いの要旨", "at": "11/23 10:15", "a": "- **前の答えの見出しの項目**\n  - 詳細 (1 文)", "open": false }
+      ]
+    },
+    {
+      "type": "work",
+      "id": "work",
+      "title": "チケット・進み具合・PR",
+      "rows": [
+        {
+          "id": "TKT-n", "title": "このハブの会話 (短い題)", "url": "<チケットの URL (チケットが無ければ欄ごと消す)>", "status": "In Progress", "who": "ハブ",
+          "children": [
+            {
+              "id": "TKT-m", "title": "子のチケットの短い題", "url": "<チケットの URL (チケットが無ければ欄ごと消す)>", "status": "In Review", "who": "子 A · <machine>/t13",
+              "steps": [
+                { "label": "チケット", "state": "done" },
+                { "label": "PR", "state": "done" },
+                { "label": "Windows で確かめ", "state": "active", "answer": "TKT-m 確かめること (短く) -> 確かめた" },
+                { "label": "merge", "state": "todo" },
+                { "label": "当てる", "state": "todo" }
+              ],
+              "children": [
+                { "kind": "pr", "id": "dotfiles#12", "title": "PR の短い題", "url": "https://github.com/pollenjp/dotfiles/pull/12", "state": "open", "ci": "pass", "note": "一言 (言うことが無ければ欄ごと消す)" },
+                {
+                  "kind": "item", "title": "解説動画 (短尺)", "who": "子 B · <machine>/t14",
+                  "steps": [
+                    { "label": "作る", "state": "done" },
+                    { "label": "見る", "state": "active", "answer": "TKT-m 解説動画 (短尺 印の名前の一言) -> 見た" }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "markdown",
+      "id": "now",
+      "title": "いま",
+      "text": "- **していること**\n  - いま何をしているか (1 文)\n- **あなたに頼むこと**\n  - 下の図の **①** と **②**\n- **済んだら私がすること**\n  - 1 文"
+    },
+    {
+      "type": "image",
+      "id": "act",
+      "title": "R1 手順の名前 (① ②)",
+      "src": "TKT-n/act.svg",
+      "width": 460,
+      "height": 300,
+      "caption": "誰が何をして、何がどこへ行くか (1 行)",
+      "marks": [
+        { "kind": "flow", "x1": 128, "y1": 152, "x2": 170, "y2": 152, "speed": 32, "color": "#61afef" },
+        { "kind": "flow", "x1": 290, "y1": 152, "x2": 332, "y2": 152, "speed": 32, "color": "#61afef" },
+        { "kind": "pulse", "x": 140, "y": 14, "w": 180, "h": 70, "radius": 8, "color": "#e5c07b" },
+        { "kind": "pulse", "x": 330, "y": 14, "w": 124, "h": 70, "radius": 8, "color": "#e5c07b" }
+      ]
+    },
+    {
+      "type": "image",
+      "id": "route",
+      "title": "届くまで (いまは ①)",
+      "src": "TKT-n/route.svg",
+      "width": 460,
+      "height": 352,
+      "caption": "何がどこからどこへ届くか、いまどの段か (1 行)",
+      "marks": [
+        { "kind": "flow", "x1": 113, "y1": 64, "x2": 113, "y2": 104, "speed": 32, "color": "#61afef" },
+        { "kind": "flow", "x1": 113, "y1": 156, "x2": 113, "y2": 196, "speed": 32, "color": "#61afef" },
+        { "kind": "pulse", "x": 8, "y": 196, "w": 210, "h": 52, "radius": 8, "color": "#e5c07b" }
+      ]
+    },
+    {
+      "type": "image",
+      "id": "compare",
+      "title": "案 A と案 B",
+      "src": "TKT-n/compare.svg",
+      "width": 460,
+      "height": 240,
+      "caption": "どこが違い、どちらを推すか (1 行)",
+      "marks": []
+    },
+    {
+      "type": "markdown",
+      "id": "notes",
+      "title": "図に描けないこと",
+      "text": "- **見出しの項目 (流れ)**\n  - 詳細 (1 文)\n  ![流れの説明 (小窓に出る 1 行)](TKT-n/mini-flow.svg)\n- **見出しの項目 (前と後)**\n  - 詳細 (1 文)\n  ![前と後の説明](TKT-n/mini-before-after.svg)\n- **見出しの項目 (分かれる)**\n  - 詳細 (1 文)\n  ![分かれる所の説明](TKT-n/mini-branch.svg)\n- **見出しの項目 (文で足りる)**\n  - 詳細 (1 文。ミニ絵を付けない)"
+    },
+    {
+      "type": "markdown",
+      "id": "prev-1",
+      "title": "前の話: 済んだ話の題 (済んだ)",
+      "text": "- **済んだこと**\n  - 何が済んだか (1 文)",
+      "done": true,
+      "collapsed": true
+    }
+  ]
+}

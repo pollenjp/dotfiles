@@ -15,8 +15,9 @@
   # (bash 版は case 文での重複チェック、fish 版は fish_add_path --prepend)
   #
   # ~/.cargo/bin は、claude-skills の clone を持つホスト (dotfiles.claude.privateSkills.enable) だけ前に足す。そこへ
-  # bootstrap-pjp.sh が cargo install で shim の pjp を入れ、bootstrap-mise.sh が mise の rust で rustup (cargo・rustc の
-  # proxy) を入れる。対話の bash は ~/.cargo/env (bash.nix の initExtra) でも足すが、~/.bashrc は対話でないと先頭で返るので、
+  # bootstrap-pjp.sh が claude-skills の shim を pjp-skills の名前で入れ、bootstrap-mise.sh が mise の rust で rustup (cargo・rustc の
+  # proxy) を入れる。入口の pjp は公開の道具 (modules/pjp-tools.nix。Nix の profile) で、ここより後ろにあるので、bootstrap-pjp.sh は
+  # 前の手順が ~/.cargo/bin に入れた shim の pjp を外す (dotfiles-private の ADR 124)。対話の bash は ~/.cargo/env (bash.nix の initExtra) でも足すが、~/.bashrc は対話でないと先頭で返るので、
   # login のシェル (hc の core が読む login の環境。下の mise の shim の節) には入らなかった。
   home.sessionPath = [
     "$HOME/bin"

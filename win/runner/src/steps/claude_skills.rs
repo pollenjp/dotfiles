@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 pub const KINDS: [&str; 4] = ["skills", "agents", "commands", "rules"];
 /// コピーの記録 (`%LOCALAPPDATA%\dotfiles\state\` の下)
 pub const RECORD_FILE: &str = "claude-skills.deployed.json";
-/// clone の場所の控え (ホームからの相対)。shim の pjp と Linux の bootstrap-pjp.sh が読む
+/// clone の場所の控え (ホームからの相対)。claude-skills の shim (pjp-skills) と Linux の bootstrap-pjp.sh が読む
 pub const STATE_FILE_REL: &str = ".local/state/dotfiles/claude-skills-dir";
 
 /// claude-skills の clone (runner の clone の隣、無ければ bootstrap の置き場)。

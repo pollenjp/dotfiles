@@ -5,6 +5,8 @@
 //! git が取り出し直すと切れる)。コピーは files と同じ記録で判定する: 置き先が無い → コピー・同じ中身 → 何もしない・記録と同じ中身 → 上書き・
 //! ほか → 衝突 (`--force` で上書き)。repo から消えたものは片付ける (リンクは外し、先は消さない。コピーは中身が記録どおりなら消す)。選び方は Linux の
 //! `nix/scripts/bootstrap-claude-skills.sh` と同じ (dotfiles-private の docs/adr/064_win_w02_claude_skills_hub_*・docs/adr/065_win_claude_config_*)。
+//! 張らない skill (`skip_skills`・わけを添える `hold`) と、先が無ければ張り替えてよいほかの手順のリンク (`adopt_dangling`) は呼ぶ側が渡す
+//! (claude-files が、skill の依存の表で外す skill と claude-skills の写しに譲る skill に使う)。
 
 use super::{Mode, Outcome};
 use crate::context::Ctx;
@@ -63,6 +65,10 @@ pub struct Linker {
     pub mode: Mode,
     pub records: Records,
     pub tally: Tally,
+    /// skills のうち、わけを添えて張らない名前とそのわけ (`hold`。claude-files が skill の依存の表で外すもの・claude-skills の写しに譲るもの)
+    held: Vec<(String, String)>,
+    /// 先が無ければ (片付けた後の残り)、この手順が張り替えてよいリンクの先 (`adopt_dangling`)
+    adopt: Vec<PathBuf>,
 }
 
 impl Linker {
@@ -80,7 +86,19 @@ impl Linker {
             mode,
             records,
             tally: Tally::default(),
+            held: Vec::new(),
+            adopt: Vec::new(),
         }
+    }
+
+    /// skills の `name` を、わけ `why` を添えて張らない (skip_skills と同じく、前にこの手順が張ったリンクは外し、ほかのリンクには触らない)。
+    pub fn hold(&mut self, name: &str, why: impl Into<String>) {
+        self.held.push((name.to_string(), why.into()));
+    }
+
+    /// `target` (とその下) を指すリンクで先が無いもの (ほかの手順が張って、元を片付けた後の残り) を、この手順のものとして張り替える。
+    pub fn adopt_dangling(&mut self, target: PathBuf) {
+        self.adopt.push(target);
     }
 
     /// この手順が張ったリンクの先か (今の根か前の根の中。印があれば、ほかの clone の同じ場所も)。
@@ -105,8 +123,27 @@ impl Linker {
         kind_ok && root.is_some_and(|r| ends_with_ignore_case(r, &suffix))
     }
 
-    fn skipped_name(&self, kind: &str, name: &str) -> bool {
-        kind == "skills" && self.src.skip_skills.iter().any(|s| s == name)
+    /// 張らない名前なら、そのわけ (skip_skills は「このマシンでは使わない」、hold は添えたわけ)。
+    fn skip_reason(&self, kind: &str, name: &str) -> Option<String> {
+        if kind != "skills" {
+            return None;
+        }
+        if self.src.skip_skills.iter().any(|s| s == name) {
+            return Some("このマシンでは使わない".to_string());
+        }
+        self.held
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, why)| why.clone())
+    }
+
+    /// 先が無く、`adopt_dangling` で張り替えてよいとしたリンクの先か。
+    fn adoptable(&self, target: &Path) -> bool {
+        !target.exists()
+            && self
+                .adopt
+                .iter()
+                .any(|a| same_path(target, a) || is_under(target, a))
     }
 
     /// `select` で写すものか (絞り込みが無ければいつも)。
@@ -166,8 +203,8 @@ impl Linker {
                 continue;
             }
             let label = format!("{kind}/{name}");
-            if self.skipped_name(kind, &name) {
-                ctx.say(format!("張らない (このマシンでは使わない): {label}"));
+            if let Some(why) = self.skip_reason(kind, &name) {
+                ctx.say(format!("張らない ({why}): {label}"));
                 continue;
             }
             let src = src_dir.join(&name);
@@ -202,7 +239,7 @@ impl Linker {
                 self.tally.same += 1;
                 return;
             }
-            if !self.is_ours(&target) {
+            if !self.is_ours(&target) && !self.adoptable(&target) {
                 self.skip(
                     ctx,
                     format!("{label} (別のリンクがある: -> {})", target.display()),
@@ -353,22 +390,25 @@ impl Linker {
             let Some(target) = link_target(&dest) else {
                 continue;
             };
-            let skipped = self.skipped_name(kind, &name);
+            let skipped = self.skip_reason(kind, &name);
             let src = self.src.root.join(kind).join(&name);
             // 根にあっても写さないもの (select で外れた) は、前に張ったリンクを外す
             let unselected = src.exists() && !self.selected(kind, &src);
             // 今の根にある名前は link_kind が受け持つ (張り替えを二度数えない)
-            if !skipped && !unselected && name != "README.md" && src.exists() {
+            if skipped.is_none() && !unselected && name != "README.md" && src.exists() {
                 continue;
             }
             if !self.is_ours(&target)
-                || (!skipped && !unselected && is_under(&target, &self.src.root) && target.exists())
+                || (skipped.is_none()
+                    && !unselected
+                    && is_under(&target, &self.src.root)
+                    && target.exists())
             {
                 continue;
             }
             let label = format!("{kind}/{name}");
-            let why = if skipped {
-                "このマシンでは使わない".to_string()
+            let why = if let Some(why) = skipped {
+                why
             } else if unselected {
                 "写すものでない".to_string()
             } else {
@@ -541,6 +581,8 @@ mod tests {
     //! - `select` で外したものは張らず写さず (「張らない」も出さない)、前にこの手順が張ったリンクと写したコピーは片付ける
     //! - 片付けの文は元の呼び名 (`origin`) を使う
     //! - つなぐ先の種類の dir がリンクなら、つなぐ先の dir の名前 (`~/<名前>/<種類>`) で知らせて触らない
+    //! - `hold` した skill は、わけを添えて張らず、前にこの手順が張ったリンクは外し、ほかの先へのリンクには触らない
+    //! - `adopt_dangling` の先を指すリンクは、先が無ければ張り替え、先があれば別のリンクとして飛ばす
 
     use super::*;
     use crate::host::{Groups, HostValues};
@@ -587,6 +629,11 @@ mod tests {
 
         /// 流し (apply なら記録を書き)、(tally, 出力) を返す
         fn run(&self, mode: Mode) -> (Tally, String) {
+            self.run_with(mode, |_| {})
+        }
+
+        /// `prepare` で Linker を整えてから流す
+        fn run_with(&self, mode: Mode, prepare: impl FnOnce(&mut Linker)) -> (Tally, String) {
             let sys = FakeSys::new(|c| fake_mklink(c).expect("mklink だけを打つ"));
             let mut out = Vec::new();
             let mut ctx = Ctx {
@@ -615,6 +662,7 @@ mod tests {
                 mode,
                 records,
             );
+            prepare(&mut w);
             w.run(&mut ctx);
             if mode.writes() {
                 w.records.save_if_changed().unwrap();
@@ -700,6 +748,71 @@ mod tests {
             "{:?}",
             tally.skipped
         );
+    }
+
+    /// hold した skill は、わけを添えて張らず、前にこの手順が張ったリンクは外す (ほかの先へのリンクには触らない)
+    #[test]
+    fn held_skills_are_not_linked_and_ours_are_removed() {
+        let e = Env::new();
+        e.t.write("base/skills/pjp-b/SKILL.md", "b\n");
+        let elsewhere = e.t.path().join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        let sys = FakeSys::new(|c| fake_mklink(c).unwrap());
+        std::fs::create_dir_all(e.dest("skills")).unwrap();
+        create_junction(
+            &sys,
+            &e.dest("skills/pjp-a"),
+            &e.base().join("skills").join("pjp-a"),
+        )
+        .unwrap();
+        create_junction(&sys, &e.dest("skills/pjp-b"), &elsewhere).unwrap();
+        let hold = |w: &mut Linker| {
+            w.hold("pjp-a", "わけ A");
+            w.hold("pjp-b", "わけ B");
+        };
+        let (_, out) = e.run_with(Mode::Check, hold);
+        assert!(out.contains("張らない (わけ A): skills/pjp-a"), "{out}");
+        assert!(out.contains("外す (apply で): skills/pjp-a"), "{out}");
+        assert!(out.contains("わけ A)"), "{out}");
+        let (tally, out) = e.run_with(Mode::Apply { force: false }, hold);
+        assert_eq!((tally.removed, tally.skipped.len()), (1, 0), "{out}");
+        assert!(!is_link(&e.dest("skills/pjp-a")));
+        assert!(same_path(
+            &link_target(&e.dest("skills/pjp-b")).unwrap(),
+            &elsewhere
+        ));
+        assert!(
+            e.base()
+                .join("skills")
+                .join("pjp-a")
+                .join("SKILL.md")
+                .is_file()
+        );
+    }
+
+    /// adopt_dangling の先を指すリンクは、先が無ければ (片付けた後の残り) 張り替え、先があれば別のリンクとして飛ばす
+    #[test]
+    fn adopts_dangling_links_only() {
+        let e = Env::new();
+        let other = e.t.path().join("other").join("skills");
+        std::fs::create_dir_all(other.join("pjp-a")).unwrap();
+        let sys = FakeSys::new(|c| fake_mklink(c).unwrap());
+        std::fs::create_dir_all(e.dest("skills")).unwrap();
+        create_junction(&sys, &e.dest("skills/pjp-a"), &other.join("pjp-a")).unwrap();
+        let adopt = |w: &mut Linker| w.adopt_dangling(other.join("pjp-a"));
+        let (tally, out) = e.run_with(Mode::Apply { force: false }, adopt);
+        assert_eq!(tally.skipped.len(), 1, "先があるうちは別のリンク: {out}");
+        assert!(same_path(
+            &link_target(&e.dest("skills/pjp-a")).unwrap(),
+            &other.join("pjp-a")
+        ));
+        std::fs::remove_dir_all(other.join("pjp-a")).unwrap();
+        let (tally, out) = e.run_with(Mode::Apply { force: false }, adopt);
+        assert_eq!((tally.updated, tally.skipped.len()), (1, 0), "{out}");
+        assert!(same_path(
+            &link_target(&e.dest("skills/pjp-a")).unwrap(),
+            &e.base().join("skills").join("pjp-a")
+        ));
     }
 
     #[test]

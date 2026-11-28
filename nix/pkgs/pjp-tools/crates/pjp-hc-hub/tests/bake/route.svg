@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="460" height="352" viewBox="0 0 460 352"
+     font-family="'Yu Gothic UI', 'Meiryo UI', Meiryo, 'Segoe UI', sans-serif">
+  <title>雛形 route: 届くまでの段を上から順に並べる。済んだ段は緑、ユーザーの番の段は黄 (①)、まだの段は灰</title>
+  <!-- panel の図の雛形 (pjp-hc-hub の references/panel-figures.md)。段は 4 つまで (箱 52・間 40。5 つ以上は段をまとめるか 2 枚に)。
+       いまの段がユーザーの番でなければ、その段を青 (#263445・#61afef) にする。
+       marks は assets/panel/sections.json の節 route。箱や線を動かしたら、marks の座標も同じに替える
+       根の width・height は viewBox (表に出る大きさ) の 4 倍のまま変えず、座標と字の大きさは viewBox の単位で書く (panel-figures.md の「細かさ」) -->
+  <rect width="460" height="352" fill="#1e2228"/>
+
+  <!-- 段をつなぐ線 (箱の間は 40 px)。済んだ段から今の段までに marks の flow を置く -->
+  <line x1="113" y1="64" x2="113" y2="104" stroke="#5c6370" stroke-width="2"/>
+  <line x1="113" y1="156" x2="113" y2="196" stroke="#5c6370" stroke-width="2"/>
+  <line x1="113" y1="248" x2="113" y2="288" stroke="#5c6370" stroke-width="2"/>
+
+  <!-- 段 1: 済んだ (緑) -->
+  <rect x="8" y="12" width="210" height="52" rx="8" fill="#26352a" stroke="#98c379" stroke-width="1.5"/>
+  <text x="113" y="33" text-anchor="middle" font-size="13" font-weight="700" fill="#d7dae0">段 1 の場所</text>
+  <text x="113" y="51" text-anchor="middle" font-size="11" fill="#9aa2ae">そこで起きること</text>
+  <text x="234" y="33" font-size="12" fill="#d7dae0">誰が: 私</text>
+  <text x="234" y="51" font-size="11" fill="#98c379">済んだ (時刻)</text>
+
+  <!-- 段 2: 済んだ (緑) -->
+  <rect x="8" y="104" width="210" height="52" rx="8" fill="#26352a" stroke="#98c379" stroke-width="1.5"/>
+  <text x="113" y="125" text-anchor="middle" font-size="13" font-weight="700" fill="#d7dae0">段 2 の場所</text>
+  <text x="113" y="143" text-anchor="middle" font-size="11" fill="#9aa2ae">そこで起きること</text>
+  <text x="234" y="125" font-size="12" fill="#d7dae0">誰が: 子 E</text>
+  <text x="234" y="143" font-size="11" fill="#98c379">済んだ</text>
+
+  <!-- 段 3: ユーザーの番 (黄)。marks の pulse を同じ x・y・w・h で重ねる -->
+  <rect x="8" y="196" width="210" height="52" rx="8" fill="#3a3222" stroke="#e5c07b" stroke-width="1.5"/>
+  <text x="113" y="215" text-anchor="middle" font-size="11" fill="#e5c07b">どこで (アプリ・画面)</text>
+  <text x="113" y="238" text-anchor="middle" font-size="15" font-weight="700" fill="#f2e6d2">① すること</text>
+  <text x="234" y="217" font-size="12" fill="#e5c07b">誰が: あなた (いま)</text>
+  <text x="234" y="235" font-size="11" fill="#9aa2ae">済んだら問いで送る</text>
+
+  <!-- 段 4: まだ (灰) -->
+  <rect x="8" y="288" width="210" height="52" rx="8" fill="#2c323c" stroke="#5c6370"/>
+  <text x="113" y="309" text-anchor="middle" font-size="13" font-weight="700" fill="#d7dae0">段 4 の場所</text>
+  <text x="113" y="327" text-anchor="middle" font-size="11" fill="#9aa2ae">そこで起きること</text>
+  <text x="234" y="309" font-size="12" fill="#d7dae0">誰が: runner</text>
+  <text x="234" y="327" font-size="11" fill="#9aa2ae">まだ</text>
+  <g id="pjp-marks">
+    <!-- pjp hub bake: panel.json の節の marks を CSS の動きに焼いた写し (panel の外に出す写し。panel には載せない) -->
+    <style>
+      @keyframes pjp-mk-0 { 0% { stroke-dashoffset: 61.542px } 100% { stroke-dashoffset: 20.771px } }
+      .pjp-mk-0 { animation: pjp-mk-0 1.274s linear infinite }
+      @keyframes pjp-mk-1 { 0% { stroke-dashoffset: 61.542px } 100% { stroke-dashoffset: 20.771px } }
+      .pjp-mk-1 { animation: pjp-mk-1 1.274s linear infinite }
+      @keyframes pjp-mk-2 { 0%, 100% { opacity: 0.15 } 50% { opacity: 1 } }
+      .pjp-mk-2 { animation: pjp-mk-2 1.6s ease-in-out infinite }
+      @media (prefers-reduced-motion: reduce) { .pjp-mk { animation: none !important } }
+    </style>
+    <defs>
+      <clipPath id="pjp-mk-0-clip"><rect x="108" y="64" width="10" height="40"/></clipPath>
+      <clipPath id="pjp-mk-1-clip"><rect x="108" y="156" width="10" height="40"/></clipPath>
+    </defs>
+    <line class="pjp-mk pjp-mk-0" x1="113" y1="64" x2="113" y2="104" style="fill: none; stroke: #61afef; stroke-width: 8px; stroke-linecap: round; stroke-dasharray: 0 40.771px; stroke-dashoffset: 20.771px; clip-path: url(#pjp-mk-0-clip); opacity: 1"/>
+    <line class="pjp-mk pjp-mk-1" x1="113" y1="156" x2="113" y2="196" style="fill: none; stroke: #61afef; stroke-width: 8px; stroke-linecap: round; stroke-dasharray: 0 40.771px; stroke-dashoffset: 20.771px; clip-path: url(#pjp-mk-1-clip); opacity: 1"/>
+    <rect class="pjp-mk pjp-mk-2" x="9" y="197" width="208" height="50" rx="7" style="fill: none; stroke: #e5c07b; stroke-width: 2px; opacity: 1"/>
+  </g>
+</svg>

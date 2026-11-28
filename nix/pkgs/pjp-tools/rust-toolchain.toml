@@ -1,0 +1,7 @@
+# ハブと子の道具の toolchain (Windows の rustup と CI。Linux の Nix は nixpkgs の rustc で作り、このファイルは読まない)。runner の手順
+# pjp-tools は、合う Release の exe が無くて cargo で作るとき、この dir に入ってから cargo を打つ (rustup が今のディレクトリから探す)。
+# 版を上げるときは、公開から 7 日以上たった stable にする (pjp-dep-release-age。1.99.1 は 2026-10-15 の公開。win/runner と同じ版)
+[toolchain]
+channel = "1.99.1"
+components = ["clippy", "rustfmt"]
+profile = "minimal"

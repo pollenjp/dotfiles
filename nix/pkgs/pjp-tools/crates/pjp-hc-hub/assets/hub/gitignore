@@ -1,0 +1,5 @@
+# pjp-hc-hub の pjp hub init が書いた。直すときは dotfiles の雛形
+# (nix/pkgs/pjp-tools/crates/pjp-hc-hub/assets/hub/gitignore) を直して打ち直す。
+
+# Claude Code がこのマシンだけの許可を書くファイル
+.claude/settings.local.json

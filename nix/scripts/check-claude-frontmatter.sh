@@ -129,10 +129,11 @@ repo_skills=${repo_dir}/.claude/skills
 problems=()
 notes=()
 
-# skill の metadata の pjp-pack に書ける pack の名前。入口の skill (pjp-pack-<pack>) は claude-skills にある。pack を足すなら、
-# ここと claude-skills の入口・scripts/lint.sh を一緒に直す。名前は入口より先に足してよい (入口の無い pack だけを書いた skill は、
-# bootstrap-claude-skill-overrides.sh が警告して説明つきのまま残す)
-packs=(diagram video notion machine repo browser lang docs)
+# skill の metadata の pjp-pack に書ける pack の名前。入口の skill (pjp-pack-<pack>) は claude-skills にある (hc の入口 pjp-pack-hc
+# だけは、入る skill が全部公開なので、この repo の nix/files/claude/skills/ にある)。pack を足すなら、ここと claude-skills の入口・
+# scripts/lint.sh を一緒に直す。名前は入口より先に足してよい (入口の無い pack だけを書いた skill は、bootstrap-claude-skill-overrides.sh が
+# 警告して説明つきのまま残す)
+packs=(diagram video notion machine repo browser lang docs hc)
 # repo の skill の metadata の pjp-extends (拡張の印) に書ける値。読む側と一緒に足す (ADR 056)
 extends=(deps)
 

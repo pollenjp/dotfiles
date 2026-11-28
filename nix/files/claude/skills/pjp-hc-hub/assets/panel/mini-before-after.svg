@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="320" viewBox="0 0 200 80"
+     font-family="'Yu Gothic UI', 'Meiryo UI', Meiryo, 'Segoe UI', sans-serif">
+  <title>雛形 mini-before-after: 前の形 (左・灰) → 後の形 (右・青)</title>
+  <!-- panel のミニ絵の雛形 (pjp-hc-hub の references/panel-figures.md の「ミニ絵」)。字だけを替えて使う。
+       箱の字は、名前 (11 px・太字) が全角 7 字まで、補足 (10 px) が全角 8 字まで (半角は 2 字で全角 1 字)。
+       左が前・右が後。動き (marks) は付けない
+       根の width・height は viewBox (表に出る大きさ) の 4 倍のまま変えず、座標と字の大きさは viewBox の単位で書く (panel-figures.md の「細かさ」) -->
+  <rect width="200" height="80" fill="#1e2228"/>
+
+  <!-- 前から後への矢印 -->
+  <line x1="92" y1="40" x2="101" y2="40" stroke="#5c6370" stroke-width="2"/>
+  <polygon points="101,35 108,40 101,45" fill="#5c6370"/>
+
+  <!-- 前 (灰) -->
+  <rect x="4" y="10" width="86" height="60" rx="6" fill="#2c323c" stroke="#5c6370"/>
+  <text x="47" y="26" text-anchor="middle" font-size="10" fill="#9aa2ae">前</text>
+  <text x="47" y="44" text-anchor="middle" font-size="11" font-weight="700" fill="#d7dae0">前の形の名前</text>
+  <text x="47" y="60" text-anchor="middle" font-size="10" fill="#9aa2ae">1 行の補足</text>
+
+  <!-- 後 (青) -->
+  <rect x="110" y="10" width="86" height="60" rx="6" fill="#263445" stroke="#61afef" stroke-width="2"/>
+  <text x="153" y="26" text-anchor="middle" font-size="10" fill="#61afef">後</text>
+  <text x="153" y="44" text-anchor="middle" font-size="11" font-weight="700" fill="#61afef">後の形の名前</text>
+  <text x="153" y="60" text-anchor="middle" font-size="10" fill="#9aa2ae">1 行の補足</text>
+</svg>
