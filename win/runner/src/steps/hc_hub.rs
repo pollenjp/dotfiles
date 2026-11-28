@@ -123,23 +123,23 @@ impl Step for HcHub {
                 Mode::Apply { .. } => Outcome::new(
                     Kind::Failed,
                     format!(
-                        "shim の pjp が無い ({}) → 上の pjp の手順を見る",
+                        "shim の pjp-skills が無い ({}) → 上の pjp の手順を見る",
                         shim.display()
                     ),
                 ),
                 Mode::Check => Outcome::new(
                     Kind::Missing,
                     format!(
-                        "shim の pjp が無いので確かめられない ({}) → apply で pjp を入れてから pjp hub init を流す",
+                        "shim の pjp-skills が無いので確かめられない ({}) → apply で手順 pjp が pjp-skills を入れてから pjp hub init を流す",
                         shim.display()
                     ),
                 ),
                 Mode::DryRun { .. } => {
                     // 同じ apply の pjp の手順 (order 55) が shim を入れてから、この手順が流れる
-                    ctx.say("[dry-run] (pjp の手順が shim を入れた後に) pjp hub check で差を見て、差があれば pjp hub init を流す");
+                    ctx.say("[dry-run] (pjp の手順が shim の pjp-skills を入れた後に) pjp hub check で差を見て、差があれば pjp hub init を流す");
                     Outcome::new(
                         Kind::Missing,
-                        "[dry-run] shim の pjp が無い → pjp を入れた後に pjp hub check で差を見て、差があれば pjp hub init を流す",
+                        "[dry-run] shim の pjp-skills が無い → 手順 pjp が入れた後に pjp hub check で差を見て、差があれば pjp hub init を流す",
                     )
                 }
             }];
@@ -265,7 +265,7 @@ mod tests {
                 .join("home")
                 .join(".cargo")
                 .join("bin")
-                .join(format!("pjp{}", std::env::consts::EXE_SUFFIX));
+                .join(format!("pjp-skills{}", std::env::consts::EXE_SUFFIX));
             std::fs::create_dir_all(shim.parent().unwrap()).unwrap();
             std::fs::write(&shim, "shim").unwrap();
             World { t }
@@ -277,7 +277,7 @@ mod tests {
                 .join("home")
                 .join(".cargo")
                 .join("bin")
-                .join(format!("pjp{}", std::env::consts::EXE_SUFFIX))
+                .join(format!("pjp-skills{}", std::env::consts::EXE_SUFFIX))
         }
 
         /// `pjp hub check` と `pjp hub init` の答え
