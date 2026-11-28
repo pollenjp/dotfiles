@@ -290,7 +290,8 @@ fn newness(dir: &Path) -> SystemTime {
         .unwrap_or(SystemTime::UNIX_EPOCH)
 }
 
-/// PowerShell で `script` を流すコマンド (値は呼ぶ側が env で渡す)
+/// PowerShell で `script` を流すコマンド (値は呼ぶ側が env で渡す)。PSModulePath は渡さない: pwsh 7 から受け継いだ値だと、Windows
+/// PowerShell 5.1 が pwsh の module (Expand-Archive) を読み、.NET Framework に無い口を呼んで落ちる (token.rs と同じ手当て)
 fn powershell(shell: &Path, script: &str, secs: u64) -> CommandSpec {
     CommandSpec::new(shell)
         .arg("-NoProfile")
@@ -299,6 +300,7 @@ fn powershell(shell: &Path, script: &str, secs: u64) -> CommandSpec {
         .arg("Bypass")
         .arg("-Command")
         .arg(script)
+        .env_remove("PSModulePath")
         .timeout(Duration::from_secs(secs))
 }
 
@@ -2212,6 +2214,8 @@ mod tests {
             ]
         );
         assert_eq!(spec.timeout, Some(Duration::from_secs(60)));
+        // pwsh 7 から受け継いだ PSModulePath を渡さない (Windows PowerShell 5.1 が pwsh の Expand-Archive を読んで落ちるため)
+        assert!(spec.removes_env("PSModulePath"));
     }
 
     /// 本物の PowerShell (Windows PowerShell 5.1 と、あれば 7) で、手元の HTTP server から落とし (404 も見分け)、Expand-Archive で解く
