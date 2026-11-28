@@ -90,7 +90,7 @@ ADR 117 (`docs/adr/117_win_runner_exe_release_*`)。
 | 形 | 使う PC | gh | Build Tools と rustup | clone | ホストの値 |
 | --- | --- | --- | --- | --- | --- |
 | 既定 (引数なし) | gh にログインできない PC (客先の PC など。pollenjp の private な repo を取れない) と、private な repo を使わない PC | 入れない・ログインしない | 入れない・確かめない (runner は配った exe で動く) | public な dotfiles だけを、資格情報なしの HTTPS で (origin は `https://github.com/pollenjp/dotfiles.git`) | 雛形 `templates/host.minimum.toml` を `%USERPROFILE%\.config\dotfiles\host.toml` に写す (あれば上書きしない。dotfiles-private の clone がある PC でも写さない) |
-| `-Rust` | 既定の形の PC のうち、runner を手元で build する (win/runner を直して試す)・claude-selector (cs) を作る PC | 既定と同じ | 入れる | 既定と同じ | 既定と同じ |
+| `-Rust` | 既定の形の PC のうち、runner を手元で build する (win/runner を直して試す)・claude-selector (cs) を作る・ハブと子の道具を手元で作る (nix/pkgs/pjp-tools を直して試す。[ハブと子の道具 (pjp-tools)](#ハブと子の道具-pjp-tools)) PC | 既定と同じ | 入れる | 既定と同じ | 既定と同じ |
 | `-Private` | private な repo (dotfiles-private・claude-skills) を使う PC (ホストの値の `privateRepos` が on のもの。[ホストの値](#ホストの値)) | 入れて、個人の gh のアカウントで github.com にログインする | 入れる (`-Rust` を含む。claude-skills の道具を cargo で作るため) | dotfiles・dotfiles-private・claude-skills を gh の資格情報で (origin は WSL と同じ ssh の URL) | dotfiles-private の `win/hosts/` から引く (雛形は写さない) |
 
 - bootstrap はホストの値を読まない (clone する前に流すので)。どの形で流すかは、人がこの表で決める。runner の手順 `bootstrap` (`-Check` で確かめる
@@ -469,7 +469,8 @@ dotfiles --self-update --dry-run   # 3 つの clone が最新と出る
 runner の exe は CI ([`.github/workflows/win-runner-release.yml`](../.github/workflows/win-runner-release.yml)) が作り、public な dotfiles の GitHub の
 Release に置く。PowerShell の `dotfiles` 関数は、clone の launcher (`powershell/Invoke-DotfilesRunner.ps1`。配らない。clone のものを呼ぶ) で、clone の
 HEAD の runner に合う exe を落として起こす。minimum の PC に Visual Studio Build Tools と rustup が要らない (経緯は dotfiles-private の ADR 117
-(`docs/adr/117_win_runner_exe_release_*`))。
+(`docs/adr/117_win_runner_exe_release_*`))。ハブと子の道具 (`pjp`・`pjp-hub` など) の exe も、同じ形 (key ごとの Release・sha256 と key の確かめ・
+置き場の印) で Release に置き、runner の手順 `pjp-tools` が置く ([ハブと子の道具 (pjp-tools)](#ハブと子の道具-pjp-tools))。
 
 - **key**: clone の HEAD の `win/runner` の git の tree の hash (`git rev-parse HEAD:win/runner`)。exe の中身は `win/runner` の中身だけで決まる
   (runner は `win/runner` の外のファイルを exe に埋めない。外のファイルは動くときに clone から読む。`runner/tests/embeds.rs` が見る)
@@ -523,6 +524,68 @@ HEAD の runner に合う exe を落として起こす。minimum の PC に Visu
 - repo の設定の immutable releases を入れると、公開した exe・`.sha256`・tag を差し替えられなくなる。そのとき、消した Release の tag の名前は二度と使えない
   ので、30 日より後に同じ中身へ戻ると、その key の Release は作れない (公開の job が落ちる)。cargo の無い PC は、`win/runner` を 1 行変えて別の key に
   するまで、その commit では止まる (めったに起きない)
+
+### ハブと子の道具 (pjp-tools)
+
+ハブと子の道具 (入口 `pjp` と、`pjp hub`・`pjp child`・`pjp mark`・`pjp pack` が起こす `pjp-hub`・`pjp-child`・`pjp-mark`・`pjp-pack`) は、public な
+dotfiles の workspace `nix/pkgs/pjp-tools` にある。Windows には、CI ([`.github/workflows/pjp-tools-release.yml`](../.github/workflows/pjp-tools-release.yml)) が作って
+GitHub の Release に置いた exe を、runner の手順 `pjp-tools` (order 54。`herdrHub` か `claudePrivateSkills` のホスト。Windows にしか無い手順なので、受け持ちが
+WSL のホストでも `dotfiles apply` が流す) が確かめて置く。形は [runner の exe (Release)](#runner-の-exe-release) と同じで、cargo の無い PC (Build Tools と
+rustup を入れない minimum の PC) でも入る。Linux は Nix の package (`nix/pkgs/pjp-tools/default.nix`)。経緯は dotfiles-private の ADR 124 (`docs/adr/124_*`)。
+
+```powershell
+dotfiles check --steps pjp-tools             # 写しと印・bin の一致を見る (何も落とさない・作らない)
+dotfiles apply --dry-run --steps pjp-tools   # 落とす URL・作る cargo・写すファイル・消す古い写しを出す
+dotfiles apply --steps pjp-tools             # 置く
+# 初めて PATH に足した後は、新しい PowerShell で (herdr-app の中の端末なら herdr-app を上げ直してから)
+pjp --version                                # pjp <版>・key=<key>・pjp-skills=<場所か 無い>
+```
+
+- **key**: clone の HEAD の `nix/pkgs/pjp-tools` の git の tree の hash (`git rev-parse HEAD:nix/pkgs/pjp-tools`)。exe の中身は workspace の中身だけで
+  決まる (workspace の外のファイルを exe に埋めない)
+- **Release**: tag `pjp-tools-<key の頭 12 字>` (prerelease)。asset は `pjp-tools-windows-x86_64.zip` (5 つの exe `pjp.exe`・`pjp-hub.exe`・`pjp-child.exe`・
+  `pjp-mark.exe`・`pjp-pack.exe` を zip の root に。C ランタイムを静的にリンクし、`pjp.exe` に key を埋める) と `pjp-tools-windows-x86_64.zip.sha256`
+  (`<64 字の 16 進>  pjp-tools-windows-x86_64.zip`)。URL は `https://github.com/pollenjp/dotfiles/releases/download/<tag>/<asset>` で、REST API は呼ばない
+- **置き場**: 使う exe は `%LOCALAPPDATA%\dotfiles\bin\` (claude-selector・claude-<名前> と同じ。置き場をユーザーの PATH の末尾に足す)。key ごとの写しは
+  `%LOCALAPPDATA%\dotfiles\pjp-tools\<key>\` に、5 つの exe と印 `verified` (key・出どころ (`release` か `cargo`)・5 つの exe の sha256 の行) を置く。
+  印は写しの `pjp.exe --version` が `key=<key>` を名乗るのを確かめてから付け、写しの exe を替えたら効かない (落とし直す)。新しい方 (印の時刻) から、
+  今の key を含めて 3 つの key の写しを残し、ほかは消す
+- **bin に写す**: 写しと sha256 が違う exe だけを写す (動いている exe も、退けてから置く)。退けられずに書けなければ ⚠ (pjp を使っている端末・会話を
+  閉じてから流し直す)
+- 落とすのと解くのは PowerShell (`Invoke-WebRequest -UseBasicParsing`・`Expand-Archive`。launcher と同じ道具)
+
+決め方:
+
+| key の写し | Release | cargo | する |
+| --- | --- | --- | --- |
+| 印 `verified` があり、`pjp.exe --version` の key が合う (印を付けた後に exe が替わっていない) | — | — | bin に写す |
+| 無い (印が無い・合わない) | ある・sha256 が合う | — | 落として解き、`pjp.exe --version` の key を確かめ、印 (`release`) を付けて写す |
+| 無い | ある・sha256 が合わない (`.sha256` が読めない・key が合わない・zip に exe が足りないも) | — | 使わずに止まる (cargo があっても戻らない。置いてある bin の exe はそのまま) |
+| 無い | 無い (404)・届かない | ある | workspace で `cargo build --release --locked` (`RUSTUP_TOOLCHAIN` は workspace の `rust-toolchain.toml` の版、`PJP_TOOLS_KEY=<key>`) で作り、写しに入れて印 (`cargo`) を付けて写す (Release を使えなかったわけを行に添える) |
+| 無い | 無い (404)・届かない | 無い | 止まる。わけと直し方を出す (下) |
+
+- 止まっても、⚠ になるのはこの手順の行だけ (ほかの手順は進む)
+- Release が無い (404) のは、merge の直後で CI がまだ作り終えていない (数分待って `dotfiles apply` を打ち直す)・clone が main より先で、
+  `nix/pkgs/pjp-tools` を変えた commit が手元にある (main に戻すか、merge まで待つ)・clone が古く、その key の Release が消えた
+  (`dotfiles --self-update apply` で進める。古い key の Release は 30 日で消える) のどれか。届かないときは github.com に届くか (ネットワーク・プロキシ) を
+  確かめる。cargo の無い PC で手元で作りたいなら `Install-Bootstrap.ps1 -Rust` で Build Tools と rustup を入れる
+- `nix/pkgs/pjp-tools` に commit していない変更 (未追跡のファイルも) があると、key の写しを使わず・作らず、cargo で作って bin に直に置く
+  (`PJP_TOOLS_KEY` は外すので、`pjp --version` は `key=` (空) を出す。写しにも印にもしない)。cargo が無ければ止まる (手元の変更は Release に無い)
+- check は何も落とさず・作らず、写しと印・bin の一致を見る (写しが無ければ、bin の `pjp.exe --version` の key も添える)。dry-run は打つもの
+  (落とす URL・作る cargo・写すファイル・消す古い写し) を出す。どちらも Release があるかは見ない (ネットワークに出ない)
+- PATH は新しい端末から効く (herdr-app とその中の端末・動いている Claude Code には効かない)
+
+公開 (CI) の決まりは runner の exe と同じ (上の「公開 (CI)」)。違うのは次だけ:
+
+- build の job は 5 つの exe を作り、Visual C++ の runtime の DLL を読まないこと (`dumpbin /dependents`)・zip を解いた `pjp.exe --version` の key・
+  `pjp-hub.exe --help` が 0 で終わることを確かめ、zip と `.sha256` を artifact (`pjp-tools-<key>`) に上げる。公開の script は
+  `.github/scripts/pjp-tools-publish.sh`
+- 公開の job が動くのは、repo の変数 `PJP_TOOLS_PUBLISH` が `true` の main の push か、main での手動の実行 (Actions の画面の「Run workflow」で `publish`
+  に印) のときだけ。最初の Release は手動の実行で作り、PC で確かめてから変数を入れる (`gh variable set PJP_TOOLS_PUBLISH --body true -R pollenjp/dotfiles`)
+- attestation は zip に作る (`gh attestation verify pjp-tools-windows-x86_64.zip -R pollenjp/dotfiles`)
+- 30 日より古い `pjp-tools-` の Release は、新しい方から 20 本を残して消す (tag も)
+- PR の exe を試すときは、clone を PR の branch にして、cargo のある PC で `dotfiles apply --steps pjp-tools` を流す (PR の key の Release は無いので
+  cargo で作る)。runner の exe と違い、置き場に手で置いた zip・exe は使わない (印の無い写しは使わず、Release から落とし直す)
 
 ### ホストの値
 
@@ -765,6 +828,7 @@ item = "op://<vault の ID>/<項目の ID>/<欄の ID>"   # 元の token の 1Pa
 | 50 | `claude-t3` | T3 Code の会話だけの Claude の設定 (`claude-code/t3/` の `settings.json`・`CLAUDE.t3.md`) を `%USERPROFILE%\.claude\t3\` へ記録つきのコピーで置き (改行は LF にし、JSON は object かを確かめてから置く。置き先で変えたファイルは衝突として知らせ、`--force` で上書き。置くファイルから外したものは、置いたままなら消す。`t3` がリンクなら触らない)、T3 の Launch arguments の文を出す (この手順は T3 の設定を書かない。`windowsT3Code` のホストでは `t3-code-settings` が書く。[後述](#claude-code-の設定))。記録は `%LOCALAPPDATA%\dotfiles\state\claude-t3.deployed.json` | `windowsClaudeCode` | 有る (Windows だけ) |
 | 50 | `git-config` | git の設定 (`%USERPROFILE%\.config\git\config`・`ignore`) を、WSL の home-manager と同じ `nix/home/modules/git.toml` から置く (署名と delta は除く。Windows だけ `core.sshCommand` に Windows の OpenSSH の `ssh.exe` を足す。apply では `openssh` (96) の後に、その `ssh.exe` が変わっていればもう一度流す。[後述](#git-の設定)) | いつも (名前とメールは `gitIdentity`) | 有る (Windows だけ) |
 | 50 | `local-env` | マシンローカルの環境変数のファイル `%USERPROFILE%\.config\pjp\env` を、無ければ作り、頭の「dotfiles が書く欄」を、つないだ skill の `pjp-env.txt` から書き直す (Linux の `bootstrap-local-env` と同じ印と書き直し方。欄の外の行と値には触れない。dotfiles の節は入れない。[後述](#マシンローカルの環境変数-configpjpenv)) | `claudePrivateSkills` | 有る (Windows だけ) |
+| 54 | `pjp-tools` | ハブと子の道具 (`pjp`・`pjp-hub`・`pjp-child`・`pjp-mark`・`pjp-pack`) の exe を、clone の HEAD の `nix/pkgs/pjp-tools` に合う key の Release から落とし (sha256 と `pjp.exe --version` の key を確かめ、`%LOCALAPPDATA%\dotfiles\pjp-tools\<key>\` に写しと印を置く)、`%LOCALAPPDATA%\dotfiles\bin\` に置いてユーザーの PATH に足す。Release が無く cargo があれば手元で作る。sha256・key が合わない Release は使わずに止まる (cargo に戻らない。[後述](#ハブと子の道具-pjp-tools)) | `herdrHub` か `claudePrivateSkills` | 有る (Windows だけ) |
 | 55 | `notion-tokens` | ホストの値の `[claude.notion.tokens]` から `%USERPROFILE%\.local\state\dotfiles\notion-tokens.json` を書き、宣言したプロファイルごとに `~/.config/pjp/env` の変数の行と、env の ACL を値を出さずに確かめて知らせる (Linux の home-manager と `bootstrap-notion-tokens` を 1 つにしたもの。env と ACL は書き換えない。[後述](#notion-の-api-キーの宣言-claudenotiontokens)) | `windowsClaudeCode` | 有る (Windows だけ) |
 | 55 | `pjp` | shim の `pjp` を (要れば) `cargo install` し、`pjp --build` で道具を作る | `claudePrivateSkills` | 有る (Windows だけ) |
 | 60 | `claude-skill-overrides` | `settings.json` の `skillOverrides` (pjp-dev-tracker の on/off・pjp-t3-hub の off・pack の skill を名前だけ・同期された skill を隠す) を書く | `windowsClaudeCode` | 有る (Windows だけ) |

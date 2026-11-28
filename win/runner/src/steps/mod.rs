@@ -36,6 +36,7 @@ mod op_reason_parity;
 pub mod pending;
 pub mod pin_updates;
 pub mod pjp;
+pub mod pjp_tools;
 pub mod port_forward;
 pub mod powershell_profile;
 pub mod powertoys;
@@ -62,6 +63,8 @@ pub enum Gate {
     Tool(&'static str),
     /// 道具の switch がどれも true のとき (Nix の表で効く条件 (requires) のある道具。先頭がその道具、後ろが Windows でも効く条件)
     AllTools(&'static [&'static str]),
+    /// 道具の switch のどれかが true のとき (いくつかの道具が同じものを使う。ハブと子の道具の exe (pjp-tools) は herdrHub か claudePrivateSkills)
+    AnyTool(&'static [&'static str]),
 }
 
 /// 道具の switch が off ならそのわけ。
@@ -83,6 +86,19 @@ impl Gate {
             Gate::Always => None,
             Gate::Tool(key) => tool_off_reason(host, key),
             Gate::AllTools(keys) => keys.iter().find_map(|key| tool_off_reason(host, key)),
+            Gate::AnyTool(keys) => {
+                if keys.iter().any(|key| host.tool(key)) {
+                    return None;
+                }
+                let each: Vec<String> = keys
+                    .iter()
+                    .map(|key| format!("{key} = false は{}", host.tool_origin(key)))
+                    .collect();
+                Some(format!(
+                    "このホストでは off ({}。どれかが true なら on)",
+                    each.join("・")
+                ))
+            }
         }
     }
 
@@ -92,6 +108,7 @@ impl Gate {
             Gate::Always => "いつも".to_string(),
             Gate::Tool(key) => key.to_string(),
             Gate::AllTools(keys) => keys.join("・"),
+            Gate::AnyTool(keys) => keys.join(" か "),
         }
     }
 }
@@ -194,6 +211,9 @@ pub fn all_with(options: Options) -> Vec<Box<dyn Step>> {
         Box::new(claude_env::ClaudeEnv),
         Box::new(claude_notion::ClaudeNotion),
         Box::new(claude_skills::ClaudeSkills),
+        // ハブと子の道具 (nix/pkgs/pjp-tools) の exe を、key ごとの Release から落として dotfiles\bin に置く (Windows にしか無い手順。
+        // dotfiles-private の docs/adr/124_*)。手順 pjp・hc-hub より先
+        Box::new(pjp_tools::PjpTools),
         Box::new(pjp::Pjp),
         Box::new(hc_hub::HcHub),
         // Windows の Claude Code に dotfiles の設定を配る (Windows にしか無い手順。dotfiles-private の docs/adr/065_win_claude_config_*)
@@ -302,6 +322,7 @@ mod tests {
                 (50, "claude-t3"),
                 (50, "git-config"),
                 (50, "local-env"),
+                (54, "pjp-tools"),
                 (55, "notion-tokens"),
                 (55, "pjp"),
                 (60, "claude-skill-overrides"),
@@ -383,7 +404,7 @@ mod tests {
     }
 
     /// Windows にしか無い手順は bootstrap と W0-2 の手順と Claude Code の設定の手順 (T3 Code の会話だけの設定も) と git の設定とマシンローカルの
-    /// 環境変数のファイル (local-env) と Notion の API キーの宣言と知らせ (notion-tokens) と herdr-app の mod
+    /// 環境変数のファイル (local-env) とハブと子の道具の exe (pjp-tools) と Notion の API キーの宣言と知らせ (notion-tokens) と herdr-app の mod
     /// (pjp-spaces と layout も) とキーと claude-personal・claude-work と claude-selector と claude の token の置き場の宣言 (claude-tokens) と T3 Code (入れる ps1 の手順と設定) と ghq・fzf (cdrepo が
     /// 使う。入れる ps1 の手順) と Claude Desktop (入れる ps1 の手順) と starship (入れる ps1 の手順と、$PROFILE の init の 1 行の starship-init) と
     /// Codex CLI (入れる ps1 の手順) と winget 自身 (入れる ps1 の手順) だけ
@@ -410,6 +431,7 @@ mod tests {
                 "claude-t3",
                 "git-config",
                 "local-env",
+                "pjp-tools",
                 "notion-tokens",
                 "pjp",
                 "claude-skill-overrides",
@@ -518,6 +540,27 @@ mod tests {
             Gate::AllTools(&["windowsClaudeAccounts", "windowsClaudeCode"]).describe(),
             "windowsClaudeAccounts・windowsClaudeCode"
         );
+        // どれかが true なら on。off のわけは、どれも false で、それぞれの値がどこで決まったか
+        let any = Gate::AnyTool(&["herdrHub", "claudePrivateSkills"]);
+        assert_eq!(
+            any.off_reason(&h).unwrap(),
+            "このホストでは off (herdrHub = false はグループ minimum の既定・claudePrivateSkills = false はグループ minimum の既定。どれかが true なら on)"
+        );
+        let host =
+            |text: &str| parse(text, Path::new("h.toml"), Groups::embedded().unwrap()).unwrap();
+        let hub = host(
+            "group = \"minimum\"\n[tools]\nwindowsClaudeCode = true\nwindowsHerdr = true\nherdrHub = true\n",
+        );
+        assert_eq!(any.off_reason(&hub), None);
+        let skills =
+            host("group = \"minimum\"\n[tools]\nprivateRepos = true\nclaudePrivateSkills = true\n");
+        assert_eq!(any.off_reason(&skills), None);
+        let written = host("group = \"minimum\"\n[tools]\nherdrHub = false\n");
+        assert_eq!(
+            any.off_reason(&written).unwrap(),
+            "このホストでは off (herdrHub = false はホストの値・claudePrivateSkills = false はグループ minimum の既定。どれかが true なら on)"
+        );
+        assert_eq!(any.describe(), "herdrHub か claudePrivateSkills");
     }
 
     /// private な repo (dotfiles-private) か gh のログインを読む手順 (ssh-config・port-forward・pin-updates) は privateRepos で on/off。bootstrap は
