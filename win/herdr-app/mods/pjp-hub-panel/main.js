@@ -31,6 +31,10 @@
 // props.image (ハブは渡さない): 図の節 (panel.json の sections の type "image" の 1 つ) がオブジェクトで来たら、その図だけを出す
 //   小窓になる (panel の図のクリックで、この mod が自分を開くときに渡す。下の「図の大きさと、大きく見る小窓」)。
 //
+// 題の貼り付け: 開いたトグル (節のカード・Q&A の項目・木のチケットの行) の題は、中身が一覧に残る間、一覧の上端に貼り付く (入れ子は親の題の
+//   下に段で並び、中身が流れ切ると次の題に押し上げられる)。貼り付いた題も押して畳め (畳むと、その題が貼り付いていた所まで送り戻す)、× と ID を
+//   写すボタンも効く。スクロールの位置は mod が持ち (on_scroll_wheel とつまみ)、題の位置は on_size_change で測った高さの和で決める。
+//
 // リンク: markdown の文 (markdown の節の text と、問いの body) の [字](URL)・<URL>・素の URL は、TextView がリンクにする (色・下線・
 //   ポインタの形は TextView が theme から決める)。押すと http と https の URL (host のあるもの。user@host の形は除く) だけを既定のブラウザで
 //   開き (cx.open_url)、ほかの scheme (file:・mailto: など) やパスは開かずに、わけの行にわけを出す (開けたら、そのわけは消す)。TextView の既定の
@@ -442,6 +446,10 @@ const DONE_PR = new Set(["merged", "closed"]); // 済んだ PR の state (小文
 // 字を囲む札・段の札と、× と ID を写すボタンの高さ・余白・角に掛ける倍率、gap は小さく出す行どうしの間 (px。行の間と同じく % に従わない)、
 // pad は done の節のカードの上下の余白 (px。カードの余白と同じく % に従わない。左右は図の幅の計算 (PIC.pad) と合わせて変えない)
 const DONE = { text: 0.8, min: 9, box: 0.7, gap: 3, pad: 6 };
+// 題の貼り付け (頭のコメントの「題の貼り付け」)。px は w()・h() と同じ (zoom を掛ける前)。list: 一覧の内の余白と節の間 (一覧の p と gap)、
+// card: 節のカードの左右の余白 (px)、sec・secDone・qa・row: 写しの題の上下の余白 (節・済んだ節・Q&A の項目・木の行)、
+// bar: スクロールのつまみの幅・右の空き・いちばん短い長さ
+const PIN = { list: 12, gap: 10, card: 12, sec: 6, secDone: 3, qa: 5, row: 3, bar: { w: 6, right: 3, min: 24 } };
 // 形の違う行・段 (null・数・文字・配列) は中身の無いものとみる
 const objOr = (v) => (v !== null && typeof v === "object" && !Array.isArray(v) ? v : {});
 const listOf = (v) => (Array.isArray(v) ? v : []);
@@ -779,6 +787,14 @@ export default class HubPanel extends View {
     this.status = "";
     this.busy = false;
     this.width = null;
+    // 題の貼り付け (頭のコメントの「題の貼り付け」): 一覧のスクロールの位置 (px。中身の上の端から欄の上の端まで)、欄と中身の高さ、
+    // 測った高さ (鍵 → px)・幅 (鍵 → px)、スクロールのつまみを引いている間の控え ({ y: 押した所, s: 押したときの位置 } か null)
+    this.scrollY = 0;
+    this.viewH = 0;
+    this.contentH = 0;
+    this.hs = {};
+    this.ws = {};
+    this.drag = null;
     this.k = TEXT_BASE; // 字の倍率。render の頭で shared の % から決め直す
     this.tiny = false; // 小さく出す間か (済んだ行とその下・done の節を作る間だけ true。withTiny)
     // 印のファイルの控え: 節を消す印 (dm) と段の押した印 (sp)。cur は印 (鍵 → 印。印のファイルの中身に、まだ書いていない押下を当てたもの)、
@@ -1255,23 +1271,86 @@ export default class HubPanel extends View {
   }
 
   // ---- 状況の節 ----
-  section(s, i, c) {
+  section(s, i, c, pin = null) {
     const id = s.id ?? `s${i}`;
     // 済んだ節 (done が true) は、見出しを小さく薄く、中身の字も小さく出す (頭のコメントの「済んだもの」)
     const done = s.done === true;
-    return this.withTiny(done, () => this.sectionCard(s, id, done, c));
+    return this.withTiny(done, () => this.sectionCard(s, id, done, c, pin));
   }
 
   // 節のカード (section が小さく出す間を決めてから呼ぶ)。初めの開け閉めは、done か collapsed の節を畳み、ほかは開く。描くたびに今の
   // panel.json の欄で決めるので、version を替えずに後から足した節・後から done を書いた節も畳んで出る。手で開け閉めした節は this.collapsed に
-  // id で覚え (version が変わると忘れる)、初めの形より先に効く
-  sectionCard(s, id, done, c) {
+  // id で覚え (version が変わると忘れる)、初めの形より先に効く。pin は題の貼り付けの控え ({ y: カードの上の端 (中身の中の px), list: 貼り付ける
+  // 題を足す並び }。頭のコメントの「題の貼り付け」)。null なら控えない
+  sectionCard(s, id, done, c, pin = null) {
     const closed = this.collapsed[id] ?? (done || !!s.collapsed);
     // 消す印 (頭のコメントの「節を消す印」)。ボタンを出すのは、まとめのペインの id のある節だけ
     const key = this.marksOn() ? markKey(s) : null;
     const marked = this.markState(s) === "marked";
+    const py = done ? DONE.pad : 12;
+    const gap = done ? 4 : 8;
+    const hk = `hp-shr-${id}`; // 題の行の高さを測る鍵
+    const nk = `hp-snt-${id}`; // 「次の更新で消える」の行の高さを測る鍵
+    // 開いた節は、題を貼り付ける控えを作り、中の Q&A の項目・木の行の控えをその kids に足す。中身の上の端は、カードの枠 (1)・上の余白・
+    // 題の行・間 (印があれば「次の更新で消える」の行と間も) の後ろ
+    let node = null;
+    let inner = null;
+    if (pin && !closed) {
+      node = { y: pin.y, end: pin.y + this.hOf(`hp-s-${id}`), h: 0, kids: [], clone: null };
+      inner = { y: pin.y + 1 + py + this.hOf(hk) + gap + (marked ? this.hOf(nk) + gap : 0), x: 0, list: node.kids };
+    }
+    let body = null;
+    if (!closed) {
+      if (s.type === "markdown") body = this.markdownBody(s, id, c);
+      else if (s.type === "qa") body = this.qaBody(s, id, c, inner);
+      else if (s.type === "flow") body = this.flow(s, id, c);
+      else if (s.type === "image") body = this.picture(s, id, c);
+      else if (s.type === "tickets") body = this.ticketList(s, id, c);
+      else if (s.type === "prs") body = this.prList(s, id, c);
+      else if (s.type === "work") body = this.workTree(s, id, c, inner);
+      else body = div().text_color(c.dim).child(`知らない節: ${s.type ?? "(type が無い)"}`);
+    }
+    if (node && body) {
+      // 写しの題: 題の行の上下に余白 (済んだ節は詰める) と、下の区切りの線 (1) を足した高さ。字の大きさを継ぐ字 (印の ▸・▾) はカードと
+      // 同じ大きさにする (pinStrip が ts(13) を当てる)
+      const pad = done ? PIN.secDone : PIN.sec;
+      node.h = this.hOf(hk) + pad * 2 + 1;
+      node.clone = (top, at) =>
+        this.withTiny(done, () =>
+          this.pinStrip(top, node.h, c, this.sectionHeadRow(s, id, done, c, closed, marked, key, { y: node.y, at }).px(PIN.card)),
+        );
+      pin.list.push(node);
+    }
+    return this.measure(
+      v_flex()
+        .id(`hp-s-${id}`)
+        .px(PIN.card)
+        .py(py)
+        .gap(gap)
+        .rounded(10)
+        .border_1()
+        .when(marked, (el) => el.border_dashed())
+        .border_color(marked ? c.warn : c.border)
+        .bg(c.surface)
+        // 済んだ節は、字の大きさを継ぐ字 (印の ▸・木の行の ID と題・知らない節のわけなど) も小さくする
+        .when(done, (el) => el.text_size(this.ts(13))),
+      `hp-s-${id}`,
+    )
+      // 題の行と、その右の印のボタン (題の行の外に置き、押しても節は開け閉めしない)
+      .child(this.measure(this.sectionHeadRow(s, id, done, c, closed, marked, key, null).id(hk), hk))
+      .when(marked, (el) =>
+        el.child(this.measure(div().id(nk).text_size(this.ts(11)).text_color(c.warn).child("次の更新で消える (「戻す」で残す)"), nk)),
+      )
+      .when(!!body, (el) => el.child(marked ? div().opacity(0.45).child(body) : body));
+  }
+
+  // 節の題の行: 開け閉めの印と題 (押すと開け閉めする) | 消す印のボタン。pin ({ y: カードの上の端, at: 写しを貼った所 }) なら貼り付けた写しの
+  // 題で、要素の id を替え、押すと畳んでから、カードの上の端が写しを貼った所に来るまで送り戻す (畳んだ題が欄の中に見える。頭のコメントの
+  // 「題の貼り付け」)
+  sectionHeadRow(s, id, done, c, closed, marked, key, pin) {
+    const sfx = pin ? "-pin" : "";
     const head = h_flex()
-      .id(`hp-sh-${id}`)
+      .id(`hp-sh-${id}${sfx}`)
       .flex_1()
       .min_w(0)
       .gap(6)
@@ -1279,6 +1358,7 @@ export default class HubPanel extends View {
       .cursor_pointer()
       .on_click((_, cx) => {
         this.collapsed[id] = !closed;
+        if (pin) this.scrollY = Math.max(0, pin.y - pin.at);
         cx.notify();
       })
       .child(div().flex_none().w(this.fs(12)).text_color(c.dim).child(closed ? "▸" : "▾"))
@@ -1292,45 +1372,17 @@ export default class HubPanel extends View {
           .when(marked, (el) => el.line_through())
           .child(s.type === "qa" ? this.qaTitle(s) : (s.title ?? "")),
       );
-    let body = null;
-    if (!closed) {
-      if (s.type === "markdown") body = this.markdownBody(s, id, c);
-      else if (s.type === "qa") body = this.qaBody(s, id, c);
-      else if (s.type === "flow") body = this.flow(s, id, c);
-      else if (s.type === "image") body = this.picture(s, id, c);
-      else if (s.type === "tickets") body = this.ticketList(s, id, c);
-      else if (s.type === "prs") body = this.prList(s, id, c);
-      else if (s.type === "work") body = this.workTree(s, id, c);
-      else body = div().text_color(c.dim).child(`知らない節: ${s.type ?? "(type が無い)"}`);
-    }
-    return v_flex()
-      .id(`hp-s-${id}`)
-      .px(12)
-      .py(done ? DONE.pad : 12)
-      .gap(done ? 4 : 8)
-      .rounded(10)
-      .border_1()
-      .when(marked, (el) => el.border_dashed())
-      .border_color(marked ? c.warn : c.border)
-      .bg(c.surface)
-      // 済んだ節は、字の大きさを継ぐ字 (印の ▸・木の行の ID と題・知らない節のわけなど) も小さくする
-      .when(done, (el) => el.text_size(this.ts(13)))
-      // 題の行と、その右の印のボタン (題の行の外に置き、押しても節は開け閉めしない)
-      .child(
-        h_flex()
-          .gap(6)
-          .items_center()
-          .child(head)
-          .when(key != null, (el) =>
-            el.child(
-              this.markButton(`hp-dm-${key}`, marked, c, ["印を外す (この節を残す)", "次の更新でこの節を消す (もう一度押すと戻せる)"], (cx) =>
-                this.toggleMark(key, { title: str(s.title) }, cx),
-              ),
-            ),
+    return h_flex()
+      .gap(6)
+      .items_center()
+      .child(head)
+      .when(key != null, (el) =>
+        el.child(
+          this.markButton(`hp-dm-${key}${sfx}`, marked, c, ["印を外す (この節を残す)", "次の更新でこの節を消す (もう一度押すと戻せる)"], (cx) =>
+            this.toggleMark(key, { title: str(s.title) }, cx),
           ),
-      )
-      .when(marked, (el) => el.child(div().text_size(this.ts(11)).text_color(c.warn).child("次の更新で消える (「戻す」で残す)")))
-      .when(!!body, (el) => el.child(marked ? div().opacity(0.45).child(body) : body));
+        ),
+      );
   }
 
   // ---- 節を消す印 (頭のコメントの「節を消す印」) と、印のファイルの読み書き (段の押した印も同じ手。頭のコメントの「段の answer」) ----
@@ -1661,50 +1713,32 @@ export default class HubPanel extends View {
     return typeof it.open === "boolean" ? it.open : i === 0;
   }
 
-  // Q&A の節の中身。項目を panel.json の順に縦に並べる
-  qaBody(s, id, c) {
+  // Q&A の節の中身。項目を panel.json の順に縦に並べる。pin は題の貼り付けの控え ({ y: 中身の上の端, x, list }。sectionCard)。null なら控えない
+  qaBody(s, id, c, pin = null) {
     const shown = this.qaShown(s);
     if (shown.length === 0) return div().text_color(c.muted).child("(項目はありません)");
-    return v_flex()
-      .gap(8)
-      .children(shown.map(({ it, i }) => this.qaItem(s, it, i, id, c)));
+    const QA_GAP = 8;
+    let y = pin ? pin.y : 0;
+    const items = shown.map(({ it, i }) => {
+      const el = this.qaItem(s, it, i, id, c, pin ? { y, x: pin.x, list: pin.list } : null);
+      y += this.hOf(`hp-qa-${id}-${i}`) + QA_GAP;
+      return el;
+    });
+    return v_flex().gap(QA_GAP).children(items);
   }
 
-  // 項目: 枠のついた小さなカード。頭の行 (印・「Q. <q>」・時刻・×) と、開いていれば、その下に 1 段下げた答え
-  qaItem(s, it, i, id, c) {
+  // 項目: 枠のついた小さなカード。頭の行 (印・「Q. <q>」・時刻・×) と、開いていれば、その下に 1 段下げた答え。pin ({ y: 項目の上の端, x, list })
+  // があり、開いて答えを出すなら、頭の行を貼り付ける控えを list に足す (頭のコメントの「題の貼り付け」)
+  qaItem(s, it, i, id, c, pin = null) {
     const key = this.qaKey(id, it, i);
     const open = this.qaOpen[key] ?? this.qaOpenByDefault(it, i);
     const mkey = this.marksOn() ? markKey(it) : null; // × を出すのは、まとめのペインの id のある項目だけ
     const marked = this.markState(it) === "marked";
     const q = str(it.q);
-    const at = str(it.at).trim();
     const S = this.fs(12); // 開け閉めの印の欄の幅 (節の題の行の ▸ の欄と同じ)
     const gap = 6;
-    const head = h_flex()
-      .id(`hp-qh-${id}-${i}`)
-      .flex_1()
-      .min_w(0)
-      .gap(gap)
-      .items_start()
-      .cursor_pointer()
-      .tooltip(open ? "畳む" : "開く")
-      .on_click((e, cx) => {
-        // ダブルクリックの 2 回目は数えない (開いてすぐ畳まない)
-        if ((e?.click_count ?? 1) > 1) return;
-        this.qaOpen[key] = !open;
-        cx.notify();
-      })
-      .child(div().flex_none().w(S).text_color(c.dim).child(open ? "▾" : "▸"))
-      .child(
-        div()
-          .flex_1()
-          .min_w(0)
-          .font_semibold()
-          .text_color(marked ? c.muted : c.fg)
-          .when(marked, (el) => el.line_through())
-          .child(`Q. ${q}`),
-      )
-      .when(at !== "", (el) => el.child(div().flex_none().text_size(this.ts(10)).text_color(c.dim).child(at)));
+    const ik = `hp-qa-${id}-${i}`; // 項目の高さを測る鍵
+    const hk = `hp-qhr-${id}-${i}`; // 頭の行の高さを測る鍵
     let answer = null;
     if (open) {
       const a = str(it.a);
@@ -1714,31 +1748,96 @@ export default class HubPanel extends View {
           : // inset: 項目のカードの左右の余白と枠 (px(10)・border_1) と答えの字下げ。ミニ絵がカードからはみ出さない幅を決める
             this.markdownBody({ title: `Q. ${q}`, text: a, inset: 22 + S + gap }, `${id}-qa-${i}`, c);
     }
-    return v_flex()
-      .id(`hp-qa-${id}-${i}`)
-      .px(10)
-      .py(8)
-      .gap(6)
-      .rounded(8)
-      .border_1()
-      .when(marked, (el) => el.border_dashed())
-      .border_color(marked ? c.warn : c.border)
-      .text_size(this.ts(12))
-      .child(
-        h_flex()
-          .gap(6)
-          .items_start()
-          .child(head)
-          .when(mkey != null, (el) =>
-            el.child(
-              this.markButton(`hp-qm-${id}-${i}`, marked, c, ["印を外す (この項目を残す)", "次の更新でこの項目を消す (もう一度押すと戻せる)"], (cx) =>
-                this.toggleMark(mkey, { title: q, section: markKey(s) ?? "" }, cx),
+    if (pin && answer) {
+      // 写しの頭の行: 項目の枠の左右の線を通した箱に、頭の行の上下の余白と下の区切りの線 (1) を足した高さ。tiny は済んだ節の中か
+      const tiny = this.tiny;
+      const node = { y: pin.y, end: pin.y + this.hOf(ik), h: this.hOf(hk) + PIN.qa * 2 + 1, kids: [], clone: null };
+      node.clone = (top, at) =>
+        this.withTiny(tiny, () =>
+          this.pinStrip(
+            top,
+            node.h,
+            c,
+            h_flex()
+              .flex_1()
+              .px(PIN.card)
+              .child(
+                v_flex()
+                  .flex_1()
+                  .min_w(0)
+                  .justify_center()
+                  .px(10)
+                  .border_l_1()
+                  .border_r_1()
+                  .border_color(marked ? c.warn : c.border)
+                  .text_size(this.ts(12))
+                  .child(this.qaHeadRow(s, it, i, id, c, { open, key, mkey, marked, q, S, gap }, { y: node.y, at })),
               ),
-            ),
           ),
-      )
+        );
+      pin.list.push(node);
+    }
+    return this.measure(
+      v_flex()
+        .id(ik)
+        .px(10)
+        .py(8)
+        .gap(6)
+        .rounded(8)
+        .border_1()
+        .when(marked, (el) => el.border_dashed())
+        .border_color(marked ? c.warn : c.border)
+        .text_size(this.ts(12)),
+      ik,
+    )
+      .child(this.measure(this.qaHeadRow(s, it, i, id, c, { open, key, mkey, marked, q, S, gap }, null).id(hk), hk))
       .when(marked, (el) => el.child(div().pl(S + gap).text_size(this.ts(11)).text_color(c.warn).child("次の更新で消える (「戻す」で残す)")))
       .when(!!answer, (el) => el.child(div().pl(S + gap).min_w(0).when(marked, (e) => e.opacity(0.45)).child(answer)));
+  }
+
+  // 項目の頭の行: 開け閉めの印・「Q. <q>」・時刻 (押すと開け閉めする) | 項目の ×。o は qaItem が決めた形 ({ open, key, mkey, marked, q, S, gap })。
+  // pin ({ y: 項目の上の端, at: 写しを貼った所 }) なら貼り付けた写しの頭の行で、要素の id を替え、押すと畳んでから、項目の上の端が写しを
+  // 貼った所に来るまで送り戻す (頭のコメントの「題の貼り付け」)
+  qaHeadRow(s, it, i, id, c, o, pin) {
+    const sfx = pin ? "-pin" : "";
+    const at = str(it.at).trim();
+    const head = h_flex()
+      .id(`hp-qh-${id}-${i}${sfx}`)
+      .flex_1()
+      .min_w(0)
+      .gap(o.gap)
+      .items_start()
+      .cursor_pointer()
+      .tooltip(o.open ? "畳む" : "開く")
+      .on_click((e, cx) => {
+        // ダブルクリックの 2 回目は数えない (開いてすぐ畳まない)
+        if ((e?.click_count ?? 1) > 1) return;
+        this.qaOpen[o.key] = !o.open;
+        if (pin) this.scrollY = Math.max(0, pin.y - pin.at);
+        cx.notify();
+      })
+      .child(div().flex_none().w(o.S).text_color(c.dim).child(o.open ? "▾" : "▸"))
+      .child(
+        div()
+          .flex_1()
+          .min_w(0)
+          .font_semibold()
+          .text_color(o.marked ? c.muted : c.fg)
+          .when(o.marked, (el) => el.line_through())
+          .child(`Q. ${o.q}`),
+      )
+      .when(at !== "", (el) => el.child(div().flex_none().text_size(this.ts(10)).text_color(c.dim).child(at)));
+    return h_flex()
+      .gap(6)
+      .items_start()
+      .child(head)
+      .when(o.mkey != null, (el) =>
+        el.child(
+          this.markButton(`hp-qm-${id}-${i}${sfx}`, o.marked, c, ["印を外す (この項目を残す)", "次の更新でこの項目を消す (もう一度押すと戻せる)"], (cx) =>
+            this.toggleMark(o.mkey, { title: o.q, section: markKey(s) ?? "" }, cx),
+          ),
+        ),
+      );
   }
 
   // ---- チケットと PR の一覧 (頭のコメントの「チケットと PR の一覧」) ----
@@ -1956,57 +2055,72 @@ export default class HubPanel extends View {
   }
 
   // 木の節 (type "work")。根の行 (related でないもの) を上から順に出し、related が true の根の行は、その下の点線の下に「関連」の字と
-  // 並べて出す (ほかの根の行が無ければ点線は引かない)
-  workTree(s, id, c) {
+  // 並べて出す (ほかの根の行が無ければ点線は引かない)。pin は題の貼り付けの控え ({ y: 中身の上の端, x, list }。sectionCard)。null なら控えない
+  workTree(s, id, c, pin = null) {
     const roots = listOf(s.rows).map((r, i) => ({ r: objOr(r), path: String(i) }));
     if (roots.length === 0) return div().text_color(c.muted).child("(行はありません)");
     const g = this.treeGeom();
     const sec = markKey(s) ?? ""; // 押した印の section (頭のコメントの「段の answer」。id の無い節は空の字)
-    // 根の行を上から並べる。行の間は TREE.gap で、小さく出す行 (済んだ行・done の節の中) が続く間は DONE.gap に詰める
-    const stack = (list) => {
+    // 根の行を上から並べる。行の間は TREE.gap で、小さく出す行 (済んだ行・done の節の中) が続く間は DONE.gap に詰める。y0 と x は並びの
+    // 上の端と左の字下げ (題の貼り付けの控え。pin が無ければ使わない)。並びの高さ (h) も返す
+    const stack = (list, y0, x) => {
       const items = [];
       let prev = null; // 前の行を小さく出したか (1 つ目の前は null)
+      let y = y0;
       for (const { r, path } of list) {
         const small = this.tiny || isDoneRow(r);
-        if (prev != null) items.push(div().h(prev && small ? DONE.gap : TREE.gap));
+        if (prev != null) {
+          const h = prev && small ? DONE.gap : TREE.gap;
+          items.push(div().h(h));
+          y += h;
+        }
         prev = small;
-        const { top, rest } = this.workRow(r, path, 0, id, g, c, null, sec);
+        const { top, rest, h } = this.workRow(r, path, 0, id, g, c, null, sec, false, pin ? { y, x, list: pin.list } : null);
         items.push(v_flex().min_w(0).child(top).when(!!rest, (el) => el.child(rest)));
+        y += h;
       }
-      return v_flex().min_w(0).children(items);
+      return { el: v_flex().min_w(0).children(items), h: y - y0 };
     };
     const main = roots.filter(({ r }) => r.related !== true);
     const related = roots.filter(({ r }) => r.related === true);
+    const y0 = pin ? pin.y : 0;
+    const x0 = pin ? pin.x : 0;
+    const mainStack = main.length > 0 ? stack(main, y0, x0) : null;
+    // 関連の行は、点線 (1) と間の後ろに、「関連」の字の幅と間 (8) だけ右へずらして並ぶ
+    const lk = `hp-wrl-${id}`; // 「関連」の字の幅を測る鍵
+    const relY = mainStack ? y0 + mainStack.h + TREE.gap + 1 + TREE.gap : y0;
+    const relStack = related.length > 0 ? stack(related, relY, x0 + this.wOf(lk) + 8) : null;
     // 「関連」の字は 1 つ目の関連の行と同じ大きさ (済んだ行なら小さい)
     const relSize = related.length > 0 ? this.ts(13, this.tiny || isDoneRow(related[0].r)) : null;
     return v_flex()
       .gap(TREE.gap)
-      .when(main.length > 0, (el) => el.child(stack(main)))
-      .when(related.length > 0, (el) =>
+      .when(!!mainStack, (el) => el.child(mainStack.el))
+      .when(!!relStack, (el) =>
         el
-          .when(main.length > 0, (e) => e.child(div().border_t_1().border_dashed().border_color(c.border)))
+          .when(!!mainStack, (e) => e.child(div().border_t_1().border_dashed().border_color(c.border)))
           // 「関連」の字は行と同じ大きさにし、1 つ目の行の 1 行目とそろえる
           .child(
             h_flex()
               .items_start()
               .gap(8)
-              .child(div().flex_none().text_size(relSize).text_color(c.muted).child("関連"))
-              .child(stack(related).flex_1()),
+              .child(this.measureW(div().id(lk).flex_none().text_size(relSize).text_color(c.muted).child("関連"), lk))
+              .child(relStack.el.flex_1()),
           ),
       );
   }
 
-  // 木の行。上の段 (top) と、その下 (rest: 段・一言・子。無ければ null) を分けて返す。親は子の top と rest の左に、それぞれ溝 (親の縦の
-  // 線) を付ける。tick は親から来る横の線: null (根・線を引かない深さ)・"tee" (下に兄弟が続く)・"corner" (最後の子。親の縦の線をここで止める)。
-  // sec は押した印の section (節の id か空の字)。under は、上の行のどれかが済んだ行か
-  workRow(r, path, depth, id, g, c, tick, sec, under = false) {
+  // 木の行。上の段 (top) と、その下 (rest: 段・一言・子。無ければ null) と、行の高さ (h。測った高さの和で、題の貼り付けに使う) を分けて返す。
+  // 親は子の top と rest の左に、それぞれ溝 (親の縦の線) を付ける。tick は親から来る横の線: null (根・線を引かない深さ)・"tee" (下に兄弟が
+  // 続く)・"corner" (最後の子。親の縦の線をここで止める)。sec は押した印の section (節の id か空の字)。under は、上の行のどれかが済んだ行か。
+  // pin は題の貼り付けの控え ({ y: 行の上の端, x: 行の字下げ, list })。null なら控えない
+  workRow(r, path, depth, id, g, c, tick, sec, under = false, pin = null) {
     // 済んだ行 (isDoneRow) と、その下の行は、上の段もその下 (段・一言・子) も小さく出し、ID と題を薄く出す (頭のコメントの「済んだもの」)
     const faint = under || isDoneRow(r);
-    return this.withTiny(faint, () => this.workRowIn(r, path, depth, id, g, c, tick, sec, faint));
+    return this.withTiny(faint, () => this.workRowIn(r, path, depth, id, g, c, tick, sec, faint, pin));
   }
 
   // workRow の中身 (小さく出す間を決めてから呼ぶ)。small は小さく出すか (済んだ行とその下・done の節の中)。行の間と段・一言の上を詰める
-  workRowIn(r, path, depth, id, g, c, tick, sec, faint) {
+  workRowIn(r, path, depth, id, g, c, tick, sec, faint, pin) {
     const small = this.tiny;
     const kind = kindOf(r);
     const steps = listOf(r.steps);
@@ -2018,12 +2132,24 @@ export default class HubPanel extends View {
     const showKids = open && kids.length > 0;
     const lined = showKids && depth < TREE.indent;
     const note = str(r.note);
+    const tk = `hp-wtr-${id}-${path}`; // 上の段の高さを測る鍵
+    const o = { foldable, open, key, tick, tail: lined, summary: open ? "" : prSummary(r), faint, small };
+    // 題の貼り付け: 開いた畳める行 (チケットの行) は、上の段を貼り付ける控えを作り、子の控えをその kids に足す。畳めない行 (PR・item) の子は
+    // 親の並びに足す (その行の上の段は貼り付けない)
+    const node = pin && foldable && open ? { y: pin.y, end: pin.y, h: this.hOf(tk) + PIN.row * 2 + 1, kids: [], clone: null } : null;
+    const kidList = node ? node.kids : pin?.list;
+    let h = this.hOf(tk);
     const rest = [];
+    const piece = (el, k) => {
+      rest.push(this.measure(el.id(k), k));
+      h += this.hOf(k);
+    };
     if (open && steps.length > 0) {
       const at = { section: sec, row: rowName(r, path) }; // 押した印の section と row (頭のコメントの「段の answer」)
-      rest.push(this.treePiece(g, lined, small ? 2 : 4, this.workSteps(steps.map(stepOf), `w-${id}-${path}`, at, c), c));
+      piece(this.treePiece(g, lined, small ? 2 : 4, this.workSteps(steps.map(stepOf), `w-${id}-${path}`, at, c), c), `hp-wsp-${id}-${path}`);
     }
-    if (open && note !== "") rest.push(this.treePiece(g, lined, small ? 1 : 2, div().min_w(0).text_size(this.ts(11)).text_color(c.muted).child(note), c));
+    if (open && note !== "")
+      piece(this.treePiece(g, lined, small ? 1 : 2, div().min_w(0).text_size(this.ts(11)).text_color(c.muted).child(note), c), `hp-wnp-${id}-${path}`);
     if (showKids) {
       // 子の上の間は TREE.gap で、小さく出すものが続く (この行か前の子と、その子) 間は DONE.gap に詰める
       let prev = small;
@@ -2032,7 +2158,10 @@ export default class HubPanel extends View {
         const ks = small || isDoneRow(k);
         const gap = prev && ks ? DONE.gap : TREE.gap;
         prev = ks;
-        const part = this.workRow(k, kp, depth + 1, id, g, c, lined ? (last ? "corner" : "tee") : null, sec, faint);
+        h += gap;
+        const kpin = pin ? { y: pin.y + h, x: pin.x + (lined ? g.I : 0), list: kidList } : null;
+        const part = this.workRow(k, kp, depth + 1, id, g, c, lined ? (last ? "corner" : "tee") : null, sec, faint, kpin);
+        h += part.h;
         if (lined) {
           rest.push(this.treeSpacer(g, c, gap));
           rest.push(this.treeWrap(g, !last, part.top, c));
@@ -2044,9 +2173,31 @@ export default class HubPanel extends View {
         }
       });
     }
+    if (node && rest.length > 0) {
+      // 写しの上の段: 線 (tick・tail) を引かず、行の字下げの所に置く。押すと畳み、行の上の端を写しを貼った所まで送り戻す
+      node.end = pin.y + h;
+      node.clone = (top, at) =>
+        this.withTiny(small, () =>
+          this.pinStrip(
+            top,
+            node.h,
+            c,
+            h_flex()
+              .px(PIN.card)
+              .child(div().flex_none().w(pin.x))
+              .child(
+                this.workTop(r, kind, path, `${id}-pin`, g, c, { ...o, tick: null, tail: false, pin: { y: node.y, at } })
+                  .flex_1()
+                  .min_w(0),
+              ),
+          ),
+        );
+      pin.list.push(node);
+    }
     return {
-      top: this.workTop(r, kind, path, id, g, c, { foldable, open, key, tick, tail: lined, summary: open ? "" : prSummary(r), faint, small }),
+      top: this.measure(this.workTop(r, kind, path, id, g, c, o).id(tk), tk),
       rest: rest.length > 0 ? v_flex().min_w(0).children(rest) : null,
+      h,
     };
   }
 
@@ -2152,6 +2303,8 @@ export default class HubPanel extends View {
           // ダブルクリックの 2 回目は数えない (開いてすぐ畳まない)
           if ((e?.click_count ?? 1) > 1) return;
           this.rowOpen[o.key] = !o.open;
+          // 貼り付けた写しの印なら、畳んでから行の上の端を写しを貼った所まで送り戻す (頭のコメントの「題の貼り付け」)
+          if (o.pin) this.scrollY = Math.max(0, o.pin.y - o.pin.at);
           cx.notify();
         })
         .child(div().text_color(c.dim).child(o.open ? "▾" : "▸"));
@@ -2700,6 +2853,161 @@ export default class HubPanel extends View {
       .child(seg("hp-zoom-in", "+", `panel の文字を大きく (${ZOOM.max}% まで)`, z < ZOOM.max, step(1), c.fg));
   }
 
+  // ---- 題の貼り付け (頭のコメントの「題の貼り付け」) ----
+
+  // 測った高さ・幅 (on_size_change の大きさを zoom で割った、w()・h() と同じ px)。まだ測っていなければ 0
+  hOf(key) {
+    return this.hs[key] ?? 0;
+  }
+
+  wOf(key) {
+    return this.ws[key] ?? 0;
+  }
+
+  // el (id を付けた div・h_flex・v_flex) の高さを key で測る。変わったら描き直す (位置は前の描画で測った高さから出すので、変わった次の描画で合う)
+  measure(el, key) {
+    return el.on_size_change((size, cx) => this.takeSize(this.hs, key, size.height, cx));
+  }
+
+  measureW(el, key) {
+    return el.on_size_change((size, cx) => this.takeSize(this.ws, key, size.width, cx));
+  }
+
+  takeSize(book, key, v, cx) {
+    const n = v / appZoom();
+    if (Math.abs((book[key] ?? -1) - n) <= 0.5) return;
+    book[key] = n;
+    cx.notify();
+  }
+
+  // スクロールの位置の上限 (中身が欄より低ければ 0)
+  scrollMax() {
+    return Math.max(0, this.contentH - this.viewH);
+  }
+
+  // スクロールの位置を v にする (0 から上限まで)。変わったら描き直す
+  scrollTo(v, cx) {
+    const next = clamp(v, 0, this.scrollMax());
+    if (Math.abs(next - this.scrollY) < 0.01) return;
+    this.scrollY = next;
+    cx.notify();
+  }
+
+  // 貼り付ける題を決める (ふつうの sticky header と同じ動き)。nodes は同じ並びの控え ({ y: 上の端, end: 下の端 (中身の中の px), h: 写しの
+  // 高さ, kids, clone })、s はスクロールの位置、O はこの深さの題を貼る所 (欄の上の端から。親の写しの下の端)。上の端が O より上へ流れ、下の端が
+  // まだ O より下にある控え (並びの中に 1 つしかない) の写しを、O か、控えの下の端に押し上げられた所に貼り、その kids を写しの下の端で続けて見る。
+  // out に { n, top, at } を親から順に足す
+  pinLayout(nodes, s, O, out) {
+    for (const n of nodes) {
+      if (!n.clone || !(n.y < s + O && n.end > s + O)) continue;
+      const top = Math.min(O, n.end - s - n.h);
+      out.push({ n, top, at: O });
+      this.pinLayout(n.kids, s, top + n.h, out);
+      return;
+    }
+  }
+
+  // 写しの題の帯: 節のカードの幅 (一覧の左右の余白の内) に、カードの地の色を塗り、カードの左右の枠と下の区切りの線を引く。inner (題の行。
+  // 左右の余白は inner が持つ) を上下のまん中に置く。字の大きさを継ぐ字はカードと同じ大きさ (済んだ節の中なら小さい)
+  pinStrip(top, h, c, inner) {
+    return v_flex()
+      .absolute()
+      .left(PIN.list)
+      .right(PIN.list)
+      .top(top)
+      .h(h)
+      .overflow_hidden()
+      .justify_center()
+      .bg(c.surface)
+      .border_l_1()
+      .border_r_1()
+      .border_b_1()
+      .border_color(c.border)
+      .text_size(this.ts(13))
+      .child(inner);
+  }
+
+  // 一覧の欄: スクロールの位置を mod が持ち (on_scroll_wheel で動かし、中身を absolute の top で送る)、貼り付けた題の写しと、スクロールの
+  // つまみを重ねる。body は一覧の要素、pins は題の貼り付けの控え (render が作る)。herdr-app の mod の API はスクロールの欄の位置を読む手を
+  // 持たない (ScrollHandle は scroll_to_item だけ) ので、overflow_y_scrollbar を使わない (頭のコメントの「題の貼り付け」)
+  listView(body, pins, c) {
+    this.scrollY = clamp(this.scrollY, 0, this.scrollMax());
+    const s = this.scrollY;
+    const placed = [];
+    this.pinLayout(pins, s, 0, placed);
+    // 深い写しを先に描き、親の写しを上に重ねる (押し上げられた子の写しは親の写しの下へ隠れる)
+    const clones = placed.reverse().map(({ n, top, at }) => n.clone(top, at));
+    const max = this.scrollMax();
+    const vh = this.viewH;
+    let bar = null;
+    if (max > 0.5 && vh > 0) {
+      const th = Math.max(PIN.bar.min, (vh * vh) / this.contentH);
+      const span = Math.max(1, vh - th);
+      bar = div()
+        .id("hp-thumb")
+        .absolute()
+        .right(PIN.bar.right)
+        .top((span * s) / max)
+        .w(PIN.bar.w)
+        .h(th)
+        .rounded(PIN.bar.w / 2)
+        .bg(c.muted)
+        .opacity(this.drag ? 0.7 : 0.35)
+        .hover((st) => st.opacity(0.7))
+        .on_mouse_down("left", (e, cx) => {
+          cx.stop_propagation();
+          this.drag = { y: e.position.y / appZoom(), s: this.scrollY, k: max / span };
+          cx.notify();
+        });
+    }
+    const endDrag = (cx) => {
+      if (!this.drag) return;
+      this.drag = null;
+      cx.notify();
+    };
+    return div()
+      .id("hp-list")
+      .flex_1()
+      .min_h(0)
+      .relative()
+      .overflow_hidden()
+      .on_size_change((size, cx) => {
+        const h = size.height / appZoom();
+        if (Math.abs(this.viewH - h) <= 0.5) return;
+        this.viewH = h;
+        cx.notify();
+      })
+      .on_scroll_wheel((e, cx) => this.scrollTo(this.scrollY - (e?.delta?.y ?? 0) / appZoom(), cx))
+      // つまみを引く: 押した所から動いた分を、つまみの動ける幅と中身の送れる幅の比で位置に直す。離す・欄の外へ出ると止める (mod の API の
+      // on_mouse_move はボタンを押しているかを渡さない)
+      .on_mouse_move((e, cx) => {
+        if (this.drag) this.scrollTo(this.drag.s + (e.position.y / appZoom() - this.drag.y) * this.drag.k, cx);
+      })
+      .on_mouse_up("left", (_, cx) => endDrag(cx))
+      .on_hover((on, cx) => {
+        if (!on) endDrag(cx);
+      })
+      .child(
+        v_flex()
+          .id("hp-content")
+          .absolute()
+          .left(0)
+          .right(0)
+          .top(-s)
+          .p(PIN.list)
+          .gap(PIN.gap)
+          .on_size_change((size, cx) => {
+            const h = size.height / appZoom();
+            if (Math.abs(this.contentH - h) <= 0.5) return;
+            this.contentH = h;
+            cx.notify();
+          })
+          .children(body.map((el, i) => this.measure(v_flex().id(`hp-b-${i}`).min_w(0).child(el), `hp-b-${i}`))),
+      )
+      .children(clones)
+      .when(!!bar, (el) => el.child(bar));
+  }
+
   render(cx) {
     const c = this.colors();
     const z = this.zoom();
@@ -2716,6 +3024,7 @@ export default class HubPanel extends View {
     const ready = !!text && !this.busy;
 
     const body = [];
+    const pins = []; // 題の貼り付けの控え (節のカード。中の Q&A の項目・木の行はその kids)
     if (!known) body.push(div().text_color(c.blocked).child(`props.role が分からない: ${JSON.stringify(role)} (summary か questions。無ければ両方を出す)`));
     if (this.error) body.push(div().text_color(c.blocked).child(this.error));
     // 印のファイル (消す印・押した印) を読み書きできなかったわけ
@@ -2732,7 +3041,13 @@ export default class HubPanel extends View {
       const shown = this.shownSections(secs);
       if (shown.length > 0) {
         if (qs.length > 0) body.push(div().h(4), div().text_size(this.fs(12)).font_semibold().text_color(c.muted).child("いまの状況"));
-        shown.forEach(({ s, i }) => body.push(this.section(s, i, c)));
+        // 節の上の端は、一覧の上の余白と、前の要素の高さと間の和 (前の描画で測った高さ。題の貼り付けの控え)
+        const yAt = (k) => {
+          let y = PIN.list;
+          for (let j = 0; j < k; j++) y += this.hOf(`hp-b-${j}`) + PIN.gap;
+          return y;
+        };
+        shown.forEach(({ s, i }) => body.push(this.section(s, i, c, { y: yAt(body.length), list: pins })));
       }
       if (!this.error && d && qs.length === 0 && shown.length === 0) body.push(div().text_color(c.muted).child("出すものはありません"));
     }
@@ -2821,7 +3136,7 @@ export default class HubPanel extends View {
           .child(this.zoomControls(z, c)),
       )
       .when(!!answerBar, (el) => el.child(answerBar))
-      .child(v_flex().id("hp-list").flex_1().min_h(0).overflow_y_scrollbar().p(12).gap(10).children(body))
+      .child(this.listView(body, pins, c))
       // 答えの欄が無いとき (問いが無い・まとめのペイン) のわけの行は、今までどおり一番下に出す
       .when(!answerBar && !!this.status, (el) =>
         el.child(div().px(14).py(6).border_t_1().border_color(c.border).text_size(this.fs(11)).text_color(c.dim).child(this.lines(this.status))),
