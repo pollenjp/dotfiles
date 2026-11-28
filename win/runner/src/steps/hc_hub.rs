@@ -1,29 +1,43 @@
-//! hc-hub (order 60): herdr-app と hc のハブ `~/h` (`C:\Users\<名前>\h`) を、claude-skills の pjp-hc-hub の `pjp hub init` で作る (作り済みなら
-//! 雛形との差だけ直す)。Linux の `nix/scripts/bootstrap-herdr-hub.sh` (旧 herdr のハブを hub-init.sh で作る) に当たる。
+//! hc-hub (order 60): herdr-app と hc のハブ `~/h` (`C:\Users\<名前>\h`) を、公開のハブの道具 `pjp-hub.exe init` で作る (作り済みなら雛形との
+//! 差だけ直す)。Linux の `nix/scripts/bootstrap-herdr-hub.sh` (旧 herdr のハブを hub-init.sh で作る) に当たる。
 //!
-//! `pjp hub check` で差を見て、差があれば apply で `pjp hub init` を引数なしで打つ (既定の `~/h`)。既にあるものを壊さない決まりは
-//! `pjp hub init` が持つ (まだハブでない場所に雛形の外のものがあれば、何も書かずに止まる。ほかの skill のハブ・別の repo の中も止まる)。runner は
-//! 止まったわけを出し、init を打たない。`pjp hub check` は、shim が pjp-hub を作り直すことがある (clone の target/ は build の置き場で、置き先・
-//! 記録・設定ではないので、check でも打つ)。dotfiles-private の docs/adr/064_win_w02_claude_skills_hub_*。
+//! 道具は公開の dotfiles の `nix/pkgs/pjp-tools` の `pjp-hub` (入口 `pjp` が `pjp hub …` で起こすもの) で、手順 pjp-tools (order 54) が
+//! `%LOCALAPPDATA%\dotfiles\bin\pjp-hub.exe` に置く。runner はそれを絶対パスで打ち (PATH に足すのは pjp-tools。今の端末の PATH に頼らない)、
+//! claude-skills の clone も shim も使わない (privateRepos・claudePrivateSkills が off のハブのホストでも動く。dotfiles-private の ADR 124)。
+//! 雛形の settings.json に重ねる skillOverrides (`~/.claude/skills/pjp-hc-hub-private/assets/hub/settings.overlay.json`。足し分の skill は
+//! claude-skills の手順 (order 50) が張る) は `pjp-hub` が自分で読む (無ければ重ねない)。runner の決め方:
+//!
+//! - `pjp-hub.exe` が無い → 手順 pjp-tools が置いていない (apply は ⚠ で止まり、ほかの手順は進む。check と dry-run は「無い」)
+//! - `pjp-hub.exe check` で差を見て、差があれば apply で `pjp-hub.exe init` を引数なしで打つ (既定の `~/h`)。既にあるものを壊さない決まりは
+//!   `pjp-hub init` が持つ (まだハブでない場所に雛形の外のものがあれば、何も書かずに止まる。ほかの skill のハブ・別の repo の中も止まる)。
+//!   runner は止まったわけを出し、init を打たない
+//! - 終了コード 2 (雛形の重ねのファイルが壊れている・git が無いなど設定の誤り) は、道具の文を添えて止まる
+//!
+//! dotfiles-private の docs/adr/064_win_w02_claude_skills_hub_*・docs/adr/124_*。
 
-use super::claude_skills::clone_dir;
-use super::pjp::shim_path;
+use super::claude_accounts::BIN_DIR_REL;
+use super::pjp_tools::exe_name;
 use super::ps1::run_streaming;
 use super::{Gate, Mode, Outcome, Step, StepInfo};
-use crate::context::Ctx;
+use crate::context::{Ctx, join_segments};
 use crate::process::{CommandSpec, Exit};
 use crate::report::Kind;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-/// pjp hub check・init の待ちの上限 (初めては shim が pjp-hub を作る)
-const HUB_SECS: u64 = 900;
+/// pjp-hub.exe check・init の待ちの上限 (init は git init と commit をする)
+const HUB_SECS: u64 = 300;
 /// pjp hub init が止まる差の印 (pjp-hc-hub の init.rs の diffs が書く)
 const STOPS: &str = "このままでは pjp hub init は止まる";
 
 pub struct HcHub;
 
-/// `pjp hub check` の答えの読み方。
+/// 打つ道具 (手順 pjp-tools が置く `%LOCALAPPDATA%\dotfiles\bin\pjp-hub.exe`)。
+fn hub_exe(ctx: &Ctx) -> PathBuf {
+    join_segments(&ctx.roots.local_app_data, BIN_DIR_REL).join(exe_name("pjp-hub"))
+}
+
+/// `pjp-hub.exe check` の答えの読み方。
 enum State {
     Same,
     /// ハブが無い・git repo でない (apply で作る)
@@ -32,29 +46,18 @@ enum State {
     Differs,
     /// init が止まる (人が直す)。添える行
     Stops(Vec<String>),
-    /// pjp hub check まで届かなかった (shim が pjp-hub を作れない。check ではオフラインで作るので、取得が要る作り直しもここ)。添える行
-    Unreachable(Vec<String>),
-    Failed(String),
+    /// 確かめられなかった。わけと添える行
+    Failed(String, Vec<String>),
 }
 
-/// `pjp hub <sub>` を打つコマンド。`offline` (check と dry-run) なら、shim の作り直しで crate も toolchain も取りに行かない (check は
-/// `~/.cargo` と `~/.rustup` を書かない。clone の `target/` は build の置き場なので書いてよい)。
-fn pjp(shim: &Path, clone: &Path, sub: &str, offline: bool) -> CommandSpec {
-    let spec = CommandSpec::new(shim)
-        .arg("hub")
+/// `pjp-hub.exe <sub>` を打つコマンド (claude-skills の clone を指す PJP_SKILLS_DIR は渡さない)
+fn pjp_hub(exe: &Path, sub: &str) -> CommandSpec {
+    CommandSpec::new(exe)
         .arg(sub)
-        .env("PJP_SKILLS_DIR", clone.as_os_str())
-        .env_remove("RUSTUP_TOOLCHAIN")
-        .timeout(Duration::from_secs(HUB_SECS));
-    if offline {
-        spec.env("CARGO_NET_OFFLINE", "true")
-            .env("RUSTUP_AUTO_INSTALL", "0")
-    } else {
-        spec
-    }
+        .timeout(Duration::from_secs(HUB_SECS))
 }
 
-/// pjp-hc-hub の道具自身が出した行か (`pjp hub check: …`・`pjp hub init: …`。shim の `pjp: …` と分ける)
+/// pjp-hc-hub の道具自身が出した行か (`pjp hub check: …`・`pjp hub init: …`)
 fn from_hub(line: &str) -> bool {
     let l = line.trim();
     l.starts_with("pjp hub check:") || l.starts_with("pjp hub init:")
@@ -68,6 +71,16 @@ fn tail(lines: &[String]) -> Vec<String> {
         .filter(|l| !l.is_empty())
         .collect();
     kept[kept.len().saturating_sub(5)..].to_vec()
+}
+
+/// 道具の行 (`pjp hub …:` で始まる行)。無ければ、最後の 5 行
+fn reason(lines: &[String]) -> Vec<String> {
+    let own: Vec<String> = lines
+        .iter()
+        .filter(|l| from_hub(l))
+        .map(|l| l.trim().to_string())
+        .collect();
+    if own.is_empty() { tail(lines) } else { own }
 }
 
 /// 差の行 (`差: ` の後ろ) が、ハブそのものが無い・git repo でないことか (`<絶対パス> が無い`・`<絶対パス> は git repo でない`)。雛形の
@@ -88,19 +101,40 @@ fn classify(exit: &Exit, lines: &[String]) -> State {
         Exit::Code(1) if diffs.iter().any(|d| d.contains(STOPS)) => State::Stops(diffs),
         // 差の行が無く、道具が自分で断った (別の repo の中など)
         Exit::Code(1) if diffs.is_empty() && hub_said => State::Stops(tail(lines)),
-        // 差の行も道具の行も無い: shim が pjp-hub を作れなかった (`pjp: …`)
-        Exit::Code(1) if diffs.is_empty() => State::Unreachable(tail(lines)),
+        // 差の行も道具の行も無い: 道具が自分の文を出さずに落ちた
+        Exit::Code(1) if diffs.is_empty() => State::Failed(
+            "pjp-hub.exe check が差も止まるわけも出さずに 1 で終わった (上の出力)".to_string(),
+            tail(lines),
+        ),
         Exit::Code(1) if diffs.iter().any(|d| hub_absent(d)) => State::Missing,
         Exit::Code(1) => State::Differs,
-        Exit::Code(2) if !hub_said => State::Unreachable(tail(lines)),
-        Exit::Code(2) => {
-            State::Failed("pjp hub check が動けない (設定の誤り。上の出力)".to_string())
-        }
-        Exit::TimedOut => State::Failed(format!(
-            "pjp hub check が {HUB_SECS} 秒たっても終わらなかった"
-        )),
-        other => State::Failed(format!("pjp hub check で確かめられなかった ({other:?})")),
+        Exit::Code(2) => State::Failed(
+            "pjp-hub.exe check が動けない (設定の誤り。雛形の重ねのファイルが壊れている・git が無いなど。※ の文を直す)".to_string(),
+            reason(lines),
+        ),
+        Exit::TimedOut => State::Failed(
+            format!("pjp-hub.exe check が {HUB_SECS} 秒たっても終わらなかった"),
+            Vec::new(),
+        ),
+        Exit::SpawnFailed(e) => State::Failed(
+            format!(
+                "pjp-hub.exe を起こせない ({e}) → dotfiles apply --steps pjp-tools で置き直す (起こせない exe はわけを出して止まる)"
+            ),
+            Vec::new(),
+        ),
+        other => State::Failed(
+            format!("pjp-hub.exe check で確かめられなかった ({other:?})"),
+            tail(lines),
+        ),
     }
+}
+
+/// 行に添える文を足す
+fn with_notes(mut o: Outcome, notes: Vec<String>) -> Outcome {
+    for n in notes {
+        o = o.note(n);
+    }
+    o
 }
 
 impl Step for HcHub {
@@ -108,7 +142,8 @@ impl Step for HcHub {
         StepInfo {
             id: "hc-hub",
             order: 60,
-            title: "herdr-app と hc のハブ ~/h を pjp hub init で作る (作り済みなら雛形との差だけ直す)",
+            title: "herdr-app と hc のハブ ~/h を公開の pjp-hub.exe init で作る (作り済みなら雛形との差だけ直す)",
+            // pjp-hub.exe を置く pjp-tools (54) と、雛形の重ねのファイルのある足し分の skill を張る claude-skills (50) の後
             gate: Gate::Tool("herdrHub"),
             ported: true,
             windows_only: true,
@@ -116,83 +151,52 @@ impl Step for HcHub {
     }
 
     fn run(&self, ctx: &mut Ctx, mode: Mode) -> Vec<Outcome> {
-        let shim = shim_path(ctx);
-        let clone = clone_dir(ctx);
-        if !shim.is_file() {
+        let exe = hub_exe(ctx);
+        if !exe.is_file() {
             return vec![match mode {
                 Mode::Apply { .. } => Outcome::new(
                     Kind::Failed,
                     format!(
-                        "shim の pjp-skills が無い ({}) → 上の pjp の手順を見る",
-                        shim.display()
+                        "pjp-hub.exe が無い ({}) → 手順 pjp-tools が置いていない (dotfiles apply --steps pjp-tools)。上の pjp-tools の行を見る",
+                        exe.display()
                     ),
                 ),
                 Mode::Check => Outcome::new(
                     Kind::Missing,
                     format!(
-                        "shim の pjp-skills が無いので確かめられない ({}) → apply で手順 pjp が pjp-skills を入れてから pjp hub init を流す",
-                        shim.display()
+                        "pjp-hub.exe が無いので確かめられない ({}。手順 pjp-tools が置く) → apply で pjp-tools が置いた後に pjp-hub.exe init を流す",
+                        exe.display()
                     ),
                 ),
                 Mode::DryRun { .. } => {
-                    // 同じ apply の pjp の手順 (order 55) が shim を入れてから、この手順が流れる
-                    ctx.say("[dry-run] (pjp の手順が shim の pjp-skills を入れた後に) pjp hub check で差を見て、差があれば pjp hub init を流す");
+                    // 同じ apply の pjp-tools の手順 (order 54) が pjp-hub.exe を置いてから、この手順が流れる
+                    ctx.say("[dry-run] (pjp-tools の手順が pjp-hub.exe を置いた後に) pjp-hub.exe check で差を見て、差があれば pjp-hub.exe init を流す");
                     Outcome::new(
                         Kind::Missing,
-                        "[dry-run] shim の pjp-skills が無い → 手順 pjp が入れた後に pjp hub check で差を見て、差があれば pjp hub init を流す",
+                        "[dry-run] pjp-hub.exe が無い → 手順 pjp-tools が置いた後に pjp-hub.exe check で差を見て、差があれば pjp-hub.exe init を流す",
                     )
                 }
             }];
         }
-        let tool = clone
-            .join("skills")
-            .join("pjp-hc-hub")
-            .join("rust")
-            .join("Cargo.toml");
-        if !tool.is_file() {
-            return vec![Outcome::new(
-                Kind::Manual,
-                format!(
-                    "claude-skills の clone に pjp-hc-hub の道具がまだ無い ({}) → clone を進める (dotfiles --self-update apply)",
-                    clone.display()
-                ),
-            )];
-        }
         ctx.say(format!(
-            "ハブ: {} (pjp hub init の既定)",
+            "ハブ: {} (pjp-hub.exe init の既定)",
             ctx.roots.user_profile.join("h").display()
         ));
-        ctx.say("+ pjp hub check");
-        let r = run_streaming(ctx, &pjp(&shim, &clone, "check", !mode.writes()));
+        ctx.say(format!("+ {} check", exe.display()));
+        let r = run_streaming(ctx, &pjp_hub(&exe, "check"));
         let (kind, text) = match classify(&r.exit, &r.output) {
             State::Same => return vec![Outcome::new(Kind::Ok, "ハブは雛形どおり")],
-            State::Failed(why) => return vec![Outcome::new(Kind::Failed, why)],
-            State::Unreachable(notes) => {
-                let mut o = if mode.writes() {
-                    Outcome::new(
-                        Kind::Failed,
-                        "pjp hub check まで届かなかった (shim が pjp-hub を作れない。上の出力)",
-                    )
-                } else {
-                    Outcome::new(
-                        Kind::Fix,
-                        "ハブを確かめられない (shim が pjp-hub を作れない。check は crate と toolchain を取らずに作るので、取得が要る作り直しもここ) → apply で pjp --build の後に確かめる",
-                    )
-                };
-                for n in notes {
-                    o = o.note(n);
-                }
-                return vec![o];
+            State::Failed(why, notes) => {
+                return vec![with_notes(Outcome::new(Kind::Failed, why), notes)];
             }
             State::Stops(notes) => {
-                let mut o = Outcome::new(
-                    Kind::Manual,
-                    "pjp hub init は止まる (※ のわけを直す。runner は init を打たない)",
-                );
-                for n in notes {
-                    o = o.note(n);
-                }
-                return vec![o];
+                return vec![with_notes(
+                    Outcome::new(
+                        Kind::Manual,
+                        "pjp hub init は止まる (※ のわけを直す。runner は init を打たない)",
+                    ),
+                    notes,
+                )];
             }
             State::Missing => (Kind::Missing, "ハブが無い"),
             State::Differs => (Kind::Fix, "ハブに雛形との差がある"),
@@ -200,29 +204,36 @@ impl Step for HcHub {
         match mode {
             Mode::Check => vec![Outcome::new(
                 kind,
-                format!("{text} → apply で pjp hub init"),
+                format!("{text} → apply で pjp-hub.exe init"),
             )],
             Mode::DryRun { .. } => {
-                ctx.say("[dry-run] pjp hub init を流す");
+                ctx.say("[dry-run] pjp-hub.exe init を流す");
                 vec![Outcome::new(
                     kind,
-                    format!("[dry-run] {text} → pjp hub init"),
+                    format!("[dry-run] {text} → pjp-hub.exe init"),
                 )]
             }
             Mode::Apply { .. } => {
-                ctx.say("+ pjp hub init");
-                let r = run_streaming(ctx, &pjp(&shim, &clone, "init", false));
+                ctx.say(format!("+ {} init", exe.display()));
+                let r = run_streaming(ctx, &pjp_hub(&exe, "init"));
                 vec![match r.exit {
                     Exit::Code(0) => {
-                        Outcome::new(Kind::Ok, format!("{text}ので pjp hub init で揃えた"))
+                        Outcome::new(Kind::Ok, format!("{text}ので pjp-hub.exe init で揃えた"))
                     }
                     Exit::Code(1) => Outcome::new(
                         Kind::Manual,
-                        "pjp hub init が止まった・落ちた (上の出力のわけを直す。止まる場所なら何も書いていない。commit で落ちたなら書いた後)",
+                        "pjp-hub.exe init が止まった・落ちた (上の出力のわけを直す。止まる場所なら何も書いていない。commit で落ちたなら書いた後)",
+                    ),
+                    Exit::Code(2) => with_notes(
+                        Outcome::new(
+                            Kind::Failed,
+                            "pjp-hub.exe init が動けない (設定の誤り。雛形の重ねのファイルが壊れている・git が無いなど。※ の文を直す)",
+                        ),
+                        reason(&r.output),
                     ),
                     other => Outcome::new(
                         Kind::Failed,
-                        format!("pjp hub init が落ちた ({other:?}。上の出力)"),
+                        format!("pjp-hub.exe init が落ちた ({other:?}。上の出力)"),
                     ),
                 }]
             }
@@ -234,119 +245,154 @@ impl Step for HcHub {
 mod tests {
     //! ## 確かめること
     //!
-    //! - shim が無い → check と dry-run は missing (apply で pjp を入れてから)、apply は failed
-    //! - clone に pjp-hc-hub の道具が無い → manual
-    //! - pjp hub check が 0 → ok。ハブが無い・git repo でない → missing、ほかの差 → fix (apply で pjp hub init)。init が止まる差・差の行の無い 1 →
-    //!   manual で init を打たない。2 → failed。init が 1 → manual
-    //! - pjp は PJP_SKILLS_DIR を付け、RUSTUP_TOOLCHAIN を外して打つ
+    //! - 打つのは手順 pjp-tools が置いた公開の `%LOCALAPPDATA%\dotfiles\bin\pjp-hub.exe` (絶対パス) の `check`・`init`。env に PJP_SKILLS_DIR を
+    //!   渡さない。privateRepos・claudePrivateSkills が off で claude-skills の clone が無いハブのホストでも打つ
+    //! - pjp-hub.exe が無い → check と dry-run は missing (手順 pjp-tools が置いた後に)、apply は failed (「手順 pjp-tools が置いていない」)
+    //! - pjp-hub.exe check が 0 → ok。ハブが無い・git repo でない → missing、ほかの差 → fix (apply で pjp-hub.exe init)。init が止まる差・差の
+    //!   行の無い 1 で道具の行がある → manual で init を打たない。終了コード 2 (雛形の重ねのファイルが壊れているなど) → failed で道具の文を添え、
+    //!   init を打たない。道具の行も差の行も無い 1 → failed。init が 1 → manual、2 → failed で道具の文を添える
+    //! - 手順の並び: claude-skills (足し分の skill の雛形の重ねを張る)・pjp-tools (pjp-hub.exe を置く) の後に流れる
 
     use super::*;
-    use crate::host::{Groups, HostValues};
+    use crate::host::{Groups, HostValues, parse};
     use crate::manifest::Roots;
     use crate::process::{CommandSpec, Exit, RunResult};
     use crate::report::Kind;
     use crate::testutil::{FakeSys, TempDir};
     use std::path::{Path, PathBuf};
 
+    const APPLY: Mode = Mode::Apply { force: false };
+
     struct World {
         t: TempDir,
     }
 
     impl World {
+        /// pjp-tools が pjp-hub.exe を置いた後 (claude-skills の clone は無い)
         fn new() -> Self {
             let t = TempDir::new("hc-hub");
             std::fs::create_dir_all(t.path().join("g").join("dotfiles")).unwrap();
-            t.write(
-                "g/claude-skills/skills/pjp-hc-hub/rust/Cargo.toml",
-                "[package]\nname = \"pjp-hc-hub\"\n",
-            );
-            let shim = t
-                .path()
-                .join("home")
-                .join(".cargo")
-                .join("bin")
-                .join(format!("pjp-skills{}", std::env::consts::EXE_SUFFIX));
-            std::fs::create_dir_all(shim.parent().unwrap()).unwrap();
-            std::fs::write(&shim, "shim").unwrap();
-            World { t }
+            let w = World { t };
+            std::fs::create_dir_all(w.hub_exe().parent().unwrap()).unwrap();
+            std::fs::write(w.hub_exe(), "pjp-hub").unwrap();
+            w
         }
 
-        fn shim(&self) -> PathBuf {
+        fn hub_exe(&self) -> PathBuf {
             self.t
                 .path()
                 .join("home")
-                .join(".cargo")
+                .join("AppData")
+                .join("Local")
+                .join("dotfiles")
                 .join("bin")
-                .join(format!("pjp-skills{}", std::env::consts::EXE_SUFFIX))
+                .join(format!("pjp-hub{}", std::env::consts::EXE_SUFFIX))
         }
 
-        /// `pjp hub check` と `pjp hub init` の答え
-        fn sys(&self, check: (i32, Vec<&str>), init: i32) -> FakeSys {
-            let check_lines: Vec<String> = check.1.iter().map(|s| s.to_string()).collect();
-            let check_code = check.0;
-            FakeSys::new(move |c: &CommandSpec| match c.args_lossy().as_slice() {
-                [hub, sub] if hub == "hub" && sub == "check" => RunResult {
-                    exit: Exit::Code(check_code),
-                    output: check_lines.clone(),
-                },
-                [hub, sub] if hub == "hub" && sub == "init" => RunResult {
-                    exit: Exit::Code(init),
-                    output: vec![],
-                },
-                other => panic!("思わぬコマンド: {other:?}"),
+        /// `pjp-hub.exe check` と `pjp-hub.exe init` の答え (`check`・`init` の終了コードと行)
+        fn sys(&self, check: (i32, Vec<&str>), init: (i32, Vec<&str>)) -> FakeSys {
+            let lines = |v: Vec<&str>| -> Vec<String> { v.iter().map(|s| s.to_string()).collect() };
+            let (check_code, check_lines) = (check.0, lines(check.1));
+            let (init_code, init_lines) = (init.0, lines(init.1));
+            let exe = self.hub_exe();
+            FakeSys::new(move |c: &CommandSpec| {
+                assert_eq!(c.program, exe, "公開の pjp-hub.exe を絶対パスで打つ");
+                match c.args_lossy().as_slice() {
+                    [sub] if sub == "check" => RunResult {
+                        exit: Exit::Code(check_code),
+                        output: check_lines.clone(),
+                    },
+                    [sub] if sub == "init" => RunResult {
+                        exit: Exit::Code(init_code),
+                        output: init_lines.clone(),
+                    },
+                    other => panic!("思わぬコマンド: {other:?}"),
+                }
             })
         }
 
-        fn run(&self, sys: &FakeSys, mode: Mode) -> Outcome {
+        fn run_on(&self, sys: &FakeSys, mode: Mode, host: HostValues) -> Outcome {
             let mut out = Vec::new();
             let mut ctx = Ctx {
                 repo: self.t.path().join("g").join("dotfiles"),
                 roots: Roots::from_home(&self.t.path().join("home")),
                 state_dir: self.t.path().join("state"),
-                host: HostValues::missing(Path::new("h.toml"), Groups::embedded().unwrap()),
+                host,
                 sys,
                 out: &mut out,
             };
             HcHub.run(&mut ctx, mode).remove(0)
         }
+
+        fn run(&self, sys: &FakeSys, mode: Mode) -> Outcome {
+            self.run_on(
+                sys,
+                mode,
+                HostValues::missing(Path::new("h.toml"), Groups::embedded().unwrap()),
+            )
+        }
     }
 
     fn inits(sys: &FakeSys) -> usize {
-        sys.call_args().iter().filter(|a| *a == "hub init").count()
+        sys.call_args().iter().filter(|a| *a == "init").count()
     }
 
     #[test]
     fn ok_when_the_hub_matches() {
         let w = World::new();
-        let sys = w.sys((0, vec!["C:\\Users\\alice\\h: 差は無い"]), 0);
-        let o = w.run(&sys, Mode::Apply { force: false });
+        let sys = w.sys((0, vec!["C:\\Users\\user\\h: 差は無い"]), (0, vec![]));
+        let o = w.run(&sys, APPLY);
         assert_eq!(o.kind, Kind::Ok, "{o:?}");
         assert_eq!(inits(&sys), 0);
         let calls = sys.calls.borrow();
-        assert_eq!(calls[0].program, w.shim());
+        assert_eq!(calls[0].program, w.hub_exe());
+        assert_eq!(calls[0].args_lossy(), ["check"]);
         assert!(
-            calls[0]
-                .env_value("PJP_SKILLS_DIR")
-                .unwrap()
-                .ends_with("claude-skills")
+            calls[0].envs.iter().all(|(k, _)| k != "PJP_SKILLS_DIR"),
+            "PJP_SKILLS_DIR を渡さない: {:?}",
+            calls[0].envs
         );
-        assert!(calls[0].removes_env("RUSTUP_TOOLCHAIN"));
+    }
+
+    /// privateRepos・claudePrivateSkills が off で claude-skills の clone も無いハブのホストでも、公開の pjp-hub.exe でハブを作る
+    #[test]
+    fn works_without_the_private_repos() {
+        let w = World::new();
+        let host = || {
+            parse(
+                "[tools]\nwindowsClaudeCode = true\nwindowsHerdr = true\nherdrHub = true\n",
+                Path::new("h.toml"),
+                Groups::embedded().unwrap(),
+            )
+            .unwrap()
+        };
+        assert!(!host().tool("privateRepos") && !host().tool("claudePrivateSkills"));
+        assert_eq!(HcHub.info().gate.off_reason(&host()), None);
+        assert!(!w.t.path().join("g").join("claude-skills").exists());
+        let sys = w.sys((1, vec!["差: C:\\Users\\user\\h が無い"]), (0, vec![]));
+        let o = w.run_on(&sys, APPLY, host());
+        assert_eq!(o.kind, Kind::Ok, "{o:?}");
+        assert_eq!(sys.call_args(), ["check", "init"]);
+        for c in sys.calls.borrow().iter() {
+            assert!(c.envs.iter().all(|(k, _)| k != "PJP_SKILLS_DIR"), "{c:?}");
+        }
     }
 
     #[test]
     fn creates_a_missing_hub() {
         let w = World::new();
         for diff in [
-            "差: C:\\Users\\alice\\h は git repo でない",
-            "差: C:\\Users\\alice\\h が無い",
+            "差: C:\\Users\\user\\h は git repo でない",
+            "差: C:\\Users\\user\\h が無い",
         ] {
-            let sys = w.sys((1, vec![diff]), 0);
+            let sys = w.sys((1, vec![diff]), (0, vec![]));
             let o = w.run(&sys, Mode::Check);
             assert_eq!(o.kind, Kind::Missing, "{diff}: {o:?}");
+            assert!(o.text.contains("pjp-hub.exe init"), "{o:?}");
             let o = w.run(&sys, Mode::DryRun { force: false });
             assert_eq!(o.kind, Kind::Missing, "{diff}: {o:?}");
             assert_eq!(inits(&sys), 0);
-            let o = w.run(&sys, Mode::Apply { force: false });
+            let o = w.run(&sys, APPLY);
             assert_eq!(o.kind, Kind::Ok, "{diff}: {o:?}");
             assert_eq!(inits(&sys), 1);
         }
@@ -360,10 +406,10 @@ mod tests {
                 1,
                 vec!["差: CLAUDE.md が雛形と違う", "差: .gitignore が無い"],
             ),
-            0,
+            (0, vec![]),
         );
         assert_eq!(w.run(&sys, Mode::Check).kind, Kind::Fix);
-        assert_eq!(w.run(&sys, Mode::Apply { force: false }).kind, Kind::Ok);
+        assert_eq!(w.run(&sys, APPLY).kind, Kind::Ok);
         assert_eq!(inits(&sys), 1);
     }
 
@@ -375,94 +421,102 @@ mod tests {
                 "差: まだハブでない。雛形の外のものがある: notes.txt。このままでは pjp hub init は止まる",
             ],
             vec![
-                "pjp hub check: C:\\Users\\alice\\h は repo C:\\Users\\alice の中。ハブは repo の外に作る",
+                "pjp hub check: C:\\Users\\user\\h は repo C:\\Users\\user の中。ハブは repo の外に作る",
             ],
         ] {
-            let sys = w.sys((1, lines.clone()), 0);
-            let o = w.run(&sys, Mode::Apply { force: false });
+            let sys = w.sys((1, lines.clone()), (0, vec![]));
+            let o = w.run(&sys, APPLY);
             assert_eq!(o.kind, Kind::Manual, "{lines:?}: {o:?}");
             assert_eq!(inits(&sys), 0);
         }
-        let sys = w.sys((2, vec!["pjp hub check: git が見つかりません (PATH)"]), 0);
-        assert_eq!(w.run(&sys, Mode::Check).kind, Kind::Failed);
-        let sys = w.sys((1, vec!["差: CLAUDE.md が無い"]), 1);
-        let o = w.run(&sys, Mode::Apply { force: false });
+        let sys = w.sys((1, vec!["差: CLAUDE.md が無い"]), (1, vec![]));
+        let o = w.run(&sys, APPLY);
         assert_eq!(o.kind, Kind::Manual, "{o:?}");
-        assert!(o.text.contains("pjp hub init が止まった・落ちた"), "{o:?}");
-    }
-
-    /// check と dry-run の pjp hub check は、shim の作り直しで crate と toolchain を取りに行かない (CARGO_NET_OFFLINE・RUSTUP_AUTO_INSTALL)。
-    /// apply は取りに行ってよい
-    #[test]
-    fn check_does_not_fetch() {
-        let w = World::new();
-        let sys = w.sys((0, vec![]), 0);
-        for mode in [Mode::Check, Mode::DryRun { force: false }] {
-            w.run(&sys, mode);
-            let calls = sys.calls.borrow();
-            let last = calls.last().unwrap();
-            assert_eq!(
-                last.env_value("CARGO_NET_OFFLINE").as_deref(),
-                Some("true"),
-                "{mode:?}"
-            );
-            assert_eq!(
-                last.env_value("RUSTUP_AUTO_INSTALL").as_deref(),
-                Some("0"),
-                "{mode:?}"
-            );
-        }
-        w.run(&sys, Mode::Apply { force: false });
-        let calls = sys.calls.borrow();
-        let last = calls.last().unwrap();
-        assert_eq!(last.env_value("CARGO_NET_OFFLINE"), None);
-        assert_eq!(last.env_value("RUSTUP_AUTO_INSTALL"), None);
-    }
-
-    /// shim が道具を作れずに落ちた (pjp: …) のは、init が止まる差ではない。check は「確かめられない」、apply は落ちた
-    #[test]
-    fn shim_failure_is_not_a_stop() {
-        let w = World::new();
-        let lines = vec![
-            "error: no matching package named `foo` found",
-            "pjp: 道具 pjp-hub を作れませんでした (cargo build)",
-        ];
-        let sys = w.sys((1, lines.clone()), 0);
-        let o = w.run(&sys, Mode::Check);
-        assert_eq!(o.kind, Kind::Fix, "{o:?}");
-        assert!(o.text.contains("確かめられない"), "{o:?}");
         assert!(
-            o.notes.iter().any(|n| n.contains("pjp: 道具 pjp-hub")),
+            o.text.contains("pjp-hub.exe init が止まった・落ちた"),
             "{o:?}"
         );
-        let o = w.run(&sys, Mode::Apply { force: false });
+    }
+
+    /// 終了コード 2 (雛形の重ねのファイルが壊れている・git が無いなど) は、道具の文を添えて止まる (init を打たない)
+    #[test]
+    fn exit_2_shows_the_reason() {
+        let w = World::new();
+        let why = "pjp hub check: C:\\Users\\user\\.claude\\skills\\pjp-hc-hub-private\\assets\\hub\\settings.overlay.json が JSON として読めません (expected value at line 1 column 1)";
+        let sys = w.sys((2, vec![why]), (0, vec![]));
+        for mode in [Mode::Check, Mode::DryRun { force: false }, APPLY] {
+            let o = w.run(&sys, mode);
+            assert_eq!(o.kind, Kind::Failed, "{mode:?} {o:?}");
+            assert!(o.notes.iter().any(|n| n == why), "{mode:?} {o:?}");
+        }
+        assert_eq!(inits(&sys), 0);
+        let init_why = "pjp hub init: git が見つかりません (PATH)";
+        let sys = w.sys((1, vec!["差: CLAUDE.md が無い"]), (2, vec![init_why]));
+        let o = w.run(&sys, APPLY);
         assert_eq!(o.kind, Kind::Failed, "{o:?}");
+        assert!(o.notes.iter().any(|n| n == init_why), "{o:?}");
+    }
+
+    /// 道具の行も差の行も無い 1 (pjp-hub.exe が自分の文を出さずに落ちた) は failed (init を打たない)
+    #[test]
+    fn a_silent_failure_is_failed() {
+        let w = World::new();
+        let sys = w.sys(
+            (1, vec!["thread 'main' panicked at src/x.rs:1:1"]),
+            (0, vec![]),
+        );
+        for mode in [Mode::Check, APPLY] {
+            let o = w.run(&sys, mode);
+            assert_eq!(o.kind, Kind::Failed, "{mode:?} {o:?}");
+            assert!(o.notes.iter().any(|n| n.contains("panicked")), "{o:?}");
+        }
         assert_eq!(inits(&sys), 0);
     }
 
+    /// pjp-hub.exe が無い: 手順 pjp-tools が置いていない (check・dry-run は missing、apply は failed)。何も打たない
     #[test]
-    fn needs_the_shim_and_the_tool() {
+    fn needs_pjp_hub_from_pjp_tools() {
         let w = World::new();
-        std::fs::remove_file(w.shim()).unwrap();
-        let sys = w.sys((0, vec![]), 0);
-        assert_eq!(w.run(&sys, Mode::Check).kind, Kind::Missing);
-        // dry-run は、同じ apply の pjp の手順が shim を入れた後にすることを [dry-run] の形で出す
+        std::fs::remove_file(w.hub_exe()).unwrap();
+        let sys = w.sys((0, vec![]), (0, vec![]));
+        let o = w.run(&sys, Mode::Check);
+        assert_eq!(o.kind, Kind::Missing, "{o:?}");
+        assert!(o.text.contains("pjp-tools"), "{o:?}");
+        // dry-run は、同じ apply の pjp-tools の手順が置いた後にすることを [dry-run] の形で出す
         let o = w.run(&sys, Mode::DryRun { force: false });
         assert_eq!(o.kind, Kind::Missing);
         assert!(o.text.starts_with("[dry-run] "), "{o:?}");
         assert!(
             o.text
-                .contains("pjp hub check で差を見て、差があれば pjp hub init を流す"),
+                .contains("pjp-hub.exe check で差を見て、差があれば pjp-hub.exe init を流す"),
             "{o:?}"
         );
-        assert_eq!(w.run(&sys, Mode::Apply { force: false }).kind, Kind::Failed);
+        let o = w.run(&sys, APPLY);
+        assert_eq!(o.kind, Kind::Failed, "{o:?}");
+        assert!(
+            o.text
+                .contains("手順 pjp-tools が置いていない (dotfiles apply --steps pjp-tools)"),
+            "{o:?}"
+        );
         assert!(sys.calls.borrow().is_empty());
+    }
 
-        let w = World::new();
-        std::fs::remove_dir_all(w.t.path().join("g").join("claude-skills").join("skills")).unwrap();
-        let sys = w.sys((0, vec![]), 0);
-        let o = w.run(&sys, Mode::Check);
-        assert_eq!(o.kind, Kind::Manual, "{o:?}");
-        assert!(sys.calls.borrow().is_empty());
+    /// pjp-hub.exe は手順 pjp-tools (54) が置き、雛形の重ねのファイルは claude-skills の手順 (50) が張る足し分の skill にあるので、その後に流れる
+    #[test]
+    fn runs_after_pjp_tools_and_claude_skills() {
+        let ids: Vec<&str> = crate::steps::all().iter().map(|s| s.info().id).collect();
+        let at = |id: &str| ids.iter().position(|x| *x == id).unwrap();
+        assert!(at("claude-skills") < at("hc-hub"), "{ids:?}");
+        assert!(at("pjp-tools") < at("hc-hub"), "{ids:?}");
+    }
+
+    #[test]
+    fn step_info() {
+        let i = HcHub.info();
+        assert_eq!(
+            (i.id, i.order, i.gate),
+            ("hc-hub", 60, Gate::Tool("herdrHub"))
+        );
+        assert!(i.ported && i.windows_only);
     }
 }

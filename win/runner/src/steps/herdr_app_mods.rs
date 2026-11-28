@@ -4,6 +4,7 @@
 //! - herdr-app の home は `HERDR_APP_HOME` → `%XDG_CONFIG_HOME%\herdr-app` → `%USERPROFILE%\.config\herdr-app` の順に決める
 //!   (`win/herdr-app/Install-HerdrApp.ps1` の Get-HerdrAppLocations と同じ)。どれにしたかは出力の頭に出す
 //! - repo の `win/herdr-app/mods/` の下のディレクトリ 1 つが mod 1 つ。その中のファイル (サブディレクトリの中も) を、置き先の同じパスへ置く。
+//!   ハブの mod `pjp-spaces` は配らない (置くのは herdr-app-pjp-spaces で、herdrHub のホストだけ。windowsHerdr だけのホストには置かない)。
 //!   herdr-app が mod を読むと mod のフォルダに書くファイル (`gpui-kit.d.ts`・`jsconfig.json`) は、どの深さでも配らず、置き先のものにも触らない。
 //!   名前が `.` で始まるもの (エディタの設定など。herdr-app も読まない) も配らない。home のほかの場所 (ハブの Claude が図を置く
 //!   `pjp-hub-panel-media` など) にも触らない
@@ -15,6 +16,7 @@
 //! 記録は `%LOCALAPPDATA%\dotfiles\state\herdr-app-mods.deployed.json`。clone を pull したら `dotfiles apply` で配り直す (herdr-app は
 //! mod のフォルダを見張っていて、書き換えると mod を読み直す)。dotfiles-private の docs/adr/068_win_herdr_app_mods_*。
 
+use super::herdr_app_pjp_spaces::MOD as HUB_MOD;
 use super::linker::{Linker, Source};
 use super::{Gate, Mode, Outcome, Step, StepInfo};
 use crate::context::{Ctx, join_segments};
@@ -62,6 +64,14 @@ impl Step for HerdrAppMods {
                 return vec![Outcome::new(Kind::Failed, why)];
             }
         };
+        // ハブの mod は herdr-app-pjp-spaces が herdrHub のホストにだけ置く
+        let (hub, mods): (Vec<ModFiles>, Vec<ModFiles>) =
+            mods.into_iter().partition(|m| m.name == HUB_MOD);
+        if !hub.is_empty() {
+            ctx.say(format!(
+                "mods/{HUB_MOD} はこの手順では置かない (herdr-app-pjp-spaces が herdrHub のホストに置く)"
+            ));
+        }
         let record_path = ctx.state_dir.join(RECORD_FILE);
         let records = match Records::load(&record_path) {
             Ok(r) => r,
@@ -89,7 +99,7 @@ impl Step for HerdrAppMods {
         for m in &mods {
             copy_mod(ctx, &mut w, &root.join(&m.name), m, &mods_dir, &mut keep);
         }
-        prune(ctx, &mut w, &mods_dir, &keep);
+        prune(ctx, &mut w, &mods_dir, &keep, &[HUB_MOD]);
         w.finish(ctx, &record_path, None)
     }
 }
@@ -99,7 +109,7 @@ pub type Keep = BTreeMap<Vec<String>, String>;
 
 /// mod 1 つ (`src` は元の mod のフォルダ) のファイルを `mods_dir\<名前>\` の同じパスへ記録つきのコピーで置き、置くファイルを `keep` に足す。
 /// 置き先の mod のフォルダがリンク (手でつないだ場所) なら、その mod には触らない。mod.json を先に置く (herdr-app は初めて見た mod のフォルダを、
-/// mod.json の place に従って表示中の layout へ差し込むので、place より先に main.js を見せない)。herdr-app-pjp-spaces (claude-skills の mod) も使う。
+/// mod.json の place に従って表示中の layout へ差し込むので、place より先に main.js を見せない)。herdr-app-pjp-spaces (ハブの mod pjp-spaces) も使う。
 pub fn copy_mod(
     ctx: &mut Ctx,
     w: &mut Linker,
@@ -240,14 +250,21 @@ fn rel_key(rel: &Path) -> Vec<String> {
 /// 記録にあるコピーのうち、今の home の `mods\` の下にあって、今は置かないもの (repo から消えたファイル・mod) を消す。中身が記録どおりで
 /// なければ残して知らせる (記録からは外す)。今も置くファイルかは `mods\` からの相対パスの鍵で比べる (`keep`)。同じファイルを別の綴りで書いた
 /// 鍵 (home を `/` で書いた・大文字小文字が違う) は消さず、apply では今の綴りの鍵が記録にあれば外す。置き先の mod のフォルダがリンクなら、その
-/// 中は見ない。ほかの home の下の記録 (`HERDR_APP_HOME` を替えた前の home) と、`mods\` の外の記録 (herdr-app-pjp-spaces の layout) は、
-/// そのまま残す。
-pub fn prune(ctx: &mut Ctx, w: &mut Linker, mods_dir: &Path, keep: &Keep) {
+/// 中は見ない。ほかの home の下の記録 (`HERDR_APP_HOME` を替えた前の home)・`mods\` の外の記録 (herdr-app-pjp-spaces の layout)・`leave` の
+/// mod (ほかの手順が置くもの。herdr-app-mods にとっての pjp-spaces) の記録は、そのまま残す (置き先のものも消さない)。
+pub fn prune(ctx: &mut Ctx, w: &mut Linker, mods_dir: &Path, keep: &Keep, leave: &[&str]) {
     for key in w.records.keys() {
         let dest = PathBuf::from(&key);
         let Ok(rel) = dest.strip_prefix(mods_dir) else {
             continue;
         };
+        let head = rel_key(rel).into_iter().next();
+        if leave
+            .iter()
+            .any(|m| rel_key(Path::new(m)).into_iter().next() == head)
+        {
+            continue;
+        }
         if let Some(current) = keep.get(&rel_key(rel)) {
             if *current != key && w.mode.writes() && w.records.get(current).is_some() {
                 w.records.remove(&key);
@@ -318,6 +335,8 @@ mod tests {
     //! - home は HERDR_APP_HOME → XDG_CONFIG_HOME の下 → %USERPROFILE%\.config\herdr-app (空の値は無いものとして読む)
     //! - 本物の repo の mod (pjp-hub-panel) と .gitignore (herdr-app が書くファイルを入れない)
     //! - 本物の repo の mod が開く自作の mod (`openOverlay` の `mod: "pjp-…"`。prefix の小窓の d が開く pjp-worktree-remove) が repo の mod にある
+    //! - repo の mods/pjp-spaces は配らない (herdr-app-pjp-spaces だけが herdrHub のホストに置く)。前にこの手順の記録があっても、置き先のものは
+    //!   消さない
 
     use super::*;
     use crate::host::{Groups, HostValues};
@@ -848,6 +867,48 @@ mod tests {
                 .any(|(from, to)| from == "pjp-prefix" && to == "pjp-worktree-remove"),
             "{opened:?}"
         );
+    }
+
+    /// repo の mods/pjp-spaces は配らない (herdr-app-pjp-spaces だけが herdrHub のホストに置く。windowsHerdr だけのホストに置かない)。前に
+    /// この手順の記録があっても (無いはずだが)、置き先のものは消さずに残す
+    #[test]
+    fn leaves_pjp_spaces_to_its_own_step() {
+        let e = Env::new();
+        e.t.write(
+            "dotfiles/win/herdr-app/mods/pjp-spaces/main.js",
+            "// spaces\n",
+        );
+        e.t.write("dotfiles/win/herdr-app/mods/pjp-spaces/mod.json", MODJSON);
+        let (o, out) = e.run(APPLY);
+        assert_eq!(kinds(&o), vec![Kind::Ok], "{o:?}\n{out}");
+        assert!(
+            o[0].text.starts_with("追加 3 /"),
+            "pjp-hub-panel の 3 つだけ: {o:?}"
+        );
+        assert!(!e.home("mods/pjp-spaces").exists());
+        assert!(
+            out.contains("mods/pjp-spaces はこの手順では置かない"),
+            "{out}"
+        );
+        assert!(e.record().keys().all(|k| !k.contains("pjp-spaces")));
+        // 前にこの手順が置いた記録がある (herdr-app-pjp-spaces の置き先と同じ場所)
+        e.t.write(
+            "home/.config/herdr-app/mods/pjp-spaces/main.js",
+            "// spaces\n",
+        );
+        let key = e
+            .home("mods/pjp-spaces/main.js")
+            .to_string_lossy()
+            .into_owned();
+        let mut r = Records::load(&e.t.path().join("state").join(RECORD_FILE)).unwrap();
+        r.set(&key, &fsutil::sha256_bytes(b"// spaces\n"));
+        r.save_if_changed().unwrap();
+        for mode in [Mode::Check, APPLY] {
+            let (o, out) = e.run(mode);
+            assert_eq!(kinds(&o), vec![Kind::Ok], "{mode:?} {o:?}\n{out}");
+            assert!(o[0].text.contains("削除 0"), "{mode:?} {o:?}");
+        }
+        assert_eq!(e.read("mods/pjp-spaces/main.js"), "// spaces\n");
     }
 
     #[test]

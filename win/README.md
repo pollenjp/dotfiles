@@ -38,7 +38,7 @@ dotfiles-private の ADR 060 (`docs/adr/060_win_runner_core_*`)・ADR 064 (`docs
 | `herdr-app/mods/pjp-sidebar-tabs/` | `%USERPROFILE%\.config\herdr-app\mods\pjp-sidebar-tabs\` (`herdr-app-mods` の手順が配る) | 自作の herdr-app の mod。左のサイドパネルの上端に、Spaces と Agents を切り替えるアイコンのタブを描く (layout pjp-main の stack `sidebar-lists` の header。[後述](#サイドパネルのタブ-pjp-sidebar-tabs)) |
 | `herdr-app/keys.json` | `%USERPROFILE%\.config\herdr-app\keys.json` の一部のキー (herdr-app の home。manifest では配らず、runner の `herdr-app-keys` の手順が書き足す) | herdr-app のキーのうち、dotfiles が持つキーだけ (space とタブの移動・prefix の `Ctrl+K`・worktree を消す確かめの小窓の `Ctrl+Q`・サイドパネルのタブを切り替える `Ctrl+Alt+←→`) ([後述](#herdr-app-のキー)) |
 | `herdr-app/keys.defaults.json` | (配らない。runner の `herdr-app-keys` の手順が読む) | herdr-app の既定の値のうち、dotfiles が上書きしてよいもの (`Ctrl+PageUp`・`Ctrl+PageDown` のタブの移動) ([後述](#herdr-app-のキー)) |
-| (claude-skills の `skills/pjp-hc-hub/herdr-app/mods/pjp-spaces/`) | `%USERPROFILE%\.config\herdr-app\mods\pjp-spaces\` と、同梱の `layouts\main.json` を写した `layouts\pjp-main.json` (manifest では配らず、runner の `herdr-app-pjp-spaces` の手順が置く) | claude-skills の herdr-app の mod。sidebar の space の行の 2 行目にハブと子の印を出す。pjp-main は sidebar の spaces を pjp-spaces に替え、Spaces と Agents を上端のタブ (`pjp-sidebar-tabs`) で切り替える layout で、初めて置くときに表示する layout にする ([後述](#herdr-app-の印-pjp-spaces)) |
+| `herdr-app/mods/pjp-spaces/` | `%USERPROFILE%\.config\herdr-app\mods\pjp-spaces\` と、同梱の `layouts\main.json` を写した `layouts\pjp-main.json` (manifest でも `herdr-app-mods` でも配らず、runner の `herdr-app-pjp-spaces` の手順が `herdrHub` のホストに置く) | ハブの herdr-app の mod (herdr-app の同梱の spaces を写したもの。写した元は `herdr-app/upstream/spaces/` に元のまま置き、試験は `herdr-app/pjp-spaces.test.mjs`)。sidebar の space の行の 2 行目にハブと子の印を出す。pjp-main は sidebar の spaces を pjp-spaces に替え、Spaces と Agents を上端のタブ (`pjp-sidebar-tabs`) で切り替える layout で、初めて置くときに表示する layout にする ([後述](#herdr-app-の印-pjp-spaces)) |
 | `herdr-app/Install-HerdrApp.ps1` | `%USERPROFILE%\.config\powershell\Install-HerdrApp.ps1` | Windows の herdr-app (herdr の desktop app) と herdr-core を、dotfiles が固定した版で公式の install.ps1 と同じ置き場所に入れる・外す。自己更新の取得元を、固定した版だけを載せた手元のフィードに替える。PowerShell の `Install-HerdrApp` から呼ぶ。setup が入れて揃えるのは herdr と同じ `dotfiles.wsl.windowsFiles.herdr.enable = true` のマシン ([後述](#herdr-app)) |
 | (`nix/pkgs/herdr-core/releases.json`) | `%USERPROFILE%\.config\powershell\herdr-releases.json` | herdr-app と herdr-core の固定した版と sha256。`Install-HerdrApp.ps1` が読む。Linux の home-manager も同じファイルを読むので `nix/` に置き、manifest の `base = "nix"` で配る ([後述](#固定した版を上げる)) |
 | `powertoys/keyboard-manager/default.json` | `%LOCALAPPDATA%\Microsoft\PowerToys\Keyboard Manager\default.json` | PowerToys の Keyboard Manager の割り当て (CapsLock → F13 など)。エンジンが読む ([後述](#powertoys)、[TKT-139](https://app.notion.com/p/Windows-Google-dotfiles-win-3f679149a66f81b1a592d85d7300a62b)) |
@@ -832,7 +832,7 @@ item = "op://<vault の ID>/<項目の ID>/<欄の ID>"   # 元の token の 1Pa
 | 55 | `notion-tokens` | ホストの値の `[claude.notion.tokens]` から `%USERPROFILE%\.local\state\dotfiles\notion-tokens.json` を書き、宣言したプロファイルごとに `~/.config/pjp/env` の変数の行と、env の ACL を値を出さずに確かめて知らせる (Linux の home-manager と `bootstrap-notion-tokens` を 1 つにしたもの。env と ACL は書き換えない。[後述](#notion-の-api-キーの宣言-claudenotiontokens)) | `windowsClaudeCode` | 有る (Windows だけ) |
 | 55 | `pjp` | claude-skills の shim を (要れば) `cargo install` して `<CARGO_HOME>\bin\pjp-skills.exe` に置き、`pjp-skills --build` で道具を作る。前の手順が入れた `<CARGO_HOME>\bin\pjp.exe` (cargo の記録で pjp-shim のもの) は、公開の入口 `pjp` を覆うので外す ([後述](#claude-skills-と-windows-のハブ-w0-2)) | `claudePrivateSkills` | 有る (Windows だけ) |
 | 60 | `claude-skill-overrides` | `settings.json` の `skillOverrides` (pjp-dev-tracker の on/off・pjp-t3-hub の off・pack の skill を名前だけ・同期された skill を隠す) を書く | `windowsClaudeCode` | 有る (Windows だけ) |
-| 60 | `hc-hub` | ハブ `%USERPROFILE%\h` を `pjp hub init` で作る (作り済みなら雛形との差だけ直す) | `herdrHub` | 有る (Windows だけ) |
+| 60 | `hc-hub` | ハブ `%USERPROFILE%\h` を、手順 `pjp-tools` が置いた公開の `%LOCALAPPDATA%\dotfiles\bin\pjp-hub.exe init` で作る (作り済みなら雛形との差だけ直す。claude-skills は使わない。[後述](#claude-skills-と-windows-のハブ-w0-2)) | `herdrHub` | 有る (Windows だけ) |
 | 90 | `files` | `manifest.toml` のファイルを配る ([配る](#配る)と同じ判定。記録は `%LOCALAPPDATA%\dotfiles\state\windows-files.deployed.json`)。runner の clone の `core.autocrlf` が true なら ⚠ (テキストが CRLF で取り出され、WSL が配った LF と合わずに衝突になる。bootstrap の clone は false) | いつも | 有る |
 | 90 | `op-reason` | `Install-OpReason.ps1 -SshRelay <モード\|off>`: WSL の op の Windows の部品 (op-reason の zip) を、入っていなければ入れ、版がずれていれば入れ替える (ps1 は `-IfMissing` を持たない)。`-SshRelay` は `-Check` にも揃える流れにも渡し、ホストの値の `opReasonSshRelay` が on なら `[opReason] sshRelayMode` のモード (op-reason の CLI で op-reason 自身の task と中継を揃える。0.6.0 までの task `\pjp\op-reason-ssh-relay` は 1 回だけ消して移す)、off なら `off` (残った task を止めて消す。どちらの task も無ければ `op-reason.exe` を起こさない)。動いている `op-reason.exe` が中継だけなら、中継を止めて入れ替えて起こし直す (ほかの `op-reason.exe` が動いている・中継が窓を開いていれば、ps1 が何も変えずに止まる) ([op-reason](#op-reason)・[SSH の中継](#ssh-の中継)) | `onePassword` | 有る |
 | 91 | `powertoys` | PowerToys を入れ (`Install-PowerToys.ps1 -IfMissing`)、Keyboard Manager と自動起動がオフならオンにして PowerToys を起動し直し、Keyboard Manager に `default.json` を読み直させる ([PowerToys](#powertoys) と同じ順と判定。check と dry-run は止めない・起こさない・イベントを送らない)。記録は `%LOCALAPPDATA%\dotfiles\state\powertoys-keyboard-manager.reloaded` | いつも | 有る |
@@ -858,8 +858,8 @@ item = "op://<vault の ID>/<項目の ID>/<欄の ID>"   # 元の token の 1Pa
 | 97 | `type-clipboard` | `Install-TypeClipboard.ps1`: 入っていなければ入れる。ずれは知らせるだけ | `windowsTypeClipboard` | 有る |
 | 98 | `google-ime` | Google 日本語入力の設定 (`config1.db`) とユーザー辞書 (`user_dictionary.db`) を、`google-japanese-input/` と dotfiles-private の辞書のテキストから組み立てて置く ([Google 日本語入力](#google-日本語入力) と同じ判定・pjp-google-ime と同じバイト列と digest。protobuf は runner が手で読み書きする)。置いたら `taskkill /F` で変換サーバーを落とし、落とせなければ印を残して次の apply が落とし直す。apply は設定画面・辞書ツールが開いていれば置かない (`tasklist` で見る)。衝突は触らない (辞書は行の数だけ出す。語の diff は `--show-words`)。`--force` は退避して置き直す。取り込みは `dotfiles import google-ime`。check と dry-run は読むだけ (tasklist・taskkill も打たない)。記録と印と退避 (10 回分) は `%LOCALAPPDATA%\dotfiles\state\google-japanese-input\` | いつも (辞書は `privateRepos`) | 有る |
 | 98 | `hc-skill`・`herdr-app-skill` | `hc --skill`・`herdr-app --skill` に頭を足して `%USERPROFILE%\.claude\skills\{hc,herdr-app}\SKILL.md` を作る | `windowsHerdr` | 有る (Windows だけ) |
-| 98 | `herdr-app-mods` | `herdr-app/mods/<名前>/` を herdr-app の home の `mods\<名前>\` へ記録つきのコピーで置く (herdr-app が mod のフォルダに書くファイルと、home のほかの場所には触らない。[後述](#herdr-app-の-mod)) | `windowsHerdr` | 有る (Windows だけ) |
-| 98 | `herdr-app-pjp-spaces` | claude-skills の mod `pjp-spaces` を herdr-app の home の `mods\pjp-spaces\` へ記録つきのコピーで置き、同梱の layout `main` を写した `layouts\pjp-main.json` の spaces を pjp-spaces に替え、`pjp-sidebar-tabs` が置けていれば sidebar の Spaces と Agents をタブで切り替える stack にする (初めては `herdr-app do layout.clone` で写し、表示する layout が pjp-main に替わる。main が変わったら作り直す。[後述](#herdr-app-の印-pjp-spaces)) | `herdrHub` | 有る (Windows だけ) |
+| 98 | `herdr-app-mods` | `herdr-app/mods/<名前>/` を herdr-app の home の `mods\<名前>\` へ記録つきのコピーで置く (ハブの mod `pjp-spaces` は配らない。herdr-app が mod のフォルダに書くファイルと、home のほかの場所には触らない。[後述](#herdr-app-の-mod)) | `windowsHerdr` | 有る (Windows だけ) |
+| 98 | `herdr-app-pjp-spaces` | dotfiles のハブの mod `herdr-app/mods/pjp-spaces/` を herdr-app の home の `mods\pjp-spaces\` へ記録つきのコピーで置き、同梱の layout `main` を写した `layouts\pjp-main.json` の spaces を pjp-spaces に替え、`pjp-sidebar-tabs` が置けていれば sidebar の Spaces と Agents をタブで切り替える stack にする (初めては `herdr-app do layout.clone` で写し、表示する layout が pjp-main に替わる。main が変わったら作り直す。[後述](#herdr-app-の印-pjp-spaces)) | `herdrHub` | 有る (Windows だけ) |
 | 98 | `t3-code-settings` | T3 Code のテレメトリを切るユーザー環境変数 `T3CODE_TELEMETRY_ENABLED=false` と、`%USERPROFILE%\.t3\userdata\settings.json` の決めたキー (Claude の home・Launch arguments・新しいスレッドの既定・`CLAUDE_CODE_ENTRYPOINT`) を合わせる (ほかのキーと順は残す。Launch arguments は `claude-t3` の置き先に 2 つのファイルがそろっているときだけ書く。前の中身は `%LOCALAPPDATA%\dotfiles\state\t3-code-settings\backup\` へ。[後述](#t3-code)) | `windowsT3Code` | 有る (Windows だけ) |
 | 99 | `claude-accounts` | claude-<名前> (既定の personal・work と `claude-account add` で足したもの) の `%USERPROFILE%\.claude-<名前>\` を用意し (settings.json と CLAUDE.md は `~/.claude` へのファイルの symlink。足りなければ UAC の確認が 1 回出る)、launcher の `claude-<名前>.exe` と管理のコマンドの `claude-account.exe` を `%LOCALAPPDATA%\dotfiles\bin` に置いてユーザーの PATH に足す ([後述](#claude-personalclaude-work)) | `windowsClaudeAccounts` と `windowsClaudeCode` | 有る (Windows だけ) |
 | 99 | `claude-selector` | claude-selector (略語 `cs`。claude のアカウントと option を矢印キーで選んで Claude Code を起こす) を、Linux と同じ crate (`nix/pkgs/claude-selector`) から runner の toolchain で `cargo build` し、`%LOCALAPPDATA%\dotfiles\bin\claude-selector.exe` に置いてユーザーの PATH に足す。crate の元か toolchain が変わったときだけ作り直す (check と dry-run は cargo を打たない。[後述](#claude-selector-cs)) | `windowsClaudeCode` | 有る (Windows だけ) |
@@ -979,11 +979,14 @@ gate が違うと、試験が落ちる
 
 ### claude-skills と Windows のハブ (W0-2)
 
-claude-skills (private な skill 置き場。Rust の道具の入口 `pjp`) を Windows の Claude Code で使い、herdr-app と hc のハブ `%USERPROFILE%\h` を作る
-手順 (claude-skills の spec `docs/superpowers/specs/2026-11-15-windows-herdr-app-hc-design.md` の §9 の Windows の項目。経緯は dotfiles-private の
-ADR 064 (`docs/adr/064_win_w02_claude_skills_hub_*`))。どれも Windows にしか無い手順なので、受け持ちが WSL のホストでも `dotfiles apply` が流す
-(ホストの値は要る。claude-skills は private な repo なので、`claudePrivateSkills`・`herdrHub` のホストは `privateRepos = true` も書き、bootstrap を
-`-Private` で流す。[ホストの値](#ホストの値))。Linux の側は `nix/README.md` の「claude-skills の Rust の道具 (shim の pjp)」と「hc の skill」。
+claude-skills (private な skill 置き場。Rust の道具の shim `pjp-skills`) を Windows の Claude Code で使い、herdr-app と hc のハブ `%USERPROFILE%\h` を
+作る手順 (claude-skills の spec `docs/superpowers/specs/2026-11-15-windows-herdr-app-hc-design.md` の §9 の Windows の項目。経緯は dotfiles-private の
+ADR 064 (`docs/adr/064_win_w02_claude_skills_hub_*`)。ハブと子の道具・mod pjp-spaces・土台の skill を公開の dotfiles に移した経緯は ADR 124
+(`docs/adr/124_*`))。どれも Windows にしか無い手順なので、受け持ちが WSL のホストでも `dotfiles apply` が流す (ホストの値は要る。
+[ホストの値](#ホストの値))。claude-skills は private な repo なので、`claudePrivateSkills` のホストは `privateRepos = true` も書き、bootstrap を
+`-Private` で流す。ハブ (`herdrHub`) は `privateRepos` が要らない: 道具 (`pjp`・`pjp-hub` など) は手順 `pjp-tools` が公開の Release から置き、
+mod `pjp-spaces` と土台の skill (`pjp-hc-hub` ほか) は dotfiles にある (claude-skills の足し分があれば、それも重ねる)。Linux の側は `nix/README.md` の
+「claude-skills の Rust の道具 (shim の pjp)」と「hc の skill」。
 
 ```powershell
 dotfiles --self-update             # runner は clone を取得しない。先に 3 つの clone を進める (gh の資格情報で HTTPS を通す。上の「clone を進める」)
@@ -999,7 +1002,7 @@ pjp doctor                         # shim・clone・toolchain・外の道具を�
 | `claude-notion` | ホストの値の `[claude.notion]` から `claude-notion.json` を書く | dotfiles が持つファイルなので、違えば書き直す |
 | `claude-skills` | clone の中身を 1 つずつ `~/.claude/<種類>/` へ。ディレクトリは junction (`cmd /c mklink /J`)、ファイル (`rules/*.md` など) はコピー (記録 `%LOCALAPPDATA%\dotfiles\state\claude-skills.deployed.json`) | README.md は除く。同じ名前の実体 (手で置いたディレクトリなど)・別の先へのリンク・記録の無い違う中身のコピーは飛ばして ⚠ で知らせる (コピーは `--force` で上書き)。clone から消えたものは外す (junction の先は消さない)。ファイルはコピーなので、clone を pull したら `dotfiles apply` で写し直す |
 | `pjp` | 前の手順が `cargo install` で入れた `<CARGO_HOME>\bin\pjp.exe` は、cargo の記録 (`<CARGO_HOME>\.crates.toml`) に pjp-shim の bin `pjp.exe` があれば `cargo uninstall --root <CARGO_HOME> pjp-shim` で外す (`.cargo\bin` は PATH で `dotfiles\bin` より前にあり、公開の入口 `pjp` を覆うため)。shim (`<CARGO_HOME>\bin\pjp-skills.exe`) が無い・起きない・版 (`pjp-skills --version`) が違うときだけ `cargo install --locked --root <使い捨て>\root --target-dir <使い捨て>\target --path <clone>\crates\pjp-shim` (clone の中で、clone の toolchain で) を打ち、出来た `pjp-skills.exe` (無ければ `pjp.exe`) を `pjp-skills.exe` の名前で置く。毎回 `pjp-skills --build` | 入口 `pjp` (公開の道具。手順 `pjp-tools`) は claude-skills の道具を `pjp-skills` に渡す。記録に無い `pjp.exe` (ほかのもの) は外さずに ⚠ で知らせる (要らなければ手で消す)。`<CARGO_HOME>` に `pjp.exe` も cargo の記録も残さないよう、使い捨ての root に入れてから写す。pjp・pjp-skills を使っている会話・端末があると、外す・入れ替えるのが落ちることがある (止めてから流し直す) |
-| `hc-hub` | `pjp hub check` で差を見て、差があれば `pjp hub init` (引数なし。`%USERPROFILE%\h`) | まだハブでない場所に雛形の外のものがある・別の repo の中などでは、`pjp hub init` が何も書かずに止まる (runner は ⚠ でわけを出す)。ハブで動いている Claude Code の会話には、作った後から hook (`pjp hub guard`) が効く |
+| `hc-hub` | 手順 `pjp-tools` が置いた公開の `%LOCALAPPDATA%\dotfiles\bin\pjp-hub.exe` を絶対パスで打つ (claude-skills の clone も shim も使わない)。`pjp-hub.exe check` で差を見て、差があれば `pjp-hub.exe init` (引数なし。`%USERPROFILE%\h`)。雛形の `settings.json` には、足し分の skill (`~/.claude/skills/pjp-hc-hub-private/assets/hub/settings.overlay.json`。手順 `claude-skills` が張る) があれば `skillOverrides` を重ねる | `pjp-hub.exe` が無ければ、手順 `pjp-tools` が置いていないと出して止まる (`dotfiles apply --steps pjp-tools`。ほかの手順は進む)。まだハブでない場所に雛形の外のものがある・別の repo の中などでは、`pjp-hub.exe init` が何も書かずに止まる (runner は ⚠ でわけを出す)。終了コード 2 (重ねのファイルが壊れている・git が無いなど) は道具の文を ※ に添えて止まる。ハブで動いている Claude Code の会話には、作った後から hook (`pjp hub guard`) が効く |
 | `hc-skill`・`herdr-app-skill` | `<道具> --skill` に頭 (frontmatter と版のコメント) を足して `~/.claude/skills/<道具>/SKILL.md` | 道具は PATH → 公式の置き場所 (`%LOCALAPPDATA%\Programs\herdr-core\hc.exe`・`…\herdr-app\herdr-app.exe`) の順に探す。手で置いた写しも書き直す。道具を上げたら `dotfiles apply` で作り直る |
 
 - junction を手で外すなら `cmd /c rmdir "%USERPROFILE%\.claude\skills\<名前>"` (先は消えない)。Windows PowerShell 5.1 の `Remove-Item -Recurse` を junction に
@@ -1494,6 +1497,8 @@ dotfiles apply --steps herdr-app-mods             # 置く
 | `pjp-worktree-remove` | `main.js`・`mod.json` | prefix の後の `d` と `Ctrl+Q` が開く確かめの小窓 (window)。今の space の端末を全部止め、終わるのを待ってから space を閉じて worktree を消す ([次節](#herdr-app-のキー))。止める端末・待つ上限・やり直し・残ったフォルダの扱いの正本は `main.js` の頭のコメント |
 | `pjp-sidebar-tabs` | `main.js`・`mod.json`・`spaces.svg`・`agents.svg` | 左のサイドパネルの Spaces と Agents を切り替える、上端のアイコンのタブ (layout pjp-main の stack `sidebar-lists` の header。layout に置くのは `herdr-app-pjp-spaces`)。選んでいるタブはアイコン + 名前、ほかはアイコンだけで、Agents のタブに blocked の agent の数の印を出す。Agents を出していない間は、agents の一覧の順 (`agent.next` の順) を代わりに渡す ([サイドパネルのタブ](#サイドパネルのタブ-pjp-sidebar-tabs))。herdr-app の決まりと見た目の正本は `main.js` の頭のコメント |
 
+- `herdr-app/mods/pjp-spaces/` (ハブの mod) はこの手順では配らない。置くのは `herdr-app-pjp-spaces` で、`herdrHub` のホストだけ (`windowsHerdr`
+  だけのホストには置かない。[herdr-app の印 (pjp-spaces)](#herdr-app-の印-pjp-spaces))
 - herdr-app の home は `HERDR_APP_HOME` → `%XDG_CONFIG_HOME%\herdr-app` → `%USERPROFILE%\.config\herdr-app` の順に決める (`Install-HerdrApp.ps1` の
   置き場所と同じ)。どれにしたかは手順の出力の頭に出る
 - 置き方は `CLAUDE.md` と同じ記録つきのコピー (`%LOCALAPPDATA%\dotfiles\state\herdr-app-mods.deployed.json`)。手で置いた同じ中身は引き取り (記録だけ
@@ -1895,11 +1900,12 @@ dotfiles apply --steps herdr-app-mods,herdr-app-keys             # 置く・書�
 ### herdr-app の印 (pjp-spaces)
 
 herdr-app の sidebar の space の行の 2 行目に、旧 herdr の sidebar の 2 行目と同じハブと子の印 (`🌱`・`🌳[N]`・`🔄`・`👀`・`🗑️`・`↑ TKT-n`) を出す。
-印を出すのは claude-skills の mod `pjp-spaces` (herdr-app の同梱の mod `spaces` を写して印を足したもの。claude-skills の spec
-`docs/superpowers/specs/2026-11-15-windows-herdr-app-hc-design.md` の §7.5・W2-4)。runner の手順 `herdr-app-pjp-spaces` (order 98) がそれを herdr-app の
-home に置き、同梱の layout `main` を写した自分の layout `pjp-main` の sidebar の spaces を pjp-spaces に替える。Windows にしか無い手順で、受け持ちが
-WSL のホストでも `dotfiles apply` が流す (on/off はハブの手順 `hc-hub` と同じ `herdrHub`)。経緯は dotfiles-private の ADR 072
-(`docs/adr/072_win_herdr_app_pjp_spaces_*`)。
+印を出すのは dotfiles のハブの mod `pjp-spaces` (`herdr-app/mods/pjp-spaces/`。herdr-app の同梱の mod `spaces` を写して印を足したもの。claude-skills の
+spec `docs/superpowers/specs/2026-11-15-windows-herdr-app-hc-design.md` の §7.5・W2-4)。runner の手順 `herdr-app-pjp-spaces` (order 98) がそれを
+herdr-app の home に置き、同梱の layout `main` を写した自分の layout `pjp-main` の sidebar の spaces を pjp-spaces に替える。Windows にしか無い手順で、
+受け持ちが WSL のホストでも `dotfiles apply` が流す (on/off はハブの手順 `hc-hub` と同じ `herdrHub`。`windowsHerdr` だけのホストには置かない。
+`herdr-app-mods` はこの mod を配らない)。経緯は dotfiles-private の ADR 072 (`docs/adr/072_win_herdr_app_pjp_spaces_*`)。claude-skills から dotfiles に
+移した経緯は ADR 124 (`docs/adr/124_*`)。
 
 ```powershell
 dotfiles check --steps herdr-app-pjp-spaces             # 差を見る (何も書かない)
@@ -1909,7 +1915,7 @@ dotfiles apply --steps herdr-app-pjp-spaces             # 置く。初めて置�
 
 | 置くもの | 置き先 (herdr-app の home の下) | 置き方 |
 | --- | --- | --- |
-| claude-skills の clone の `skills/pjp-hc-hub/herdr-app/mods/pjp-spaces/` | `mods\pjp-spaces\` | `herdr-app-mods` と同じ記録つきのコピー (記録は `%LOCALAPPDATA%\dotfiles\state\herdr-app-pjp-spaces.deployed.json`) |
+| dotfiles の `herdr-app/mods/pjp-spaces/` (`main.js`・`mod.json`) | `mods\pjp-spaces\` | `herdr-app-mods` と同じ記録つきのコピー (記録は `%LOCALAPPDATA%\dotfiles\state\herdr-app-pjp-spaces.deployed.json`。前の runner が claude-skills の clone から置いたものも、同じ記録で引き継ぐ) |
 | 同梱の `layouts\main.json` の、spaces を指す block (`content.mod` が `spaces`) を `pjp-spaces` に替え、`pjp-sidebar-tabs` が置けていれば `sidebar-lists` をタブの stack にしたもの ([サイドパネルのタブ](#サイドパネルのタブ-pjp-sidebar-tabs)) | `layouts\pjp-main.json` | 初めては `herdr-app do layout.clone '{"name":"main","as":"pjp-main"}'` で写してから替える。その後は runner が今の main から作り直す (同じ記録) |
 
 - **初めて置く apply は、表示する layout を main から pjp-main に替える** (`layout.clone` は写した layout へ表示を替える)。sidebar の幅などの clicks
@@ -1925,12 +1931,17 @@ dotfiles apply --steps herdr-app-pjp-spaces             # 置く。初めて置�
   pjp-spaces に替えると今の形になるもの (人が `layout.clone` で main を写し直した・中身は同じで保存し直した) は、⚠ にせずに引き取って書き直す
 - 書かなかった実行で、herdr-app が layout を読めなかった理由のファイル (`layouts\pjp-main.error`、pjp-main を表示しているときは home の `layout.error`)
   があれば、pjp-main の行に ※ でその 1 行目を添える。`herdr-app status | Out-String` でも見られる
-- 同梱の main に spaces を指す block が無くなったら (herdr-app の形が変わった)、pjp-main は前のままにして ⚠ で知らせる。claude-skills の pjp-spaces と
-  合わせて差し替え方を決め直す
-- 同梱の mod `spaces` が変わったとき (herdr-app を上げた) に pjp-spaces へ差を取り込むのは claude-skills (pjp-spaces の頭に、写した元の herdr-app の版が
-  ある)。取り込んだ版は、clone を pull して `dotfiles apply` で届く
-- claude-skills の clone に pjp-spaces がまだ無い (claude-skills の PR の merge 前) うちは何もしない (· で知らせる)。置いた後で clone から無くなったら、
-  置いたものに触らずに ⚠ で知らせる (layout が mod を指しているので、片付けると sidebar が壊れる)
+- 同梱の main に spaces を指す block が無くなったら (herdr-app の形が変わった)、pjp-main は前のままにして ⚠ で知らせる。pjp-spaces と合わせて
+  差し替え方を決め直す
+- 同梱の mod `spaces` が変わったとき (herdr-app を上げた) は、dotfiles の pjp-spaces へ差を取り込む。写した元の同梱の spaces は
+  `herdr-app/upstream/spaces/` に元のまま置いてあり (pjp-spaces の頭に写した元の herdr-app の版がある)、新しい同梱の spaces との 3-way で取り込む
+  (手順は skill `pjp-hc-hub` の `references/spaces.md`)。印の計算と描き方の試験は `herdr-app/pjp-spaces.test.mjs` (`node --test`。CI の workflow
+  `pjp-spaces` が流す)。取り込んだ版は、clone を進めて `dotfiles apply` で届く
+- 前の runner (claude-skills の clone から置いていた) が置いたものは、記録 (置き先のパスと sha256) ごと引き継ぐ: 置き先の中身が今の元と同じなら記録
+  だけ、記録どおりの前の写しは上書きし、手で直したものは衝突で ⚠ (`--force` で上書き)。claude-skills の片付けの PR まで claude-skills にも写しが
+  あるが、置くのはこの手順だけ (claude-skills の写しは置かない)
+- dotfiles の clone に pjp-spaces が無い (clone が壊れている) ときは何もせずに ⚠ で知らせる。置いた後で無くなっても、置いたものに触らない (layout が
+  mod を指しているので、片付けると sidebar が壊れる)
 - mod.json の `place` が `none` でない mod は置かない (⚠。herdr-app は初めて見た mod を、place に従って表示中の layout へ差し込む)。mod.json は先に置く。
   同梱の main が無い (herdr-app をまだ起こしていない) ときは mod も置かずに ⚠ (一度起こしてから apply)
 - 置き方の細部 (herdr-app が mod のフォルダに書く `gpui-kit.d.ts`・`jsconfig.json` は配らない・置き先の mod のフォルダがリンクなら触らない・元から
@@ -3124,7 +3135,7 @@ core の版・generation と linux-aarch64・linux-x86_64・windows-x86_64 の s
   (公式は待ち続ける。setup が止まったままにならないよう)
 - 新しく開くシェルから `herdr-app` と `hc` が引ける (`Install-HerdrApp` を打った PowerShell には、script が今のプロセスの PATH にも足す)
 - 設定 (`~/.config/herdr-app`。テレメトリは既定で有効で、Settings → Privacy で変える) は dotfiles では配らない。自作の mod (`~/.config/herdr-app/mods/`
-  の下) は runner の `herdr-app-mods` の手順が配り、`keys.json` には runner の `herdr-app-keys` の手順が dotfiles のキーだけを書き足す。claude-skills の
+  の下) は runner の `herdr-app-mods` の手順が配り、`keys.json` には runner の `herdr-app-keys` の手順が dotfiles のキーだけを書き足す。ハブの
   mod `pjp-spaces` と、それを使う自分の layout `pjp-main` は runner の `herdr-app-pjp-spaces` の手順が置く
   ([herdr-app の mod](#herdr-app-の-mod)・[herdr-app のキー](#herdr-app-のキー)・[herdr-app の印 (pjp-spaces)](#herdr-app-の印-pjp-spaces))
 

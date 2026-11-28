@@ -1,15 +1,18 @@
-//! herdr-app-pjp-spaces (order 98): claude-skills の herdr-app の mod `pjp-spaces` を herdr-app の home の `mods\pjp-spaces\` へ置き、同梱の
+//! herdr-app-pjp-spaces (order 98): dotfiles の herdr-app の mod `pjp-spaces` を herdr-app の home の `mods\pjp-spaces\` へ置き、同梱の
 //! layout `main` を写した自分の layout `pjp-main` の spaces の block を pjp-spaces に替える。pjp-spaces は herdr-app の spaces の mod を写し、
 //! space の行の 2 行目にハブと子の印 (🌱・🌳[N]・🔄・👀・🗑️・↑ TKT-n) を足したもの (claude-skills の spec
-//! `docs/superpowers/specs/2026-11-15-windows-herdr-app-hc-design.md` の §7.5・§9 の W2-4)。あわせて、sidebar の spaces と agents を縦に並べる
-//! `sidebar-lists` を stack にし、dotfiles の mod `pjp-sidebar-tabs` のアイコンのタブで Spaces と Agents を切り替える形にする。herdr-app は
-//! Windows だけなので、WSL の setup に同じ手順は無い (Windows にしか無い手順)。
+//! `docs/superpowers/specs/2026-11-15-windows-herdr-app-hc-design.md` の §7.5・§9 の W2-4。dotfiles に移した経緯は dotfiles-private の ADR 124)。
+//! あわせて、sidebar の spaces と agents を縦に並べる `sidebar-lists` を stack にし、dotfiles の mod `pjp-sidebar-tabs` のアイコンのタブで
+//! Spaces と Agents を切り替える形にする。herdr-app は Windows だけなので、WSL の setup に同じ手順は無い (Windows にしか無い手順)。
 //!
-//! - mod の元は claude-skills の clone の `skills/pjp-hc-hub/herdr-app/mods/pjp-spaces/` (claude-skills と決めた置き場)。置き方は herdr-app-mods と
-//!   同じ記録つきのコピー (herdr-app が書くファイルと名前が `.` で始まるものは配らない。元から消えたファイルは記録どおりなら消す。mod.json を
-//!   先に置く)
-//! - clone にまだ無ければ (claude-skills の PR の merge 前) 何もしない。置いた後で clone から無くなったら、置いたものには触らずに知らせる
-//!   (layout が mod を指しているので、片付けると sidebar が壊れる)
+//! - mod の元は dotfiles の `win/herdr-app/mods/pjp-spaces/` (main.js・mod.json)。写した元の herdr-app の同梱の spaces は
+//!   `win/herdr-app/upstream/spaces/` (herdr-app を上げたときに元との差を取り込む 3-way の元。runner は置かない)。claude-skills の clone は
+//!   使わない (privateRepos が off のハブのホストでも置く)。herdr-app-mods はこの mod を配らない (置くのはこの手順だけで、herdrHub のホストだけ)
+//! - 置き方は herdr-app-mods と同じ記録つきのコピー (herdr-app が書くファイルと名前が `.` で始まるものは配らない。元から消えたファイルは記録
+//!   どおりなら消す。mod.json を先に置く)。前の手順 (元は claude-skills の clone) が置いたものと記録 (置き先のパスと sha256) はそのまま引き継ぐ:
+//!   置き先の中身が今の元と同じなら記録だけ、記録どおりの前の写しは上書き、手で直したものは衝突 (`--force` で上書き)
+//! - repo に mod が無ければ (clone が壊れている) 何もしない。置いた後で repo から無くなったら、置いたものには触らずに知らせる (layout が mod を
+//!   指しているので、片付けると sidebar が壊れる)
 //! - mod.json の place が none でない mod は置かない (herdr-app は初めて見た mod を、place に従って表示中の layout へ差し込む)。同梱の main が
 //!   無ければ (herdr-app をまだ起こしていない) mod も置かない
 //! - layout は `layouts\pjp-main.json`。無く、作った記録も無いときだけ、apply が `herdr-app do layout.clone {"name":"main","as":"pjp-main"}` を
@@ -38,12 +41,11 @@
 //! 違い (`/` と `\`・Windows の大文字小文字) を見ずに引く。dotfiles-private の docs/adr/072_win_herdr_app_pjp_spaces_*。タブは
 //! docs/adr/106_win_herdr_app_sidebar_tabs_*。
 
-use super::claude_skills::clone_dir;
-use super::herdr_app_mods::{Keep, app_home, copy_mod, list_mod, prune};
+use super::herdr_app_mods::{Keep, MODS, app_home, copy_mod, list_mod, prune};
 use super::linker::{Linker, Source};
 use super::tool_skill::{HERDR_APP_OFFICIAL, locate};
 use super::{Gate, Mode, Outcome, Step, StepInfo};
-use crate::context::{Ctx, join_segments};
+use crate::context::Ctx;
 use crate::fsutil;
 use crate::ojson::OValue;
 use crate::process::CommandSpec;
@@ -53,10 +55,10 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-/// claude-skills の clone の中の mod の置き場 (`/` 区切り。この下の `pjp-spaces` が mod。claude-skills と決めた約束)
-pub const SOURCE_ROOT: &str = "skills/pjp-hc-hub/herdr-app/mods";
-/// mod の名前 (元と置き先のフォルダの名前。layout の content.mod)
+/// mod の名前 (元 (dotfiles の `win/herdr-app/mods/` の下) と置き先のフォルダの名前。layout の content.mod)
 pub const MOD: &str = "pjp-spaces";
+/// mod の写した元の herdr-app の同梱の spaces (dotfiles の repo の中。`/` 区切り)。herdr-app を上げたときの 3-way の元で、runner は置かない
+pub const UPSTREAM: &str = "win/herdr-app/upstream/spaces";
 /// 写す元の同梱の layout
 pub const BASE: &str = "main";
 /// 差し替える同梱の mod
@@ -90,8 +92,8 @@ impl Step for HerdrAppPjpSpaces {
             id: "herdr-app-pjp-spaces",
             // herdr-app を入れる手順 (97) の後。dotfiles の mod を置く herdr-app-mods と並べる
             order: 98,
-            title: "claude-skills の herdr-app の mod pjp-spaces を置き、main を写した layout pjp-main の spaces を pjp-spaces に替え、sidebar の Spaces と Agents をタブ (pjp-sidebar-tabs) で切り替える形にする",
-            // 印はハブの道具 (pjp child・pjp mark) が付ける label を読む。claude-skills の clone を使うハブの手順 (hc-hub) と同じ switch
+            title: "dotfiles の herdr-app の mod pjp-spaces を置き、main を写した layout pjp-main の spaces を pjp-spaces に替え、sidebar の Spaces と Agents をタブ (pjp-sidebar-tabs) で切り替える形にする",
+            // 印はハブの道具 (pjp child・pjp mark) が付ける label を読む。ハブの手順 (hc-hub) と同じ switch (windowsHerdr だけのホストには置かない)
             gate: Gate::Tool("herdrHub"),
             ported: true,
             windows_only: true,
@@ -99,8 +101,7 @@ impl Step for HerdrAppPjpSpaces {
     }
 
     fn run(&self, ctx: &mut Ctx, mode: Mode) -> Vec<Outcome> {
-        let clone = clone_dir(ctx);
-        let root = join_segments(&clone, SOURCE_ROOT);
+        let root = ctx.repo_path(MODS);
         let src = root.join(MOD);
         let (home, why) = app_home(ctx);
         ctx.say(format!("mod の元: {}", src.display()));
@@ -117,7 +118,7 @@ impl Step for HerdrAppPjpSpaces {
         };
         if !src.is_dir() {
             let placed = !records.keys().is_empty();
-            return vec![missing_source(ctx, &clone, &src, placed)];
+            return vec![missing_source(ctx, &src, placed)];
         }
         let layouts = home.join("layouts");
         let layout_path = layouts.join(format!("{LAYOUT}.json"));
@@ -157,13 +158,13 @@ impl Step for HerdrAppPjpSpaces {
             skip_skills: Vec::new(),
             select: None,
             origin: "clone",
-            absorb: "claude-skills の skills/pjp-hc-hub/herdr-app/mods/pjp-spaces",
+            absorb: "dotfiles の win/herdr-app/mods/pjp-spaces",
             step: "herdr-app-pjp-spaces",
         };
         let mut w = Linker::new(source, mods_dir.clone(), mode, records);
         let mut keep = Keep::new();
         copy_mod(ctx, &mut w, &src, &m, &mods_dir, &mut keep);
-        prune(ctx, &mut w, &mods_dir, &keep);
+        prune(ctx, &mut w, &mods_dir, &keep, &[]);
         let mod_ok = w.tally.errors == 0;
         let mut outcomes = w.finish(ctx, &record_path, None);
         if let Some(first) = outcomes.first_mut() {
@@ -192,33 +193,18 @@ fn say_out(ctx: &mut Ctx, kind: Kind, why: String) -> Outcome {
     Outcome::new(kind, why)
 }
 
-/// clone に mod が無いときの行。置いた記録が無ければ (claude-skills の PR の merge 前) 知らせるだけ、あれば置いたものに触らずに知らせる。
-fn missing_source(ctx: &mut Ctx, clone: &Path, src: &Path, placed: bool) -> Outcome {
-    if !clone.is_dir() {
-        return say_out(
-            ctx,
-            Kind::Manual,
-            format!(
-                "claude-skills の clone が無い ({}) → -Private の bootstrap (Install-Bootstrap.ps1 -Private) が clone する",
-                clone.display()
-            ),
-        );
-    }
-    if placed {
-        return say_out(
-            ctx,
-            Kind::Manual,
-            format!(
-                "claude-skills の clone に {MOD} が無い ({})。前に置いた mod と layout {LAYOUT} には触らない (layout が mod を指している) → clone の branch と中身を確かめる。外すなら win/README.md の「herdr-app の印 (pjp-spaces)」の切り戻し",
-                src.display()
-            ),
-        );
-    }
+/// dotfiles の repo に mod が無いときの行 (clone が壊れている・取り出し方が違う)。置いた記録があれば、置いたものに触らないことも言う。
+fn missing_source(ctx: &mut Ctx, src: &Path, placed: bool) -> Outcome {
+    let keep = if placed {
+        format!("。前に置いた mod と layout {LAYOUT} には触らない (layout が mod を指している)")
+    } else {
+        String::new()
+    };
     say_out(
         ctx,
-        Kind::Info,
+        Kind::Manual,
         format!(
-            "claude-skills の clone に {MOD} がまだ無い ({}。claude-skills の PR の merge 前) → 何もしない (merge の後に dotfiles --self-update apply)",
+            "dotfiles の clone に {MOD} が無い ({}){keep} → clone の branch と中身を確かめる (git status)。外すなら win/README.md の「herdr-app の印 (pjp-spaces)」の切り戻し",
             src.display()
         ),
     )
@@ -229,7 +215,7 @@ fn missing_source(ctx: &mut Ctx, clone: &Path, src: &Path, placed: bool) -> Outc
 fn check_mod(src: &Path) -> Result<(), String> {
     if !src.join("main.js").is_file() {
         return Err(format!(
-            "{MOD} に main.js が無い ({}) → 置かない。claude-skills の mod を確かめる",
+            "{MOD} に main.js が無い ({}) → 置かない。dotfiles の win/herdr-app/mods/{MOD} を確かめる",
             src.display()
         ));
     }
@@ -237,7 +223,7 @@ fn check_mod(src: &Path) -> Result<(), String> {
     match place.as_deref() {
         Some("none") => Ok(()),
         other => Err(format!(
-            "{MOD} の mod.json の place が none でない ({}) → 置かない (herdr-app は初めて見た mod を、place に従って表示中の layout へ差し込む)。claude-skills の mod を直す",
+            "{MOD} の mod.json の place が none でない ({}) → 置かない (herdr-app は初めて見た mod を、place に従って表示中の layout へ差し込む)。dotfiles の win/herdr-app/mods/{MOD} を直す",
             other.unwrap_or("書いていない")
         )),
     }
@@ -962,7 +948,10 @@ mod tests {
     //! - 初めて: check と dry-run は mod も layout も「無い」(3 の種類) で何も書かず、herdr-app も打たない。apply は mod を記録つきで置き、
     //!   `herdr-app do layout.clone {"name":"main","as":"pjp-main"}` を 1 回だけ打ち、clone の写しを「main の spaces を pjp-spaces に替えた形 +
     //!   cloned_from」で書き直して記録する。2 回目は揃っていて、herdr-app を打たない。herdr-app が書くファイルは配らない
-    //! - clone に mod がまだ無ければ知らせるだけ (· で、何も書かない)。置いた後で無くなったら、置いたものに触らずに ⚠。clone が無ければ ⚠
+    //! - mod の元は dotfiles の win/herdr-app/mods/pjp-spaces/ (claude-skills の clone を使わない)。repo に無ければ ⚠ で何も書かない。置いた後で
+    //!   無くなったら、置いたものに触らずに ⚠
+    //! - 前の手順 (元は claude-skills の clone) が置いた mod と記録を引き継ぐ: 置き先の中身が今の元と同じなら記録だけ (書かない)、記録どおりの
+    //!   前の写しは上書きし、手で直したものは衝突 (--force で上書き)
     //! - mod.json の place が none でない・main.js が無い mod は置かない (⚠)
     //! - 表示が main でなければ layout を作らない (·)。herdr-app が無い・同梱の main が無い・main に spaces の block が無いときは ⚠ で、
     //!   herdr-app を打たない。clone が落ちたら ⚠ で、記録を作らない (次の apply で作り直せる)
@@ -975,7 +964,9 @@ mod tests {
     //!   元から消えたファイルは記録どおりなら消す。mod.json を先に置く
     //! - layout の記録は home の綴りの違いを見ずに引く (作り直さない・外したままも保つ。記録の鍵は今の綴りに寄る)
     //! - 差し替え (point_to) と node の違い (changed_nodes)・数を値で比べる (same)
-    //! - dotfiles の repo に pjp-spaces を置いていない (claude-skills のもの。herdr-app-mods と二重に配らない)
+    //! - dotfiles の repo の pjp-spaces: 置いてよい形 (main.js と place が none の mod.json)・写した元の同梱の spaces (win/herdr-app/upstream/spaces/)
+    //!   がある。herdr-app-mods は配らない (この手順だけが herdrHub のホストに置く)
+    //! - gate は herdrHub (windowsHerdr だけのホストには置かない)
     //! - タブ: herdr-app の home に pjp-sidebar-tabs が置けていれば (herdr-app-mods が先に置く)、sidebar-lists を stack (active は spaces、
     //!   header は mod pjp-sidebar-tabs、子はそのまま) にする。置けていない・place が none でなければ column のまま ※ で知らせ、前に作った
     //!   pjp-main も次の apply で揃う (column ⇄ stack。herdr-app を打たない・cloned_from は残す)。main に sidebar-lists (spaces と agents を
@@ -989,6 +980,7 @@ mod tests {
     //! - dotfiles の repo の pjp-sidebar-tabs: main.js・place が none の mod.json・main.js が使うアイコンがあり、既定の stack が LISTS
 
     use super::*;
+    use crate::context::join_segments;
     use crate::host::{Groups, HostValues};
     use crate::manifest::Roots;
     use crate::process::{Exit, RunResult};
@@ -1093,7 +1085,8 @@ mod tests {
 "#;
     const CLONED_FROM: &str = r#"{"name":"main","version":"0.1.15"}"#;
     const CLONE_ARGS: &str = "do layout.clone {\"name\":\"main\",\"as\":\"pjp-main\"}";
-    const SRC: &str = "claude-skills/skills/pjp-hc-hub/herdr-app/mods/pjp-spaces";
+    /// mod の元 (dotfiles の repo の中)
+    const SRC: &str = "dotfiles/win/herdr-app/mods/pjp-spaces";
 
     struct Env {
         t: TempDir,
@@ -1349,27 +1342,112 @@ mod tests {
         }
     }
 
+    /// mod の元は dotfiles の repo の中 (claude-skills の clone は無くてよい)。repo に無ければ ⚠ で何も書かない
     #[test]
-    fn waits_for_claude_skills_to_carry_the_mod() {
+    fn takes_the_mod_from_the_dotfiles_repo() {
         let e = Env::new();
+        assert!(!e.t.path().join("claude-skills").exists());
+        let (o, out, _) = e.run(Mode::Check);
+        assert!(
+            out.contains(&format!(
+                "mod の元: {}",
+                join_segments(e.t.path(), SRC).display()
+            )),
+            "{out}"
+        );
+        assert_eq!(
+            kinds(&o),
+            vec![Kind::Missing, Kind::Missing],
+            "{o:?}\n{out}"
+        );
         std::fs::remove_dir_all(e.t.path().join(SRC)).unwrap();
         for mode in [Mode::Check, APPLY] {
             let (o, out, calls) = e.run(mode);
-            assert_eq!(kinds(&o), vec![Kind::Info], "{mode:?} {o:?}\n{out}");
-            assert!(o[0].text.contains("まだ無い"), "{o:?}");
+            assert_eq!(kinds(&o), vec![Kind::Manual], "{mode:?} {o:?}\n{out}");
+            assert!(
+                o[0].text.contains("dotfiles の clone に pjp-spaces が無い"),
+                "{o:?}"
+            );
             assert!(calls.is_empty());
         }
         assert!(!e.home("mods/pjp-spaces").exists());
         assert!(!e.t.path().join("state").join(RECORD_FILE).exists());
-        // clone そのものが無い
-        std::fs::remove_dir_all(e.t.path().join("claude-skills")).unwrap();
-        let (o, _, _) = e.run(Mode::Check);
-        assert_eq!(kinds(&o), vec![Kind::Manual], "{o:?}");
-        assert!(o[0].text.contains("clone が無い"), "{o:?}");
+    }
+
+    /// 前の手順 (元は claude-skills の clone) が置いた mod と記録 (置き先のパスと sha256。元は持たない) を引き継ぐ: 置き先の中身が今の元と同じなら
+    /// 記録だけ (書かない)・記録どおりの前の写しは上書き・手で直したものは衝突 (--force で上書き)
+    #[test]
+    fn inherits_what_the_earlier_step_placed() {
+        /// 前の手順が置いた形: 置き先の中身と、前の手順が書いた記録の sha256 の中身
+        fn earlier(e: &Env, placed_js: &str, recorded_js: &str) {
+            e.t.write("home/.config/herdr-app/mods/pjp-spaces/main.js", placed_js);
+            e.t.write("home/.config/herdr-app/mods/pjp-spaces/mod.json", MOD_JSON);
+            let mut r = Records::load(&e.t.path().join("state").join(RECORD_FILE)).unwrap();
+            r.set(
+                &e.home("mods/pjp-spaces/main.js").to_string_lossy(),
+                &fsutil::sha256_bytes(recorded_js.as_bytes()),
+            );
+            r.set(
+                &e.home("mods/pjp-spaces/mod.json").to_string_lossy(),
+                &fsutil::sha256_bytes(MOD_JSON.as_bytes()),
+            );
+            r.save_if_changed().unwrap();
+        }
+        let old_js = "// pjp-spaces (前の手順の元)\n";
+
+        // 同じ中身: 記録だけ (書かない)
+        let e = Env::new();
+        earlier(&e, MAIN_JS, MAIN_JS);
+        for mode in [Mode::Check, APPLY] {
+            let (o, out, _) = e.run(mode);
+            assert_eq!(o[0].kind, Kind::Ok, "{mode:?} {o:?}\n{out}");
+            assert!(
+                o[0].text
+                    .starts_with("mod pjp-spaces: 追加 0 / 更新 0 / 削除 0 / 同じ 2 / 飛ばした 0"),
+                "{mode:?} {o:?}"
+            );
+        }
+        assert_eq!(e.read("mods/pjp-spaces/main.js"), MAIN_JS);
+
+        // 記録どおりの前の写し: 今の元で上書きする
+        let e = Env::new();
+        earlier(&e, old_js, old_js);
+        let (o, out, _) = e.run(Mode::Check);
+        assert_eq!(o[0].kind, Kind::Fix, "{o:?}\n{out}");
+        assert!(
+            out.contains("上書きする (apply で): mods/pjp-spaces/main.js"),
+            "{out}"
+        );
+        let (o, out, _) = e.run(APPLY);
+        assert_eq!(o[0].kind, Kind::Ok, "{o:?}\n{out}");
+        assert!(o[0].text.contains("更新 1"), "{o:?}");
+        assert_eq!(e.read("mods/pjp-spaces/main.js"), MAIN_JS);
+        assert_eq!(
+            e.record()
+                .get(&*e.home("mods/pjp-spaces/main.js").to_string_lossy())
+                .and_then(|v| v.as_str()),
+            Some(fsutil::sha256_bytes(MAIN_JS.as_bytes()).as_str())
+        );
+
+        // 前の写しを手で直した: 衝突 (--force で上書き)
+        let e = Env::new();
+        earlier(&e, "// 手で直した\n", old_js);
+        let (o, out, _) = e.run(APPLY);
+        assert_eq!(o[1].kind, Kind::Manual, "{o:?}\n{out}");
+        assert!(
+            o[1].notes.iter().any(|n| n
+                .starts_with("mods/pjp-spaces/main.js (中身が違う。Windows 側で変わった")
+                && n.contains("dotfiles の win/herdr-app/mods/pjp-spaces へ取り込む")),
+            "{o:?}"
+        );
+        assert_eq!(e.read("mods/pjp-spaces/main.js"), "// 手で直した\n");
+        let (o, out, _) = e.run(FORCE);
+        assert_eq!(o[0].kind, Kind::Ok, "{o:?}\n{out}");
+        assert_eq!(e.read("mods/pjp-spaces/main.js"), MAIN_JS);
     }
 
     #[test]
-    fn keeps_placed_files_when_the_mod_leaves_the_clone() {
+    fn keeps_placed_files_when_the_mod_leaves_the_repo() {
         let e = Env::new();
         e.run(APPLY);
         std::fs::remove_dir_all(e.t.path().join(SRC)).unwrap();
@@ -2018,13 +2096,22 @@ mod tests {
         }
     }
 
+    /// dotfiles の repo の pjp-spaces: 置いてよい形 (main.js と place が none の mod.json)。写した元の同梱の spaces (herdr-app を上げたときに
+    /// 元との差を取り込む 3-way の元) が win/herdr-app/upstream/spaces/ にある
     #[test]
-    fn real_repo_does_not_carry_the_mod() {
+    fn real_repo_carries_the_mod() {
         let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
-        let dotfiles_mods = join_segments(&repo, crate::steps::herdr_app_mods::MODS);
-        assert!(
-            !dotfiles_mods.join(MOD).exists(),
-            "pjp-spaces は claude-skills のもの (herdr-app-mods と二重に配らない)"
+        let src = join_segments(&repo, crate::steps::herdr_app_mods::MODS).join(MOD);
+        assert_eq!(check_mod(&src), Ok(()));
+        let m = list_mod(src.parent().unwrap(), MOD).unwrap();
+        assert_eq!(m.files, vec!["main.js".to_string(), "mod.json".to_string()]);
+        let upstream = join_segments(&repo, UPSTREAM);
+        for f in ["main.js", "mod.json"] {
+            assert!(upstream.join(f).is_file(), "{f} が {UPSTREAM} に無い");
+        }
+        assert_eq!(
+            read_place(SHIPPED, &upstream).unwrap().as_deref(),
+            Some("none")
         );
     }
 
@@ -2060,5 +2147,13 @@ mod tests {
             ("herdr-app-pjp-spaces", 98, Gate::Tool("herdrHub"))
         );
         assert!(i.ported && i.windows_only);
+        // windowsHerdr だけのホストには置かない
+        let host = |text: &str| {
+            crate::host::parse(text, Path::new("h.toml"), Groups::embedded().unwrap()).unwrap()
+        };
+        let herdr = host("[tools]\nwindowsHerdr = true\n");
+        assert!(i.gate.off_reason(&herdr).is_some());
+        let hub = host("[tools]\nwindowsClaudeCode = true\nwindowsHerdr = true\nherdrHub = true\n");
+        assert_eq!(i.gate.off_reason(&hub), None);
     }
 }

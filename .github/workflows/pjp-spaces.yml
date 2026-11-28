@@ -1,0 +1,48 @@
+name: pjp-spaces
+
+# ハブの herdr-app の mod pjp-spaces (win/herdr-app/mods/pjp-spaces/。runner の手順 herdr-app-pjp-spaces が herdrHub のホストに置く) の印の
+# 計算と描き方を、herdr-app の外 (node) で確かめる (win/herdr-app/pjp-spaces.test.mjs。dotfiles-private の docs/adr/124_*)。
+#
+# - 試験は gpui-kit・gpui-base・herdr を一時ディレクトリの偽物にして main.js を読むので、herdr-app も npm の依存も要らない。node は
+#   GitHub の ubuntu のランナーに入っているものを使う (actions を足さない)
+# - 写した元の herdr-app の同梱の spaces (win/herdr-app/upstream/spaces/) を変えた PR でも流す (herdr-app を上げて元との差を取り込んだ後に
+#   確かめる。取り込み方は skill pjp-hc-hub の references/spaces.md)。見た目 (並び・色・幅) は herdr-app で確かめる
+on:
+  push:
+    branches: [main]
+    paths:
+      - "win/herdr-app/mods/pjp-spaces/**"
+      - "win/herdr-app/upstream/**"
+      - "win/herdr-app/pjp-spaces.test.mjs"
+      - ".github/workflows/pjp-spaces.yml"
+  pull_request:
+    paths:
+      - "win/herdr-app/mods/pjp-spaces/**"
+      - "win/herdr-app/upstream/**"
+      - "win/herdr-app/pjp-spaces.test.mjs"
+      - ".github/workflows/pjp-spaces.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: node --test (pjp-spaces.test.mjs)
+    runs-on: ubuntu-latest
+    # 固まったジョブが分を食いつぶさないようにする (既定は 360 分)
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: node の版
+        run: node --version
+
+      - name: test
+        run: node --test win/herdr-app/pjp-spaces.test.mjs
