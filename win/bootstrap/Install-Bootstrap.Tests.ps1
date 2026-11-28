@@ -77,7 +77,7 @@ Test-Case 'Start-Process に -Wait を付けていない (gh のログインの�
             }, $true) | ForEach-Object { $_.Extent.StartLineNumber }) -join ' '
 }
 
-Test-Case '固定した版は param の既定値 (check-winget-version.sh が読む行の形)' '2.56.0.4 2.103.3 7.6.10.0 17.14.44 1.29.3' {
+Test-Case '固定した版は param の既定値 (check-winget-version.sh が読む行の形)' '2.56.1 2.105.0 7.6.10.0 17.14.45 1.29.3' {
     $text = Get-Content -LiteralPath $Script -Encoding UTF8
     foreach ($p in @('GitVersion', 'GhVersion', 'PwshVersion', 'VsBuildToolsVersion', 'RustupVersion')) {
         $line = @($text | Where-Object { $_ -match "^\s*\[string\]\`$$p\s*=\s*'([^']*)'" })[0]

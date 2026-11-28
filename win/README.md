@@ -177,10 +177,10 @@ dotfiles apply
 
    | 道具 | winget の ID | 固定した版 (param) | 入れ方 |
    | --- | --- | --- | --- |
-   | Git for Windows | `Git.Git` | `2.56.0.4` (`-GitVersion`) | machine の scope (`C:\Program Files\Git`)。インストーラーの選択肢は既定のまま。入れたての Windows 11 の winget (v1.11.510) は、昇格していないと machine の scope の source を開けず、`Failed to open the predefined source` (`0x80070005`) で落ちる。そのときだけ、同じ引数を昇格した winget で打ち直す (System32 の Windows PowerShell を UAC で昇格させて打つ。UAC の確認は Git の installer の代わりにそこで 1 回出る。普段のアカウントが管理者でない PC で、昇格した側のアカウントに winget が無ければ、そのアカウントと登録の手を出す) |
-   | GitHub CLI (`-Private` だけ) | `GitHub.cli` | `2.103.3` (`-GhVersion`) | MSI (`C:\Program Files\GitHub CLI`)。`--silent` を付けないので、UAC と進み具合の小さな窓が出る (per-machine の MSI は、quiet だと管理者でない PowerShell から UAC を出せずに落ちる) |
+   | Git for Windows | `Git.Git` | `2.56.1` (`-GitVersion`) | machine の scope (`C:\Program Files\Git`)。インストーラーの選択肢は既定のまま。入れたての Windows 11 の winget (v1.11.510) は、昇格していないと machine の scope の source を開けず、`Failed to open the predefined source` (`0x80070005`) で落ちる。そのときだけ、同じ引数を昇格した winget で打ち直す (System32 の Windows PowerShell を UAC で昇格させて打つ。UAC の確認は Git の installer の代わりにそこで 1 回出る。普段のアカウントが管理者でない PC で、昇格した側のアカウントに winget が無ければ、そのアカウントと登録の手を出す) |
+   | GitHub CLI (`-Private` だけ) | `GitHub.cli` | `2.105.0` (`-GhVersion`) | MSI (`C:\Program Files\GitHub CLI`)。`--silent` を付けないので、UAC と進み具合の小さな窓が出る (per-machine の MSI は、quiet だと管理者でない PowerShell から UAC を出せずに落ちる) |
    | PowerShell 7 | `Microsoft.PowerShell` | `7.6.10.0` (`-PwshVersion`) | 入っていないときだけ入れる。普段のアカウントが管理者の PC は MSIX (`--installer-type msix`。ユーザー単位に入るので UAC は出ない。`--silent`)、管理者でない PC は MSI (`--installer-type wix --custom "USE_MU=0 ENABLE_MU=0"`。`C:\Program Files\PowerShell\7`。`--silent` を付けないので、UAC で管理者の資格情報を入れる。Microsoft Update の更新には入れない)。管理者でない PC で MSIX しか無ければ MSI を `--force` で足す (入っている MSIX があると、winget は install を upgrade に替えて止まるため)。入れた直後に、7.6 の線に留める pin (`--version 7.6.*`) を足す。7.6 (LTS) の MSIX は package `Microsoft.PowerShell-LTS` で、7.7 からの MSIX (別の package `Microsoft.PowerShell`) へは上がらない。7.7 からは MSI も無い |
-   | Visual Studio Build Tools 2022 (`-Rust`・`-Private` だけ) | `Microsoft.VisualStudio.2022.BuildTools` | `17.14.44` (`-VsBuildToolsVersion`) | C++ のワークロード (`Workload.VCTools`。必須の部品だけ)・x64 の MSVC (`VC.Tools.x86.x64`)・Windows SDK (`Windows11SDK.26100`)・英語の言語パック。MSVC と SDK は rustup が自分で入れるときと同じ部品。`--silent` を付けないので、UAC と進み具合の窓が出る。数 GB を落とすので 10 分以上かかることがある |
+   | Visual Studio Build Tools 2022 (`-Rust`・`-Private` だけ) | `Microsoft.VisualStudio.2022.BuildTools` | `17.14.45` (`-VsBuildToolsVersion`) | C++ のワークロード (`Workload.VCTools`。必須の部品だけ)・x64 の MSVC (`VC.Tools.x86.x64`)・Windows SDK (`Windows11SDK.26100`)・英語の言語パック。MSVC と SDK は rustup が自分で入れるときと同じ部品。`--silent` を付けないので、UAC と進み具合の窓が出る。数 GB を落とすので 10 分以上かかることがある |
    | rustup (`-Rust`・`-Private` だけ) | `Rustlang.Rustup` | `1.29.3` (`-RustupVersion`) | 既定の host を MSVC (`--default-host x86_64-pc-windows-msvc`) にし、toolchain は入れない (`--default-toolchain none`。版は runner の `rust-toolchain.toml` が決める)。自己更新を止める (`rustup set auto-self-update disable`) |
 
    Rust は MSVC の host (`x86_64-pc-windows-msvc`) を使う。GNU の host (`x86_64-pc-windows-gnu`) にしないのは、`windows-sys` 0.61 が使う
@@ -4515,7 +4515,7 @@ dotfiles が入れる版は自動では上がらない (依存の更新も見な
 ## Claude Code
 
 `claude-code/Install-ClaudeCode.ps1` は、Claude Code を winget の `Anthropic.ClaudeCode` (portable の `claude.exe` 1 つ。管理者は要らない。
-x64 と arm64) で入れ、版を `-Version` の既定値 (今は `2.1.318`) の 1 か所で固定する ([ADR 055](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/055_win_ntn_claude_code_pin_updates_20261114T185136JST/README.md))。PowerShell の `c` が
+x64 と arm64) で入れ、版を `-Version` の既定値 (今は `2.1.330`) の 1 か所で固定する ([ADR 055](https://github.com/pollenjp/dotfiles-private/blob/main/docs/adr/055_win_ntn_claude_code_pin_updates_20261114T185136JST/README.md))。PowerShell の `c` が
 起動する `claude.exe` はこれ ([PowerShell](#powershell))。WSL の claude は mise の `claude@latest` (猶予 1 日) で、別のもの。
 
 - winget で入れた Claude Code は自分では上がらない (公式。`claude update` は何もしない)。版は dotfiles が決める
@@ -4663,7 +4663,7 @@ dotfiles の clone があるマシンだけ) にも出る。猶予・落ちる�
 ## Tailscale
 
 `tailscale/Install-Tailscale.ps1` は、Tailscale (VPN。Windows を tailnet に参加させる) を winget の `Tailscale.Tailscale` (machine スコープの
-MSI。入れる・上げるときは Windows のデスクトップに UAC の確認と、進み具合の小さな窓が出る) で入れ、版を `-Version` の既定値 (今は `1.104.5`)
+MSI。入れる・上げるときは Windows のデスクトップに UAC の確認と、進み具合の小さな窓が出る) で入れ、版を `-Version` の既定値 (今は `1.104.7`)
 の 1 か所で固定する (dotfiles-private の ADR 069 (`docs/adr/069_win_tailscale_*`))。固定した版は新しく入れるときの版で、入れた後の更新は
 Tailscale の自動更新に任せる ([Tailscale を入れる](#tailscale-を入れる-winget))。
 
