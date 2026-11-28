@@ -5287,7 +5287,8 @@ claude-skills の片付けの PR までは claude-skills にも同じ名前の�
 | claude-skills を使う | home-manager は張らず、名前と store のパスを `~/.local/state/dotfiles/claude-base-skills.tsv` に書く。`bootstrap-claude-skills.sh` が、claude-skills の clone に同じ名前があればそちらを張り、無ければ（片付けの PR の後・clone を取れない）この store のパスを張る |
 
 前に張った土台のリンクは、リンク先が store のパスの形（`/nix/store/<32 字>-<名前>`）かで見分ける（store のパスが替われば張り替え、
-表から外れた名前のものは外す）。確かめるのは flake の checks の `claude-hub-skills`（置き方）と `bootstrap-claude-skills-test`（張り方）。
+表から外れた名前のものは外す）。clone を取れないときは、clone へのリンク（前に張った claude-skills の写し）は張り替えない。確かめるのは
+flake の checks の `claude-hub-skills`（置き方）と `bootstrap-claude-skills-test`（張り方）。
 
 ### herdr の集約ハブ (`~/h`)
 

@@ -20,6 +20,8 @@
 #
 # 冪等。skill を足したあとや、別マシンでの変更を取り込むときに何度でも実行してよい。
 #
+# macOS の /bin/bash (3.2) でも動くように書く (連想配列・mapfile・名前参照を使わない)。OS を問わず claude-skills を使うホストで流れる。
+#
 # GitHub から取るとき (clone と取得) は git_github を通す。dotfiles.claude.gitViaGh.enable のマシンでは
 # gh の資格情報 (git gh。HTTPS) で先に試し、gh が使えない・取れないときだけ ssh (ssh-agent) で取る
 # (TKT-221。ssh を張り直したあとの herdr の中のように、SSH_AUTH_SOCK が切れていても取れる)。
@@ -78,7 +80,8 @@
 # claude-skills を使うホストではこの skill を ~/.claude/skills/ に張らず、名前と store のパスを 1 行 1 つ (<名前><TAB><パス>) で
 # ~/.local/state/dotfiles/claude-base-skills.tsv に書く。ここで、claude-skills の clone に同じ名前があればそちら (上の 2.) を張り、無ければ
 # (片付けの PR の後・clone を取れない) store のパスを張る。前に張った土台のリンクは、リンク先が store のパスの形 (<store>/<32 字>-<名前>)
-# かで見分ける (store のパスが替われば張り替え、表から外れた名前のものは外す)。
+# かで見分ける (store のパスが替われば張り替え、表から外れた名前のものは外す)。clone を取れないときは、clone へのリンク (前に張った
+# claude-skills の写し) は張り替えない (取得できていないときは clone のものに触らない)。
 #
 # ## 自分が張ったリンクの見分け方
 #
@@ -305,15 +308,29 @@ is_base_target() {
   [[ $1 == "${store_dir}"/????????????????????????????????-"$2" ]]
 }
 
-# 土台の skill の表 (名前 → store のパス)
-declare -A base_path=()
+# 土台の skill の表 (名前と store のパスを、同じ添字の 2 つの配列に。連想配列は bash 3.2 に無い)
+base_names=()
+base_paths=()
 if [[ -r ${base_file} ]]; then
   while IFS=$'\t' read -r base_name base_target || [[ -n ${base_name} ]]; do
     if [[ -n ${base_name} && -n ${base_target} ]]; then
-      base_path[${base_name}]=${base_target}
+      base_names+=("${base_name}")
+      base_paths+=("${base_target}")
     fi
   done <"${base_file}"
 fi
+
+# 土台の skill $1 の store のパスを出す。表に無ければ 1
+base_path_of() {
+  local i
+  for ((i = 0; i < ${#base_names[@]}; i++)); do
+    if [[ ${base_names[i]} == "$1" ]]; then
+      printf '%s' "${base_paths[i]}"
+      return 0
+    fi
+  done
+  return 1
+}
 
 ##########
 # 取得   #
@@ -465,12 +482,13 @@ link_base_skills() {
   local dest_dir="${claude_dir}/skills"
   local name path dest target
 
-  if [[ ${#base_path[@]} == 0 && ! -d ${dest_dir} ]]; then
+  if [[ ${#base_names[@]} == 0 && ! -d ${dest_dir} ]]; then
     return 0
   fi
+  # 空の配列の "${a[@]}" は bash 4.4 より前の set -u で落ちるので、${a[@]+…} で包む
   while IFS= read -r name; do
     [[ -n ${name} ]] || continue
-    path=${base_path[${name}]}
+    path=$(base_path_of "${name}")
     dest="${dest_dir}/${name}"
     # claude-skills の clone に同じ名前がある間は、そちら (link_kind が張った)
     if [[ ${unreachable} == 0 && -e ${dir}/skills/${name} ]]; then
@@ -479,6 +497,10 @@ link_base_skills() {
     if [[ -L ${dest} ]]; then
       target=$(readlink "${dest}")
       if [[ ${target} == "${path}" ]]; then
+        continue
+      fi
+      # clone を取れていないときは、clone へのリンク (前に link_kind が張ったもの) に触らない (下の main の「~/.claude/ には一切触らない」)
+      if [[ ${unreachable} == 1 ]] && is_ours "${target}"; then
         continue
       fi
       if is_base_target "${target}" "${name}" || is_ours "${target}"; then
@@ -500,14 +522,14 @@ link_base_skills() {
     fi
     run ln -s "${path}" "${dest}"
     linked=$((linked + 1))
-  done < <(printf '%s\n' "${!base_path[@]}" | sort)
+  done < <(printf '%s\n' ${base_names[@]+"${base_names[@]}"} | sort)
 
   # 表から外れた名前 (herdr-core を外したホストなど) の、土台の形のリンクを外す
   if [[ -d ${dest_dir} ]]; then
     for dest in "${dest_dir}"/*; do
       [[ -L ${dest} ]] || continue
       name=$(basename "${dest}")
-      if [[ -n ${base_path[${name}]+x} ]]; then
+      if base_path_of "${name}" >/dev/null; then
         continue
       fi
       target=$(readlink "${dest}")
@@ -594,7 +616,7 @@ if [[ ${unreachable} == 0 ]]; then
     mkdir -p "${state_dir}"
     printf '%s\n' "${dir}" >"${state_file}"
   fi
-elif [[ ${#base_path[@]} -gt 0 ]]; then
+elif [[ ${#base_names[@]} -gt 0 ]]; then
   echo "==> ~/.claude/skills/ へ公開の土台の skill をリンク (claude-skills を取れていない)"
   link_base_skills
   note "追加/更新 ${linked} / 削除 ${removed} / 飛ばした ${skipped}"

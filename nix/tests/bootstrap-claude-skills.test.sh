@@ -22,8 +22,9 @@
 #   - rules/ の rule も ~/.claude/rules/ へ 1 つずつ張り (README.md は張らない)、repo から消えた rule の symlink は外す
 #   - 公開の土台の skill (home-manager が ~/.local/state/dotfiles/claude-base-skills.tsv に名前と store のパスを書いたもの): claude-skills の
 #     clone に同じ名前があればそちらを張り (前に張った土台のリンクも張り替える)、無ければ store のパスを張る。store のパスが替われば張り
-#     替え、表から外れた名前の土台のリンクは外す。土台の形でないリンク・実体は張り替えず、警告する。clone が無くても土台は張る
-#     (store は NIX_STORE_DIR の一時のディレクトリ)
+#     替え、表から外れた名前の土台のリンクは外す。土台の形でないリンク・実体は張り替えず、警告する。clone が無くても土台は張るが、
+#     clone へのリンク (前に張った claude-skills の写し) は、clone を取れないときは張り替えない (store は NIX_STORE_DIR の一時のディレクトリ)
+#   - macOS の /bin/bash (3.2) でも動く書き方 (連想配列・mapfile・名前参照・大文字小文字の変換を使わない。script の字面で見る)
 #
 # git gh の代わりに偽の git-gh を置く (引数を書き留めて本物の git に渡すか、落ちる)。gh も偽物で、
 # auth token の終了コードだけを返す。偽のコマンドの shebang は $BASH から作る (サンドボックスに /usr/bin/env が無い)。
@@ -303,6 +304,30 @@ if [[ $(rc "${h}") == 0 && $(readlink "${h}/.claude/skills/pjp-child") == "${sto
   ok "claude-skills の clone が無くても土台の skill は張る"
 else
   ng "clone の無いときの土台" "$(detail "${h}")"$'\n'"skills=$(ls -la "${h}/.claude/skills" 2>&1)"
+fi
+
+# clone を取れないときは、clone へのリンク (前に張った claude-skills の写し) を土台へ張り替えない (~/.claude/ の clone のものに触らない)
+h="${work}/t7c"
+mkdir -p "${h}/.local/state/dotfiles" "${h}/.claude/skills" "${work}/not-a-clone-2/skills/pjp-child"
+base_tsv="${h}/.local/state/dotfiles/claude-base-skills.tsv"
+write_base "pjp-child"$'\t'"${store}/${hash2}-pjp-child"
+ln -s "${work}/not-a-clone-2/skills/pjp-child" "${h}/.claude/skills/pjp-child"
+run_base "${work}/not-a-clone-2"
+if [[ $(rc "${h}") == 0 && $(readlink "${h}/.claude/skills/pjp-child") == "${work}/not-a-clone-2/skills/pjp-child" ]] \
+  && grep -q 'git リポジトリではありません' "${h}/err"; then
+  ok "clone を取れないときは、clone へのリンクを土台へ張り替えない"
+else
+  ng "clone を取れないときの clone へのリンク" "$(detail "${h}")"$'\n'"skills=$(ls -la "${h}/.claude/skills" 2>&1)"
+fi
+
+# 8. macOS の /bin/bash (3.2) でも動く書き方 (この script は OS を問わず claude-skills を使うホストで流れる。試験の bash は Nix の bash 5
+# なので、字面で見る)
+# (コメントの行は見ない)
+if bad=$(grep -nE 'declare -A|local -A|typeset -A|mapfile|readarray|declare -n|local -n|\$\{[^}]*(,,|\^\^)\}' "${script}" \
+  | grep -vE '^[0-9]+:[[:space:]]*#'); then
+  ng "macOS の /bin/bash (3.2) で動かない書き方がある" "${bad}"
+else
+  ok "連想配列・mapfile・名前参照・大文字小文字の変換を使わない (macOS の /bin/bash 3.2 でも動く)"
 fi
 
 echo "== ${pass} passed, ${fail} failed"
