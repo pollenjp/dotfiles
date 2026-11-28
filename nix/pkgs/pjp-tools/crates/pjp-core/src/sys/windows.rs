@@ -634,10 +634,18 @@ mod tests {
         let t = TempDir::new("acl-owner-rights");
         let p = t.write("f", "x");
         let me = current_user_sid().unwrap();
-        // 持ち主はファイルを作った本人。OWNER RIGHTS (OW) の読みは本人として見る
+        // OWNER RIGHTS (OW) の読みは、ファイルの持ち主として見る。持ち主はふつう作った本人 (本人の ACE と重なって本人だけになる) だが、
+        // 管理者のアカウント (GitHub の windows-latest など) では、作ったファイルの既定の持ち主が BUILTIN\Administrators になるので、
+        // OW は Administrators として見える
         set_dacl(&p, &format!("D:P(A;;FA;;;{me})(A;;FR;;;OW)")).unwrap();
         let a = read_access(&p).unwrap();
-        assert!(a.owner_only(), "{a:?}");
+        let sids: Vec<&str> = a.allowed.iter().flatten().map(|t| t.sid.as_str()).collect();
+        if sids == [me.as_str()] {
+            assert!(a.owner_only(), "{a:?}");
+        } else {
+            assert_eq!(sids, [me.as_str(), "S-1-5-32-544"], "{a:?}");
+            assert!(!a.owner_only(), "{a:?}");
+        }
     }
 
     #[test]
